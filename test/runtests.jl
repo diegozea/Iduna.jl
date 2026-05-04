@@ -1,10 +1,9 @@
 using Iduna
 using Test
-using Aqua
+using TestItemRunner
 
 @testset "Iduna.jl" begin
-    @testset "Code quality (Aqua.jl)" begin
-        Aqua.test_all(Iduna)
-    end
-    # Write your tests here.
+    include("aqua.jl")
 end
+
+@run_package_tests
