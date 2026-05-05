@@ -4,8 +4,8 @@ using BioAlignments: AffineGapScoreModel, BLOSUM62, GlobalAlignment, alignment,
                      count_deletions, count_insertions, count_mismatches, pairalign
 using BioSequences: LongAA
 using CodecZlib: GzipDecompressor
-using HTTP
-using JSON3
+import HTTP
+import JSON3
 using MIToS.MSA: AbstractMultipleSequenceAlignment, sequencenames
 using Printf: @sprintf
 

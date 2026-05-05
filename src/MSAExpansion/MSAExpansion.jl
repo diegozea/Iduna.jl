@@ -1,8 +1,10 @@
 module MSAExpansion
 
-using HMMER_jll
-using MIToS.MSA
-using MMseqs2_jll
+import HMMER_jll
+import MMseqs2_jll
+
+using MIToS.MSA: A3M, AbstractMultipleSequenceAlignment, FASTA, Stockholm,
+                 nsequences, read_file, sequencenames, write_file
 
 using ..Utils: ExpansionResult, ResolvedTarget, SeedSelection, ensure_mmseqs_db,
                format_pid, run_logged, safe_rm, write_fasta

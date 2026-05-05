@@ -16,7 +16,8 @@
         species = Iduna.ThorAxeMSA.assemble_transcript_msa(
             thoraxe, "ENSG00000000001.1", "ENST00000000001.1")
         @test Iduna.ThorAxeMSA.nsequences(msa) == 2
-        @test Iduna.ThorAxeMSA.ncolumns(msa) == 4
+        name = first(Iduna.ThorAxeMSA.sequencenames(msa))
+        @test length(Iduna.ThorAxeMSA.stringsequence(msa, name)) == 4
         @test species == ["homo_sapiens", "mus_musculus"]
 
         uniprot = joinpath(tmp, "uniprot.fasta")

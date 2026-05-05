@@ -1,5 +1,7 @@
-using ArgParse
-using JSON3
+import ArgParse
+import JSON3
+
+using ArgParse: ArgParseSettings, @add_arg_table!, parse_args
 
 const _APP_TIMEOUT_KEYS = Set([
     :transcript_query_timeout_seconds,

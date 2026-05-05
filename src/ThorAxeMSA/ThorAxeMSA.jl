@@ -1,11 +1,13 @@
 module ThorAxeMSA
 
-using CSV
-using DataFrames
-using HHsuite_jll
-using MIToS.MSA
-using Statistics: mean, median
-using ThorAxe
+import CSV
+import HHsuite_jll
+import ThorAxe
+
+using DataFrames: DataFrame
+using MIToS.MSA: AbstractMultipleSequenceAlignment, FASTA, Stockholm, join_msas,
+                 nsequences, read_file, sequencenames, setreference!,
+                 stringsequence, write_file
 
 using ..Utils: DEFAULT_PID_THRESHOLDS, ResolvedTarget, SeedSelection, ThorAxeMSAResult,
                fasta_sequence, format_pid, protein_alignment_stats, resolve_sequence_name,

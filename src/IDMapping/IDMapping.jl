@@ -1,7 +1,7 @@
 module IDMapping
 
-using HTTP
-using JSON3
+import HTTP
+import JSON3
 
 using ..Utils: ResolvedTarget, decode_body, fasta_sequence, format_fasta, id_kind,
                is_ensembl_transcript_id, protein_alignment_stats, strip_ensembl_version,

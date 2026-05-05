@@ -1,8 +1,11 @@
 module ResultsValidation
 
-using CSV
-using DataFrames
-using MIToS.MSA
+import CSV
+
+using DataFrames: DataFrame
+using MIToS.MSA: A3M, AbstractMultipleSequenceAlignment, FASTA, Stockholm,
+                 hobohmI, n_effective, namedmatrix, ncolumns, nsequences,
+                 read_file, sequencenames, stringsequence
 
 using ..Utils: ExpansionResult, ResolvedTarget, SeedSelection, ValidationResult,
                protein_alignment_stats, resolve_sequence_name
