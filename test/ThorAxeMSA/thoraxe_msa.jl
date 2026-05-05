@@ -97,4 +97,98 @@
             cached_input_dir = joinpath(tmp, "missing"),
             overwrite = true)
     end
+
+    @testset "orthology specieslist filter helpers" begin
+        @test Iduna.ThorAxeMSA._orthology_relationships("1:1") ==
+              ["ortholog_one2one"]
+        @test Iduna.ThorAxeMSA._orthology_relationships("1:n") ==
+              ["ortholog_one2one", "ortholog_one2many"]
+        @test Iduna.ThorAxeMSA._orthology_relationships("m:n") ==
+              ["ortholog_one2one", "ortholog_one2many", "ortholog_many2many"]
+        @test_throws ErrorException Iduna.ThorAxeMSA._orthology_relationships("all")
+
+        homologies = [
+            Dict(
+                "type" => "ortholog_one2one",
+                "target" => Dict("species" => "mus_musculus")),
+            Dict(
+                "type" => "ortholog_one2many",
+                "target" => Dict("species" => "danio_rerio")),
+            Dict(
+                "type" => "ortholog_many2many",
+                "target" => Dict("species" => "xenopus_tropicalis"))
+        ]
+        homology_data = Dict("data" => [Dict("homologies" => homologies)])
+        @test Iduna.ThorAxeMSA._homology_species(homology_data, "1:1") ==
+              ["mus_musculus"]
+        @test Iduna.ThorAxeMSA._homology_species(homology_data, "1:n") ==
+              ["mus_musculus", "danio_rerio"]
+        @test Iduna.ThorAxeMSA._homology_species(homology_data, "m:n") ==
+              ["mus_musculus", "danio_rerio", "xenopus_tropicalis"]
+    end
+
+    @testset "species list parsing and filtering" begin
+        mktempdir() do tmp
+            species_file = joinpath(tmp, "species.txt")
+            write(species_file, "Mus musculus\n\nDanio rerio\n")
+            @test Iduna.ThorAxeMSA._parse_specieslist(nothing) === nothing
+            @test Iduna.ThorAxeMSA._parse_specieslist(
+                "Homo sapiens,mus_musculus, Mus musculus ") ==
+                  ["homo_sapiens", "mus_musculus"]
+            @test Iduna.ThorAxeMSA._parse_specieslist(species_file) ==
+                  ["mus_musculus", "danio_rerio"]
+            @test Iduna.ThorAxeMSA._parse_specieslist("Canis lupus") ==
+                  ["canis_lupus"]
+        end
+
+        target = Iduna.ResolvedTarget(;
+            input_id = "ENST00000000001.1",
+            input_kind = :ensembl_transcript,
+            ensembl_gene_id = "ENSG00000000001.1",
+            transcript_id = "ENST00000000001.1",
+            species = "Homo sapiens")
+        fetcher = (target, orthology) -> ["mus_musculus", "danio_rerio"]
+
+        default = Iduna.ThorAxeMSA._resolve_effective_specieslist(
+            target, nothing, "1:1"; homology_species_fetcher = fetcher)
+        @test default.specieslist == "homo_sapiens,mus_musculus,danio_rerio"
+        @test isempty(default.warnings)
+
+        filtered = Iduna.ThorAxeMSA._resolve_effective_specieslist(
+            target, "Mus musculus,Canis lupus", "1:1";
+            homology_species_fetcher = fetcher)
+        @test filtered.specieslist == "homo_sapiens,mus_musculus"
+        @test length(filtered.warnings) == 1
+        @test occursin("canis_lupus", only(filtered.warnings))
+
+        @test_throws ErrorException Iduna.ThorAxeMSA._resolve_effective_specieslist(
+            target, "Canis lupus", "1:1"; homology_species_fetcher = fetcher)
+
+        fallback = Iduna.ThorAxeMSA._resolve_effective_specieslist(
+            target, "Canis lupus", "1:1";
+            homology_species_fetcher = (target, orthology) -> error("temporary failure"))
+        @test fallback.specieslist == "Canis lupus"
+        @test length(fallback.warnings) == 1
+        @test occursin("Ensembl specieslist filter failed", only(fallback.warnings))
+    end
+
+    @testset "transcript_query receives orthology and effective species list" begin
+        mktempdir() do tmp
+            captured = Ref{Cmd}()
+            runner = command -> (captured[] = command)
+            Iduna.ThorAxeMSA._run_transcript_query_once(
+                "ENSG00000000001", tmp, "homo_sapiens",
+                "homo_sapiens,mus_musculus",
+                joinpath(tmp, "stdout.log"), joinpath(tmp, "stderr.log");
+                timeout_seconds = nothing,
+                orthology = "1:n",
+                runner = runner)
+            parts = captured[].exec
+            @test "--orthology" in parts
+            @test parts[findfirst(==("--orthology"), parts) + 1] == "1:n"
+            @test "--specieslist" in parts
+            @test parts[findfirst(==("--specieslist"), parts) + 1] ==
+                  "homo_sapiens,mus_musculus"
+        end
+    end
 end

@@ -5,6 +5,7 @@
         @test kwargs[:mmseqs_db] == "db"
         @test kwargs[:overwrite] === false
         @test kwargs[:allow_specieslist_timeout_fallback] === true
+        @test kwargs[:specieslist_filter] === true
         @test !haskey(kwargs, :pid_thresholds)
         @test !haskey(kwargs, :transcript_query_retries)
     end
@@ -17,6 +18,8 @@
             "--output-dir", "out",
             "--overwrite",
             "--no-specieslist-timeout-fallback",
+            "--orthology", "1:n",
+            "--no-specieslist-filter",
             "--threads", "4",
             "--transcript-query-retries", "3"
         ])
@@ -24,6 +27,8 @@
         @test kwargs[:output_dir] == "out"
         @test kwargs[:overwrite] === true
         @test kwargs[:allow_specieslist_timeout_fallback] === false
+        @test kwargs[:orthology] == "1:n"
+        @test kwargs[:specieslist_filter] === false
         @test kwargs[:threads] == 4
         @test kwargs[:transcript_query_retries] == 3
     end

@@ -96,6 +96,16 @@ function _app_arg_settings(;
         metavar = "path-or-list"
         arg_type = String
 
+        "--orthology"
+        help = "Orthology relationship passed to transcript_query: 1:1, 1:n, or m:n."
+        metavar = "relationship"
+        arg_type = String
+
+        "--no-specieslist-filter"
+        help = "Skip Ensembl homology specieslist filtering."
+        dest_name = "specieslist_filter"
+        action = :store_false
+
         "--thoraxe-input-dir"
         help = "Reuse a complete transcript_query bundle."
         metavar = "path"

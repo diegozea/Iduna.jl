@@ -22,6 +22,9 @@ The package writes a stable work directory containing ThorAxe outputs, PID seed
 MSAs, expansion outputs, logs, and validation stats. It does not implement DCA,
 ZMIp, plots, or batch recovery tables.
 
+By default, Iduna filters the ThorAxe species list with Ensembl homology using
+`orthology="1:1"`. Use `orthology="1:n"` or `"m:n"` to keep broader ortholog
+relationships, or set `specieslist_filter=false` to skip this filtering.
 `transcript_query_timeout_seconds` bounds each Ensembl download attempt and
 Iduna can retry without the species list after a timeout. Set
 `thoraxe_timeout_seconds` when individual ThorAxe runs should also have a

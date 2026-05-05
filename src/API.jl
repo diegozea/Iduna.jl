@@ -11,11 +11,14 @@ The function is file-first: every external tool writes its inputs, outputs, and
 logs under `workdir`, and the returned [`IdunaResult`](@ref) stores paths plus
 the resolved identifiers and validation statistics.
 
-`transcript_query_timeout_seconds` limits each Ensembl query attempt. Iduna
-retries that step and can retry without `specieslist` after a timeout. Set
-`thoraxe_timeout_seconds` to give the baseline and PID ThorAxe runs the same
-kind of wall-clock guard. Pass `thoraxe_input_dir` to reuse a complete
-transcript_query bundle instead of fetching it again.
+`orthology` controls the ThorAxe relationship filter (`"1:1"`, `"1:n"`, or
+`"m:n"`). By default, Iduna filters the ThorAxe species list with Ensembl
+homology before `transcript_query`. `transcript_query_timeout_seconds` limits
+each Ensembl query attempt. Iduna retries that step and can retry without
+`specieslist` after a timeout. Set `thoraxe_timeout_seconds` to give the
+baseline and PID ThorAxe runs the same kind of wall-clock guard. Pass
+`thoraxe_input_dir` to reuse a complete transcript_query bundle instead of
+fetching it again.
 """
 function iduna(; id::Union{Nothing, AbstractString} = nothing,
         uniprot_id::Union{Nothing, AbstractString} = nothing,
@@ -30,6 +33,8 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
         pid_thresholds::AbstractVector{<:Real} = Utils.DEFAULT_PID_THRESHOLDS,
         species::Union{Nothing, AbstractString} = nothing,
         specieslist::Union{Nothing, AbstractString} = nothing,
+        orthology::AbstractString = "1:1",
+        specieslist_filter::Bool = true,
         thoraxe_input_dir::Union{Nothing, AbstractString} = nothing,
         transcript_query_timeout_seconds::Union{Nothing, Real} = 180,
         transcript_query_timeout_max_seconds::Union{Nothing, Real} = 240,
@@ -57,6 +62,8 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
     thoraxe = ThorAxeMSA.build_thoraxe_msa(target, root;
         pid_thresholds,
         specieslist,
+        orthology,
+        specieslist_filter,
         cached_thoraxe_input_dir = thoraxe_input_dir,
         overwrite,
         transcript_query_timeout_seconds,

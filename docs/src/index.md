@@ -37,10 +37,13 @@ julia --project=. -m Iduna P20963 --mmseqs-db /path/to/mmseqs/uniref_db
 For an Ensembl transcript input, Iduna resolves the parent Ensembl gene ID and
 species needed by ThorAxe. It does not require UniProt mapping on that path.
 
+Iduna filters the ThorAxe species list with Ensembl homology by default using
+`orthology="1:1"`. Use `orthology="1:n"` or `"m:n"` for broader ortholog
+relationships, or set `specieslist_filter=false` to skip this step.
 `transcript_query_timeout_seconds` defaults to 180 seconds, with a bounded retry
-that can drop the species list after a timeout. `thoraxe_timeout_seconds` is
-unset by default because ThorAxe runtime depends on gene complexity and the
-selected PID thresholds.
+that can drop the species list after a timeout.
+`thoraxe_timeout_seconds` is unset by default because ThorAxe runtime depends on
+gene complexity and the selected PID thresholds.
 
 If the ThorAxe `transcript_query` bundle has already been created, pass it with
 `thoraxe_input_dir`. Iduna copies that bundle into `workdir/thoraxe_input` and

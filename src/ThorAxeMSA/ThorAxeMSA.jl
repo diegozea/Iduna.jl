@@ -2,6 +2,8 @@ module ThorAxeMSA
 
 import CSV
 import HHsuite_jll
+import HTTP
+import JSON3
 import ThorAxe
 
 using DataFrames: DataFrame
@@ -10,8 +12,8 @@ using MIToS.MSA: AbstractMultipleSequenceAlignment, FASTA, Stockholm, join_msas,
                  stringsequence, write_file
 
 using ..Utils: DEFAULT_PID_THRESHOLDS, ResolvedTarget, SeedSelection, ThorAxeMSAResult,
-               fasta_sequence, format_pid, protein_alignment_stats, resolve_sequence_name,
-               safe_rm, write_fasta
+               decode_body, fasta_sequence, format_pid, protein_alignment_stats,
+               resolve_sequence_name, safe_rm, strip_ensembl_version, write_fasta
 
 export assemble_transcript_msa,
        build_thoraxe_msa,
@@ -38,6 +40,12 @@ const _REQUIRED_ENSEMBL_FILES = (
     "ensembl_version.csv",
     "tsl.csv"
 )
+const _ENSEMBL_REST_BASE = "https://rest.ensembl.org"
+const _ENSEMBL_JSON_HEADERS = [
+    "Accept" => "application/json",
+    "Content-Type" => "application/json"
+]
+const _TRANSIENT_HTTP_STATUSES = Set([429, 500, 502, 503, 504])
 
 _normalize_species_name(species::Nothing) = nothing
 function _normalize_species_name(species::AbstractString)
@@ -139,20 +147,170 @@ function _normalized_specieslist(specieslist::Union{Nothing, AbstractString})
     return isempty(stripped) ? nothing : stripped
 end
 
+function _orthology_relationships(orthology::AbstractString)
+    value = strip(String(orthology))
+    if value == "1:1"
+        return ["ortholog_one2one"]
+    elseif value == "1:n"
+        return ["ortholog_one2one", "ortholog_one2many"]
+    elseif value == "m:n"
+        return ["ortholog_one2one", "ortholog_one2many", "ortholog_many2many"]
+    end
+    error("Orthology must be one of 1:1, 1:n, or m:n; got $(orthology).")
+end
+
+function _unique_nonempty_species(items)
+    seen = Set{String}()
+    species = String[]
+    for item in items
+        item === nothing && continue
+        value = String(item)
+        isempty(value) && continue
+        value in seen && continue
+        push!(seen, value)
+        push!(species, value)
+    end
+    return species
+end
+
+function _parse_specieslist(specieslist::Union{Nothing, AbstractString})
+    normalized = _normalized_specieslist(specieslist)
+    normalized === nothing && return nothing
+
+    raw_species = String[]
+    if occursin(',', normalized)
+        append!(raw_species, split(normalized, ','))
+    elseif isfile(normalized)
+        append!(raw_species, readlines(normalized))
+    else
+        push!(raw_species, normalized)
+    end
+
+    return _unique_nonempty_species(
+        _normalize_species_name(species) for species in raw_species)
+end
+
+function _specieslist_string(species::AbstractVector{<:AbstractString})
+    isempty(species) && return nothing
+    return join(species, ",")
+end
+
+function _homology_species(data, orthology::AbstractString)
+    wanted = Set(_orthology_relationships(orthology))
+    species = String[]
+    for item in get(data, "data", Any[])
+        for homology in get(item, "homologies", Any[])
+            type = get(homology, "type", nothing)
+            type isa AbstractString && String(type) in wanted || continue
+            target = get(homology, "target", nothing)
+            target === nothing && continue
+            target_species = get(target, "species", nothing)
+            target_species isa AbstractString || continue
+            push!(species, _normalize_species_name(target_species))
+        end
+    end
+    return _unique_nonempty_species(species)
+end
+
+function _fetch_ensembl_homology_data(species::AbstractString,
+        gene_id::AbstractString;
+        retries::Integer = 4,
+        sleep_seconds::Real = 1.5)
+    gene_core = strip_ensembl_version(gene_id)
+    url = "$(_ENSEMBL_REST_BASE)/homology/id/$(species)/$(gene_core)?type=orthologues;sequence=none"
+    last_status = nothing
+    for attempt in 1:max(Int(retries), 1)
+        resp = HTTP.get(url; headers = _ENSEMBL_JSON_HEADERS, retry = false,
+            status_exception = false)
+        if resp.status == 200
+            return JSON3.read(decode_body(resp))
+        end
+        last_status = resp.status
+        resp.status in _TRANSIENT_HTTP_STATUSES || break
+        sleep(sleep_seconds * attempt)
+    end
+    error("Ensembl homology specieslist filter failed for $(gene_core) in $(species) with HTTP status $(last_status).")
+end
+
+function _fetch_ortholog_species(target::ResolvedTarget, orthology::AbstractString)
+    species = _normalize_species_name(target.species)
+    species === nothing &&
+        error("Cannot run Ensembl specieslist filter because the target species is unknown.")
+    data = _fetch_ensembl_homology_data(species, target.ensembl_gene_id)
+    return _homology_species(data, orthology)
+end
+
+function _prepend_query_species(species::AbstractVector{<:AbstractString},
+        query_species::Union{Nothing, AbstractString})
+    query_species === nothing && return String.(species)
+    return _unique_nonempty_species(Iterators.flatten(([String(query_species)], species)))
+end
+
+function _resolve_effective_specieslist(target::ResolvedTarget,
+        specieslist::Union{Nothing, AbstractString},
+        orthology::AbstractString;
+        homology_species_fetcher::Function = _fetch_ortholog_species)
+    _orthology_relationships(orthology)
+    query_species = _normalize_species_name(target.species)
+    ortholog_species = try
+        homology_species_fetcher(target, orthology)
+    catch err
+        err isa InterruptException && rethrow()
+        warning = "Ensembl specieslist filter failed; using the unfiltered specieslist. $(sprint(showerror, err))"
+        return (specieslist = _normalized_specieslist(specieslist), warnings = [warning])
+    end
+
+    ortholog_species = _unique_nonempty_species(ortholog_species)
+    if isempty(ortholog_species)
+        error("Ensembl specieslist filter found no $(orthology) ortholog species for $(target.ensembl_gene_id).")
+    end
+
+    requested_species = _parse_specieslist(specieslist)
+    if requested_species === nothing
+        effective_species = _prepend_query_species(ortholog_species, query_species)
+        return (specieslist = _specieslist_string(effective_species), warnings = String[])
+    end
+
+    allowed_targets = Set(ortholog_species)
+    matching_targets = [species
+                        for species in requested_species if species in allowed_targets]
+    if isempty(matching_targets)
+        error("Ensembl specieslist filter found no requested species with $(orthology) orthologs for $(target.ensembl_gene_id).")
+    end
+
+    removed = [species
+               for species in requested_species
+               if species != query_species && !(species in allowed_targets)]
+    warnings = String[]
+    if !isempty(removed)
+        removed_text = join(removed, ", ")
+        push!(warnings,
+            "Removed species without $(orthology) Ensembl orthologs for $(target.ensembl_gene_id): $(removed_text).")
+    end
+
+    effective_species = _prepend_query_species(matching_targets, query_species)
+    return (specieslist = _specieslist_string(effective_species), warnings = warnings)
+end
+
 function _run_transcript_query_once(gene_core::AbstractString,
         workdir::AbstractString,
         species::Union{Nothing, AbstractString},
         specieslist::Union{Nothing, AbstractString},
         stdout_log::AbstractString,
         stderr_log::AbstractString;
-        timeout_seconds::Union{Nothing, Real})
-    runner = _thoraxe_runner(stdout_log, stderr_log; timeout_seconds = timeout_seconds)
+        timeout_seconds::Union{Nothing, Real},
+        orthology::AbstractString = "1:1",
+        runner::Function = _thoraxe_runner(stdout_log, stderr_log;
+            timeout_seconds = timeout_seconds))
+    _orthology_relationships(orthology)
     cd(workdir) do
         if species === nothing
-            ThorAxe.transcript_query(gene_core; specieslist = specieslist, runner = runner)
+            ThorAxe.transcript_query(
+                gene_core; orthology = orthology, specieslist = specieslist, runner = runner)
         else
             ThorAxe.transcript_query(
-                gene_core; species = species, specieslist = specieslist, runner = runner)
+                gene_core; species = species, orthology = orthology,
+                specieslist = specieslist, runner = runner)
         end
     end
     return nothing
@@ -186,7 +344,9 @@ function _ensure_transcript_query(target::ResolvedTarget, workdir::AbstractStrin
         timeout_seconds::Union{Nothing, Real} = 180,
         timeout_max_seconds::Union{Nothing, Real} = 240,
         max_retries::Integer = 2,
+        orthology::AbstractString = "1:1",
         allow_specieslist_timeout_fallback::Bool = true)
+    _orthology_relationships(orthology)
     if cached_input_dir !== nothing
         return _ensure_cached_thoraxe_input(cached_input_dir, workdir; overwrite)
     end
@@ -197,7 +357,7 @@ function _ensure_transcript_query(target::ResolvedTarget, workdir::AbstractStrin
     end
 
     isdir(input_dir) && safe_rm(input_dir, workdir)
-    gene_core = first(split(target.ensembl_gene_id, "."; limit = 2))
+    gene_core = strip_ensembl_version(target.ensembl_gene_id)
     tmp_gene_dir = joinpath(workdir, gene_core)
     isdir(tmp_gene_dir) && safe_rm(tmp_gene_dir, workdir)
 
@@ -213,7 +373,7 @@ function _ensure_transcript_query(target::ResolvedTarget, workdir::AbstractStrin
         isdir(tmp_gene_dir) && safe_rm(tmp_gene_dir, workdir)
         try
             _run_transcript_query_once(gene_core, workdir, species, active_specieslist,
-                stdout_log, stderr_log; timeout_seconds = current_timeout)
+                stdout_log, stderr_log; timeout_seconds = current_timeout, orthology)
             if _has_valid_ensembl_bundle(tmp_gene_dir)
                 break
             elseif attempt < attempts
@@ -540,23 +700,33 @@ function build_thoraxe_msa(target::ResolvedTarget, workdir::AbstractString;
         specieslist::Union{Nothing, AbstractString} = nothing,
         cached_thoraxe_input_dir::Union{Nothing, AbstractString} = nothing,
         overwrite::Bool = false,
+        orthology::AbstractString = "1:1",
+        specieslist_filter::Bool = true,
         transcript_query_timeout_seconds::Union{Nothing, Real} = 180,
         transcript_query_timeout_max_seconds::Union{Nothing, Real} = 240,
         transcript_query_retries::Integer = 2,
         allow_specieslist_timeout_fallback::Bool = true,
         thoraxe_timeout_seconds::Union{Nothing, Real} = nothing)
+    _orthology_relationships(orthology)
+    species_filter = cached_thoraxe_input_dir === nothing && specieslist_filter ?
+                     _resolve_effective_specieslist(target, specieslist, orthology) :
+                     (
+        specieslist = _normalized_specieslist(specieslist), warnings = String[])
+    effective_specieslist = species_filter.specieslist
     input_dir = _ensure_transcript_query(target, workdir;
-        specieslist, overwrite, cached_input_dir = cached_thoraxe_input_dir,
+        specieslist = effective_specieslist, overwrite,
+        cached_input_dir = cached_thoraxe_input_dir,
         timeout_seconds = transcript_query_timeout_seconds,
         timeout_max_seconds = transcript_query_timeout_max_seconds,
         max_retries = transcript_query_retries,
+        orthology,
         allow_specieslist_timeout_fallback)
     thoraxe_dir = _ensure_baseline_thoraxe(
-        target, input_dir, workdir; specieslist, overwrite,
+        target, input_dir, workdir; specieslist = effective_specieslist, overwrite,
         timeout_seconds = thoraxe_timeout_seconds)
     msa,
     species = assemble_transcript_msa(thoraxe_dir, target.ensembl_gene_id, target.transcript_id)
-    warnings = _validate_transcript_translation(target, msa)
+    warnings = vcat(species_filter.warnings, _validate_transcript_translation(target, msa))
     baseline_fasta, baseline_sto,
     sequence_fasta, species_file = _save_baseline_msa(workdir, msa, species; overwrite)
 
