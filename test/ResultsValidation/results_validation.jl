@@ -9,7 +9,7 @@
         """)
         msa = Iduna.ResultsValidation.load_msa(sto)
         @test Iduna.ResultsValidation.nsequences(msa) == 2
-        @test Iduna.ResultsValidation.resolve_query_name(msa, "missing_gene", "missing_tx") ==
+        @test Iduna.ResultsValidation._resolve_query_name(msa, "missing_gene", "missing_tx") ==
               "seq1"
         stats = Iduna.ResultsValidation.alignment_stats(sto)
         @test stats.n_sequences == 2

@@ -27,7 +27,7 @@
 
         hits_tsv = joinpath(tmp, "hits.tsv")
         write(hits_tsv, "query\tseed one\tACD-\nquery\thit one\tACDF\n")
-        all_hits, filtered_hits = Iduna.MSAExpansion.collect_hits(hits_tsv, Set(["seed"]))
+        all_hits, filtered_hits = Iduna.MSAExpansion._collect_hits(hits_tsv, Set(["seed"]))
         @test all_hits == [("seed", "ACD"), ("hit", "ACDF")]
         @test filtered_hits == [("hit", "ACDF")]
 

@@ -1,19 +1,19 @@
 using ArgParse
 using JSON3
 
-const APP_TIMEOUT_KEYS = Set([
+const _APP_TIMEOUT_KEYS = Set([
     :transcript_query_timeout_seconds,
     :transcript_query_timeout_max_seconds,
     :thoraxe_timeout_seconds
 ])
 
-function parse_pid_thresholds(value::AbstractString)
+function _parse_pid_thresholds(value::AbstractString)
     vals = parse.(Float64, strip.(split(value, ',')))
     isempty(vals) && error("--pid-thresholds cannot be empty.")
     return vals
 end
 
-function parse_timeout_value(value::AbstractString)
+function _parse_timeout_value(value::AbstractString)
     normalized = lowercase(strip(value))
     normalized in ("none", "nothing", "off", "0") && return nothing
     parsed = parse(Float64, value)
@@ -21,12 +21,12 @@ function parse_timeout_value(value::AbstractString)
     return parsed
 end
 
-function throw_parse_error(settings, err)
+function _throw_parse_error(settings, err)
     throw(err)
 end
 
-function app_arg_settings(;
-        exc_handler::Function = throw_parse_error,
+function _app_arg_settings(;
+        exc_handler::Function = _throw_parse_error,
         exit_after_help::Bool = false)
     settings = ArgParseSettings(;
         prog = "iduna",
@@ -132,14 +132,14 @@ function app_arg_settings(;
     return settings
 end
 
-function postprocess_app_args(parsed::Dict{Symbol, Any})
+function _postprocess_app_args(parsed::Dict{Symbol, Any})
     kwargs = Dict{Symbol, Any}()
     for (key, value) in parsed
         value === nothing && continue
         if key === :pid_thresholds
-            kwargs[key] = parse_pid_thresholds(value)
-        elseif key in APP_TIMEOUT_KEYS
-            kwargs[key] = parse_timeout_value(value)
+            kwargs[key] = _parse_pid_thresholds(value)
+        elseif key in _APP_TIMEOUT_KEYS
+            kwargs[key] = _parse_timeout_value(value)
         else
             kwargs[key] = value
         end
@@ -147,17 +147,17 @@ function postprocess_app_args(parsed::Dict{Symbol, Any})
     return kwargs
 end
 
-function parse_app_args(args::Vector{String};
-        exc_handler::Function = throw_parse_error,
+function _parse_app_args(args::Vector{String};
+        exc_handler::Function = _throw_parse_error,
         exit_after_help::Bool = false)
-    parsed = parse_args(args, app_arg_settings(; exc_handler, exit_after_help);
+    parsed = parse_args(args, _app_arg_settings(; exc_handler, exit_after_help);
         as_symbols = true)
     parsed === nothing && return Dict{Symbol, Any}(:help => true)
-    return postprocess_app_args(parsed)
+    return _postprocess_app_args(parsed)
 end
 
-function run_app(args::Vector{String} = ARGS)
-    kwargs = parse_app_args(args; exc_handler = ArgParse.default_handler)
+function _run_app(args::Vector{String} = ARGS)
+    kwargs = _parse_app_args(args; exc_handler = ArgParse.default_handler)
     if get(kwargs, :help, false)
         return nothing
     end
@@ -168,6 +168,6 @@ function run_app(args::Vector{String} = ARGS)
 end
 
 function (@main)(args)
-    run_app(String.(args))
+    _run_app(String.(args))
     return nothing
 end

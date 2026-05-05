@@ -2,7 +2,7 @@
     @test Iduna.IDMapping.sequences_match("ACDEFG", "ACDEFG")
     @test !Iduna.IDMapping.sequences_match("ACDEFG", "ACDFFG")
 
-    lookup = Iduna.IDMapping.parse_transcript_lookup(
+    lookup = Iduna.IDMapping._parse_transcript_lookup(
         Dict(
             "id" => "ENSMUST00000193812",
             "Parent" => "ENSMUSG00000102693",
@@ -14,12 +14,12 @@
     @test lookup.ensembl_gene_id == "ENSMUSG00000102693"
     @test lookup.species == "mus_musculus"
 
-    no_species = Iduna.IDMapping.parse_transcript_lookup(
+    no_species = Iduna.IDMapping._parse_transcript_lookup(
         Dict("Parent" => "ENSMUSG00000102693"),
         "ENSMUST00000193812.2"
     )
     @test no_species.species === nothing
-    @test_throws ErrorException Iduna.IDMapping.parse_transcript_lookup(
+    @test_throws ErrorException Iduna.IDMapping._parse_transcript_lookup(
         Dict("species" => "mus_musculus"),
         "ENSMUST00000193812.2"
     )

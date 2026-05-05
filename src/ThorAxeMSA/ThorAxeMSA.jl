@@ -16,20 +16,20 @@ export assemble_transcript_msa,
        compute_identity_against_reference,
        select_best_seed
 
-struct CommandTimeoutError <: Exception
+struct _CommandTimeoutError <: Exception
     command::String
     seconds::Float64
     stdout_log::String
     stderr_log::String
 end
 
-function Base.showerror(io::IO, err::CommandTimeoutError)
+function Base.showerror(io::IO, err::_CommandTimeoutError)
     print(io,
         "ThorAxe command timed out after $(err.seconds) seconds: $(err.command). ",
         "See $(err.stdout_log) and $(err.stderr_log).")
 end
 
-const REQUIRED_ENSEMBL_FILES = (
+const _REQUIRED_ENSEMBL_FILES = (
     "sequences.fasta",
     "exonstable.tsv",
     "tree.nh",
@@ -37,28 +37,28 @@ const REQUIRED_ENSEMBL_FILES = (
     "tsl.csv"
 )
 
-normalize_species_name(species::Nothing) = nothing
-function normalize_species_name(species::AbstractString)
+_normalize_species_name(species::Nothing) = nothing
+function _normalize_species_name(species::AbstractString)
     lowercase(replace(strip(String(species)), ' ' => '_'))
 end
 
-thoraxe_input_dir(workdir::AbstractString) = joinpath(workdir, "thoraxe_input")
-thoraxe_output_dir(workdir::AbstractString) = joinpath(workdir, "thoraxe")
-thoraxe_msa_dir(workdir::AbstractString) = joinpath(workdir, "thoraxe_msa")
-thoraxe_seed_dir(workdir::AbstractString) = joinpath(thoraxe_msa_dir(workdir), "seeds")
-thoraxe_logs_dir(workdir::AbstractString) = joinpath(workdir, "logs", "thoraxe")
+_thoraxe_input_dir(workdir::AbstractString) = joinpath(workdir, "thoraxe_input")
+_thoraxe_output_dir(workdir::AbstractString) = joinpath(workdir, "thoraxe")
+_thoraxe_msa_dir(workdir::AbstractString) = joinpath(workdir, "thoraxe_msa")
+_thoraxe_seed_dir(workdir::AbstractString) = joinpath(_thoraxe_msa_dir(workdir), "seeds")
+_thoraxe_logs_dir(workdir::AbstractString) = joinpath(workdir, "logs", "thoraxe")
 
-function has_valid_ensembl_bundle(bundle_root::AbstractString)::Bool
+function _has_valid_ensembl_bundle(bundle_root::AbstractString)::Bool
     ensembl_dir = joinpath(bundle_root, "Ensembl")
     isdir(ensembl_dir) || return false
-    for file in REQUIRED_ENSEMBL_FILES
+    for file in _REQUIRED_ENSEMBL_FILES
         path = joinpath(ensembl_dir, file)
         isfile(path) && filesize(path) > 0 || return false
     end
     return true
 end
 
-function open_logs(f::Function, stdout_path::AbstractString, stderr_path::AbstractString)
+function _open_logs(f::Function, stdout_path::AbstractString, stderr_path::AbstractString)
     mkpath(dirname(stdout_path))
     mkpath(dirname(stderr_path))
     open(stdout_path, "w") do out_io
@@ -68,14 +68,14 @@ function open_logs(f::Function, stdout_path::AbstractString, stderr_path::Abstra
     end
 end
 
-function normalize_timeout(timeout_seconds::Union{Nothing, Real})
+function _normalize_timeout(timeout_seconds::Union{Nothing, Real})
     timeout_seconds === nothing && return nothing
     value = Float64(timeout_seconds)
     value > 0 || error("ThorAxe timeout values must be positive.")
     return value
 end
 
-function wait_logged_command(process, timeout_seconds::Union{Nothing, Float64})
+function _wait_logged_command(process, timeout_seconds::Union{Nothing, Float64})
     if timeout_seconds === nothing
         wait(process)
         return false
@@ -94,15 +94,15 @@ function wait_logged_command(process, timeout_seconds::Union{Nothing, Float64})
     return false
 end
 
-function run_logged_command(command::Cmd,
+function _run_logged_command(command::Cmd,
         stdout_log::AbstractString,
         stderr_log::AbstractString;
         timeout_seconds::Union{Nothing, Real} = nothing)
-    timeout = normalize_timeout(timeout_seconds)
-    open_logs(stdout_log, stderr_log) do out_io, err_io
+    timeout = _normalize_timeout(timeout_seconds)
+    _open_logs(stdout_log, stderr_log) do out_io, err_io
         process = run(pipeline(command; stdout = out_io, stderr = err_io), wait = false)
-        timed_out = wait_logged_command(process, timeout)
-        timed_out && throw(CommandTimeoutError(
+        timed_out = _wait_logged_command(process, timeout)
+        timed_out && throw(_CommandTimeoutError(
             string(command), timeout::Float64, String(stdout_log), String(stderr_log)))
         success(process) ||
             error("ThorAxe command failed: $(command). See $(stderr_log).")
@@ -110,41 +110,41 @@ function run_logged_command(command::Cmd,
     return nothing
 end
 
-function thoraxe_runner(stdout_log::AbstractString,
+function _thoraxe_runner(stdout_log::AbstractString,
         stderr_log::AbstractString;
         timeout_seconds::Union{Nothing, Real} = nothing)
     # ThorAxe.jl builds the exact CLI command. The runner only controls logging,
     # timeouts, and error messages around that command.
-    return command -> run_logged_command(
+    return command -> _run_logged_command(
         command, stdout_log, stderr_log; timeout_seconds = timeout_seconds)
 end
 
-function next_timeout(timeout_seconds::Union{Nothing, Real},
+function _next_timeout(timeout_seconds::Union{Nothing, Real},
         timeout_max_seconds::Union{Nothing, Real})
     timeout_seconds === nothing && return nothing
-    current = normalize_timeout(timeout_seconds)::Float64
+    current = _normalize_timeout(timeout_seconds)::Float64
     timeout_max_seconds === nothing && return current
-    return min(2 * current, normalize_timeout(timeout_max_seconds)::Float64)
+    return min(2 * current, _normalize_timeout(timeout_max_seconds)::Float64)
 end
 
-function retry_wait_seconds(attempt::Integer)
+function _retry_wait_seconds(attempt::Integer)
     return min(30.0, 2.0^(attempt - 1))
 end
 
-function normalized_specieslist(specieslist::Union{Nothing, AbstractString})
+function _normalized_specieslist(specieslist::Union{Nothing, AbstractString})
     specieslist === nothing && return nothing
     stripped = strip(String(specieslist))
     return isempty(stripped) ? nothing : stripped
 end
 
-function run_transcript_query_once(gene_core::AbstractString,
+function _run_transcript_query_once(gene_core::AbstractString,
         workdir::AbstractString,
         species::Union{Nothing, AbstractString},
         specieslist::Union{Nothing, AbstractString},
         stdout_log::AbstractString,
         stderr_log::AbstractString;
         timeout_seconds::Union{Nothing, Real})
-    runner = thoraxe_runner(stdout_log, stderr_log; timeout_seconds = timeout_seconds)
+    runner = _thoraxe_runner(stdout_log, stderr_log; timeout_seconds = timeout_seconds)
     cd(workdir) do
         if species === nothing
             ThorAxe.transcript_query(gene_core; specieslist = specieslist, runner = runner)
@@ -156,28 +156,28 @@ function run_transcript_query_once(gene_core::AbstractString,
     return nothing
 end
 
-function ensure_cached_thoraxe_input(source_dir::AbstractString,
+function _ensure_cached_thoraxe_input(source_dir::AbstractString,
         workdir::AbstractString;
         overwrite::Bool = false)
-    dest = thoraxe_input_dir(workdir)
-    if !overwrite && has_valid_ensembl_bundle(dest)
+    dest = _thoraxe_input_dir(workdir)
+    if !overwrite && _has_valid_ensembl_bundle(dest)
         return dest
     end
 
     source = abspath(String(source_dir))
-    has_valid_ensembl_bundle(source) ||
+    _has_valid_ensembl_bundle(source) ||
         error("Cached ThorAxe input at $(source) is not a valid transcript_query bundle.")
     if abspath(dest) != source
         isdir(dest) && safe_rm(dest, workdir)
         mkpath(dirname(dest))
         cp(source, dest; force = true)
     end
-    has_valid_ensembl_bundle(dest) ||
+    _has_valid_ensembl_bundle(dest) ||
         error("Copied ThorAxe input bundle at $(dest) is incomplete.")
     return dest
 end
 
-function ensure_transcript_query(target::ResolvedTarget, workdir::AbstractString;
+function _ensure_transcript_query(target::ResolvedTarget, workdir::AbstractString;
         specieslist::Union{Nothing, AbstractString} = nothing,
         overwrite::Bool = false,
         cached_input_dir::Union{Nothing, AbstractString} = nothing,
@@ -186,11 +186,11 @@ function ensure_transcript_query(target::ResolvedTarget, workdir::AbstractString
         max_retries::Integer = 2,
         allow_specieslist_timeout_fallback::Bool = true)
     if cached_input_dir !== nothing
-        return ensure_cached_thoraxe_input(cached_input_dir, workdir; overwrite)
+        return _ensure_cached_thoraxe_input(cached_input_dir, workdir; overwrite)
     end
 
-    input_dir = thoraxe_input_dir(workdir)
-    if !overwrite && has_valid_ensembl_bundle(input_dir)
+    input_dir = _thoraxe_input_dir(workdir)
+    if !overwrite && _has_valid_ensembl_bundle(input_dir)
         return input_dir
     end
 
@@ -199,70 +199,70 @@ function ensure_transcript_query(target::ResolvedTarget, workdir::AbstractString
     tmp_gene_dir = joinpath(workdir, gene_core)
     isdir(tmp_gene_dir) && safe_rm(tmp_gene_dir, workdir)
 
-    logs = thoraxe_logs_dir(workdir)
+    logs = _thoraxe_logs_dir(workdir)
     stdout_log = joinpath(logs, "transcript_query_stdout.log")
     stderr_log = joinpath(logs, "transcript_query_stderr.log")
-    species = normalize_species_name(target.species)
+    species = _normalize_species_name(target.species)
 
     attempts = max(Int(max_retries), 1)
-    active_specieslist = normalized_specieslist(specieslist)
+    active_specieslist = _normalized_specieslist(specieslist)
     current_timeout = timeout_seconds
     for attempt in 1:attempts
         isdir(tmp_gene_dir) && safe_rm(tmp_gene_dir, workdir)
         try
-            run_transcript_query_once(gene_core, workdir, species, active_specieslist,
+            _run_transcript_query_once(gene_core, workdir, species, active_specieslist,
                 stdout_log, stderr_log; timeout_seconds = current_timeout)
-            if has_valid_ensembl_bundle(tmp_gene_dir)
+            if _has_valid_ensembl_bundle(tmp_gene_dir)
                 break
             elseif attempt < attempts
                 @warn "transcript_query produced an invalid bundle; retrying." gene=gene_core attempt
                 active_specieslist = nothing
-                sleep(retry_wait_seconds(attempt))
+                sleep(_retry_wait_seconds(attempt))
                 continue
             end
         catch err
-            if err isa CommandTimeoutError && has_valid_ensembl_bundle(tmp_gene_dir)
+            if err isa _CommandTimeoutError && _has_valid_ensembl_bundle(tmp_gene_dir)
                 @warn "transcript_query timed out but produced a usable Ensembl bundle." gene=gene_core attempt
                 break
             end
-            if err isa CommandTimeoutError && attempt < attempts
+            if err isa _CommandTimeoutError && attempt < attempts
                 if active_specieslist !== nothing && allow_specieslist_timeout_fallback
                     @warn "transcript_query timed out with a species list; retrying without it." gene=gene_core attempt
                     active_specieslist = nothing
                     current_timeout = timeout_max_seconds === nothing ?
                                       timeout_seconds : timeout_max_seconds
                 else
-                    current_timeout = next_timeout(current_timeout, timeout_max_seconds)
+                    current_timeout = _next_timeout(current_timeout, timeout_max_seconds)
                 end
-                sleep(retry_wait_seconds(attempt))
+                sleep(_retry_wait_seconds(attempt))
                 continue
             end
             rethrow(err)
         end
     end
 
-    has_valid_ensembl_bundle(tmp_gene_dir) ||
+    _has_valid_ensembl_bundle(tmp_gene_dir) ||
         error("transcript_query did not create a valid Ensembl bundle at $(tmp_gene_dir). See $(stderr_log).")
     mv(tmp_gene_dir, input_dir; force = true)
     return input_dir
 end
 
-function ensure_baseline_thoraxe(target::ResolvedTarget,
+function _ensure_baseline_thoraxe(target::ResolvedTarget,
         input_dir::AbstractString,
         workdir::AbstractString;
         specieslist::Union{Nothing, AbstractString} = nothing,
         overwrite::Bool = false,
         timeout_seconds::Union{Nothing, Real} = nothing)
-    thoraxe_dir = thoraxe_output_dir(workdir)
+    thoraxe_dir = _thoraxe_output_dir(workdir)
     if !overwrite && isfile(joinpath(thoraxe_dir, "path_table.csv")) &&
        isfile(joinpath(thoraxe_dir, "s_exon_table.csv"))
         return thoraxe_dir
     end
 
     isdir(thoraxe_dir) && safe_rm(thoraxe_dir, workdir)
-    stdout_log = joinpath(thoraxe_logs_dir(workdir), "baseline_stdout.log")
-    stderr_log = joinpath(thoraxe_logs_dir(workdir), "baseline_stderr.log")
-    runner = thoraxe_runner(stdout_log, stderr_log; timeout_seconds = timeout_seconds)
+    stdout_log = joinpath(_thoraxe_logs_dir(workdir), "baseline_stdout.log")
+    stderr_log = joinpath(_thoraxe_logs_dir(workdir), "baseline_stderr.log")
+    runner = _thoraxe_runner(stdout_log, stderr_log; timeout_seconds = timeout_seconds)
     ThorAxe.thoraxe(input_dir, workdir; specieslist = specieslist, runner = runner)
 
     isfile(joinpath(thoraxe_dir, "path_table.csv")) ||
@@ -270,8 +270,9 @@ function ensure_baseline_thoraxe(target::ResolvedTarget,
     return thoraxe_dir
 end
 
-function join_msas_consistently(lhs::MSAType, rhs::MSAType) where {MSAType <:
-                                                                   AbstractMultipleSequenceAlignment}
+function _join_msas_consistently(
+        lhs::MSAType, rhs::MSAType) where {MSAType <:
+                                           AbstractMultipleSequenceAlignment}
     common = intersect(sequencenames(lhs), sequencenames(rhs))
     isempty(common) && error("Cannot join s-exon MSAs that share no sequence names.")
     return join_msas(lhs, rhs)
@@ -306,7 +307,7 @@ function assemble_transcript_msa(thoraxe_dir::AbstractString,
     all(isfile, exon_files) || error("At least one expected s-exon MSA is missing.")
 
     exon_msas = [read_file(file, FASTA) for file in exon_files]
-    transcript_msa = reduce(join_msas_consistently, exon_msas)
+    transcript_msa = reduce(_join_msas_consistently, exon_msas)
 
     reference = resolve_sequence_name(transcript_msa, gene_id)
     reference === nothing &&
@@ -324,11 +325,11 @@ function assemble_transcript_msa(thoraxe_dir::AbstractString,
     return transcript_msa, species
 end
 
-function save_baseline_msa(workdir::AbstractString,
+function _save_baseline_msa(workdir::AbstractString,
         msa::AbstractMultipleSequenceAlignment,
         species::AbstractVector{<:AbstractString};
         overwrite::Bool = false)
-    seed_dir = thoraxe_seed_dir(workdir)
+    seed_dir = _thoraxe_seed_dir(workdir)
     mkpath(seed_dir)
     fasta_path = joinpath(seed_dir, "msa_0.fasta")
     sto_path = joinpath(seed_dir, "msa_0.sto")
@@ -351,13 +352,13 @@ function save_baseline_msa(workdir::AbstractString,
     return fasta_path, sto_path, sequences_path, species_path
 end
 
-function read_single_fasta_sequence(path::AbstractString)
+function _read_single_fasta_sequence(path::AbstractString)
     seq = fasta_sequence(read(path, String))
     seq === nothing && error("FASTA file $(path) did not contain a sequence.")
     return seq
 end
 
-function extract_reference_sequence(msa::AbstractMultipleSequenceAlignment,
+function _extract_reference_sequence(msa::AbstractMultipleSequenceAlignment,
         gene_id::AbstractString,
         transcript_id::AbstractString)
     for id in (gene_id, transcript_id)
@@ -370,21 +371,21 @@ function extract_reference_sequence(msa::AbstractMultipleSequenceAlignment,
     error("Could not find a reference sequence for $(gene_id) / $(transcript_id).")
 end
 
-function compare_protein_sequences(query_seq::AbstractString, reference_seq::AbstractString)
+function _compare_protein_sequences(query_seq::AbstractString, reference_seq::AbstractString)
     protein_alignment_stats(query_seq, reference_seq)
 end
 
-function validate_transcript_translation(target::ResolvedTarget,
+function _validate_transcript_translation(target::ResolvedTarget,
         msa::AbstractMultipleSequenceAlignment)
     target.uniprot_sequence_path === nothing && return String[]
     isfile(target.uniprot_sequence_path) || return String[
         "UniProt sequence file is missing; skipped ThorAxe transcript validation."]
 
     query_name,
-    query_seq = extract_reference_sequence(msa,
+    query_seq = _extract_reference_sequence(msa,
         target.ensembl_gene_id, target.transcript_id)
-    reference_seq = read_single_fasta_sequence(target.uniprot_sequence_path)
-    stats = compare_protein_sequences(query_seq, reference_seq)
+    reference_seq = _read_single_fasta_sequence(target.uniprot_sequence_path)
+    stats = _compare_protein_sequences(query_seq, reference_seq)
     warnings = String[]
     if stats.insertions != 0 || stats.deletions != 0
         error(
@@ -397,7 +398,7 @@ function validate_transcript_translation(target::ResolvedTarget,
     return warnings
 end
 
-function get_codes(output::AbstractString)
+function _get_codes(output::AbstractString)
     in_alignment = false
     query_line = true
     cols = 1:0
@@ -440,7 +441,7 @@ function get_codes(output::AbstractString)
     return positions, codes
 end
 
-function identity_from_codes(positions::Vector{Int}, codes::Vector{Char})
+function _identity_from_codes(positions::Vector{Int}, codes::Vector{Char})
     seen = Dict{Int, Bool}()
     for (pos, code) in zip(positions, codes)
         pos == 0 && continue
@@ -472,19 +473,19 @@ function compute_identity_against_reference(reference_fasta::AbstractString,
             mkpath(logs_dir)
             cp(out_path, joinpath(logs_dir, "$(label)_hhalign.out"); force = true)
         end
-        positions, codes = get_codes(output)
-        return identity_from_codes(positions, codes)
+        positions, codes = _get_codes(output)
+        return _identity_from_codes(positions, codes)
     end
 end
 
-function generate_pid_seed(target::ResolvedTarget,
+function _generate_pid_seed(target::ResolvedTarget,
         input_dir::AbstractString,
         workdir::AbstractString,
         pid::Real,
         species_file::AbstractString;
         overwrite::Bool = false,
         timeout_seconds::Union{Nothing, Real} = nothing)
-    seed_dir = thoraxe_seed_dir(workdir)
+    seed_dir = _thoraxe_seed_dir(workdir)
     pid_label = format_pid(pid)
     fasta_path = joinpath(seed_dir, "thoraxe_pid$(pid_label)_msa_0.fasta")
     sto_path = joinpath(seed_dir, "thoraxe_pid$(pid_label)_msa_0.sto")
@@ -492,12 +493,12 @@ function generate_pid_seed(target::ResolvedTarget,
         return fasta_path, sto_path
     end
 
-    tmp_root = joinpath(thoraxe_msa_dir(workdir), "tmp")
+    tmp_root = joinpath(_thoraxe_msa_dir(workdir), "tmp")
     mkpath(tmp_root)
     mktempdir(tmp_root; prefix = "thoraxe_pid$(pid_label)_") do tmp
-        stdout_log = joinpath(thoraxe_logs_dir(workdir), "pid$(pid_label)_stdout.log")
-        stderr_log = joinpath(thoraxe_logs_dir(workdir), "pid$(pid_label)_stderr.log")
-        runner = thoraxe_runner(stdout_log, stderr_log; timeout_seconds = timeout_seconds)
+        stdout_log = joinpath(_thoraxe_logs_dir(workdir), "pid$(pid_label)_stdout.log")
+        stderr_log = joinpath(_thoraxe_logs_dir(workdir), "pid$(pid_label)_stderr.log")
+        runner = _thoraxe_runner(stdout_log, stderr_log; timeout_seconds = timeout_seconds)
         ThorAxe.thoraxe(
             input_dir, tmp; identity = Float64(pid), specieslist = species_file,
             runner = runner)
@@ -510,7 +511,7 @@ function generate_pid_seed(target::ResolvedTarget,
     return fasta_path, sto_path
 end
 
-function summarize_pid_scores(rows::Vector{NamedTuple}, path::AbstractString)
+function _summarize_pid_scores(rows::Vector{NamedTuple}, path::AbstractString)
     df = DataFrame(rows)
     sort!(df, [:pid])
     CSV.write(path, df)
@@ -542,30 +543,30 @@ function build_thoraxe_msa(target::ResolvedTarget, workdir::AbstractString;
         transcript_query_retries::Integer = 2,
         allow_specieslist_timeout_fallback::Bool = true,
         thoraxe_timeout_seconds::Union{Nothing, Real} = nothing)
-    input_dir = ensure_transcript_query(target, workdir;
+    input_dir = _ensure_transcript_query(target, workdir;
         specieslist, overwrite, cached_input_dir = cached_thoraxe_input_dir,
         timeout_seconds = transcript_query_timeout_seconds,
         timeout_max_seconds = transcript_query_timeout_max_seconds,
         max_retries = transcript_query_retries,
         allow_specieslist_timeout_fallback)
-    thoraxe_dir = ensure_baseline_thoraxe(
+    thoraxe_dir = _ensure_baseline_thoraxe(
         target, input_dir, workdir; specieslist, overwrite,
         timeout_seconds = thoraxe_timeout_seconds)
     msa,
     species = assemble_transcript_msa(thoraxe_dir, target.ensembl_gene_id, target.transcript_id)
-    warnings = validate_transcript_translation(target, msa)
+    warnings = _validate_transcript_translation(target, msa)
     baseline_fasta, baseline_sto,
-    sequence_fasta, species_file = save_baseline_msa(workdir, msa, species; overwrite)
+    sequence_fasta, species_file = _save_baseline_msa(workdir, msa, species; overwrite)
 
-    summary_path = joinpath(thoraxe_msa_dir(workdir), "best_seed.csv")
+    summary_path = joinpath(_thoraxe_msa_dir(workdir), "best_seed.csv")
     score_rows = NamedTuple[]
     for pid in Float64.(pid_thresholds)
         fasta_path,
-        sto_path = generate_pid_seed(
+        sto_path = _generate_pid_seed(
             target, input_dir, workdir, pid, species_file;
             overwrite, timeout_seconds = thoraxe_timeout_seconds)
         identity = compute_identity_against_reference(baseline_fasta, fasta_path;
-            logs_dir = joinpath(thoraxe_logs_dir(workdir), "hhalign"),
+            logs_dir = joinpath(_thoraxe_logs_dir(workdir), "hhalign"),
             label = "pid$(format_pid(pid))")
         push!(score_rows,
             (;
@@ -580,20 +581,20 @@ function build_thoraxe_msa(target::ResolvedTarget, workdir::AbstractString;
                 stockholm_path = sto_path
             ))
     end
-    summarize_pid_scores(score_rows, summary_path)
+    _summarize_pid_scores(score_rows, summary_path)
     best = select_best_seed(summary_path)
 
     return ThorAxeMSAResult(;
         input_dir,
         thoraxe_dir,
-        msa_dir = thoraxe_msa_dir(workdir),
+        msa_dir = _thoraxe_msa_dir(workdir),
         baseline_fasta,
         baseline_stockholm = baseline_sto,
         sequence_fasta,
         species_file,
         pid_summary = summary_path,
         best_seed = best,
-        logs_dir = thoraxe_logs_dir(workdir),
+        logs_dir = _thoraxe_logs_dir(workdir),
         warnings,
         status = :ok
     )

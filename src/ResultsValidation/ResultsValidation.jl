@@ -45,31 +45,31 @@ function alignment_stats(path::AbstractString; cluster_threshold::Real = 62.0, n
     )
 end
 
-function resolve_query_name(msa::AbstractMultipleSequenceAlignment,
+function _resolve_query_name(msa::AbstractMultipleSequenceAlignment,
         gene_id::AbstractString,
         transcript_id::AbstractString)
     return resolve_sequence_name(msa, (gene_id, transcript_id); fallback = true)
 end
 
-function extract_query_sequence(msa::AbstractMultipleSequenceAlignment,
+function _extract_query_sequence(msa::AbstractMultipleSequenceAlignment,
         gene_id::AbstractString,
         transcript_id::AbstractString)
-    name = resolve_query_name(msa, gene_id, transcript_id)
+    name = _resolve_query_name(msa, gene_id, transcript_id)
     seq = replace(stringsequence(msa, name), '-' => "", '.' => "")
     return name, uppercase(String(seq))
 end
 
-function read_fasta_sequence(path::AbstractString)
+function _read_fasta_sequence(path::AbstractString)
     msa = read_file(path, FASTA)
     name = first(sequencenames(msa))
     return uppercase(String(stringsequence(msa, name)))
 end
 
-function align_sequences(query_seq::AbstractString, reference_seq::AbstractString)
+function _align_sequences(query_seq::AbstractString, reference_seq::AbstractString)
     protein_alignment_stats(query_seq, reference_seq; include_alignment = true)
 end
 
-function write_alignment_log(path::AbstractString,
+function _write_alignment_log(path::AbstractString,
         target::ResolvedTarget,
         query_name::AbstractString,
         query_seq::AbstractString,
@@ -112,12 +112,13 @@ function validate_results(target::ResolvedTarget,
 
     if target.uniprot_sequence_path !== nothing && isfile(target.uniprot_sequence_path)
         query_name,
-        query_seq = extract_query_sequence(expanded_stats.msa,
+        query_seq = _extract_query_sequence(expanded_stats.msa,
             target.ensembl_gene_id, target.transcript_id)
-        uniprot_seq = read_fasta_sequence(target.uniprot_sequence_path)
-        aln_stats = align_sequences(query_seq, uniprot_seq)
+        uniprot_seq = _read_fasta_sequence(target.uniprot_sequence_path)
+        aln_stats = _align_sequences(query_seq, uniprot_seq)
         aln_path = joinpath(workdir, "validation", "query_vs_uniprot_alignment.txt")
-        write_alignment_log(aln_path, target, query_name, query_seq, uniprot_seq, aln_stats)
+        _write_alignment_log(
+            aln_path, target, query_name, query_seq, uniprot_seq, aln_stats)
         aln_identical = aln_stats.identical
         aln_mismatches = aln_stats.mismatches
         aln_insertions = aln_stats.insertions

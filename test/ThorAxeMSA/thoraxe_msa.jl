@@ -28,15 +28,15 @@
             transcript_id = "ENST00000000001.1",
             uniprot_sequence_path = uniprot)
         write(uniprot, ">P20963\nAACC\n")
-        @test isempty(Iduna.ThorAxeMSA.validate_transcript_translation(target, msa))
+        @test isempty(Iduna.ThorAxeMSA._validate_transcript_translation(target, msa))
 
         write(uniprot, ">P20963\nAAAC\n")
-        warnings = Iduna.ThorAxeMSA.validate_transcript_translation(target, msa)
+        warnings = Iduna.ThorAxeMSA._validate_transcript_translation(target, msa)
         @test length(warnings) == 1
         @test occursin("substitutions", only(warnings))
 
         write(uniprot, ">P20963\nAAC\n")
-        @test_throws ErrorException Iduna.ThorAxeMSA.validate_transcript_translation(
+        @test_throws ErrorException Iduna.ThorAxeMSA._validate_transcript_translation(
             target, msa)
     end
 
@@ -56,7 +56,7 @@
     mktempdir() do tmp
         stdout_log = joinpath(tmp, "stdout.log")
         stderr_log = joinpath(tmp, "stderr.log")
-        Iduna.ThorAxeMSA.run_logged_command(
+        Iduna.ThorAxeMSA._run_logged_command(
             `$(Base.julia_cmd()) --startup-file=no -e "println(\"ok\")"`,
             stdout_log,
             stderr_log;
@@ -64,7 +64,7 @@
         @test read(stdout_log, String) == "ok\n"
         @test isempty(read(stderr_log, String))
 
-        @test_throws Iduna.ThorAxeMSA.CommandTimeoutError Iduna.ThorAxeMSA.run_logged_command(
+        @test_throws Iduna.ThorAxeMSA._CommandTimeoutError Iduna.ThorAxeMSA._run_logged_command(
             `$(Base.julia_cmd()) --startup-file=no -e "sleep(2)"`,
             joinpath(tmp, "slow_stdout.log"),
             joinpath(tmp, "slow_stderr.log");
@@ -75,7 +75,7 @@
         source = joinpath(tmp, "cached_input")
         ensembl = joinpath(source, "Ensembl")
         mkpath(ensembl)
-        for file in Iduna.ThorAxeMSA.REQUIRED_ENSEMBL_FILES
+        for file in Iduna.ThorAxeMSA._REQUIRED_ENSEMBL_FILES
             write(joinpath(ensembl, file), "x\n")
         end
         target = Iduna.ResolvedTarget(;
@@ -84,14 +84,14 @@
             ensembl_gene_id = "ENSG00000000001.1",
             transcript_id = "ENST00000000001.1")
         workdir = joinpath(tmp, "work")
-        copied = Iduna.ThorAxeMSA.ensure_transcript_query(target, workdir;
+        copied = Iduna.ThorAxeMSA._ensure_transcript_query(target, workdir;
             cached_input_dir = source,
             overwrite = true)
         @test copied == joinpath(workdir, "thoraxe_input")
         @test isfile(joinpath(copied, "Ensembl", "sequences.fasta"))
         @test isdir(source)
 
-        @test_throws ErrorException Iduna.ThorAxeMSA.ensure_transcript_query(
+        @test_throws ErrorException Iduna.ThorAxeMSA._ensure_transcript_query(
             target, joinpath(tmp, "bad_work");
             cached_input_dir = joinpath(tmp, "missing"),
             overwrite = true)

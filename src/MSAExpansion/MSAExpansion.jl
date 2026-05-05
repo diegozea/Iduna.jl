@@ -11,13 +11,13 @@ export expand_msa,
        normalize_stockholm_annotations!,
        prepare_stockholm_for_mmseqs
 
-normalize_id(s::AbstractString) = String(split(String(s))[1])
+_normalize_id(s::AbstractString) = String(split(String(s))[1])
 
-function expansion_root(workdir::AbstractString)
+function _expansion_root(workdir::AbstractString)
     joinpath(workdir, "expansion")
 end
 
-function expanded_outputs_exist(dir::AbstractString, transcript_id::AbstractString)
+function _expanded_outputs_exist(dir::AbstractString, transcript_id::AbstractString)
     all(isfile,
         (
             joinpath(dir, "$(transcript_id)_full.sto"),
@@ -141,7 +141,7 @@ function normalize_stockholm_annotations!(path::AbstractString)
     return path
 end
 
-function run_labeled(cmd::Cmd, label::AbstractString, logs_dir::AbstractString)
+function _run_labeled(cmd::Cmd, label::AbstractString, logs_dir::AbstractString)
     mkpath(logs_dir)
     run_logged(cmd;
         stdout_path = joinpath(logs_dir, "$(label)_stdout.log"),
@@ -149,7 +149,7 @@ function run_labeled(cmd::Cmd, label::AbstractString, logs_dir::AbstractString)
     return nothing
 end
 
-function mmseqs_search(seed_msa_sto::AbstractString,
+function _mmseqs_search(seed_msa_sto::AbstractString,
         base_db::AbstractString,
         db_dir::AbstractString,
         tmp_dir::AbstractString,
@@ -167,30 +167,30 @@ function mmseqs_search(seed_msa_sto::AbstractString,
     aln_db = string(base_db, "_aln")
     seq_db = string(base_db, "_seq")
 
-    run_labeled(`$(mmseqs_bin) convertmsa $seed_msa_sto $seed_db`, "convertmsa", logs_dir)
+    _run_labeled(`$(mmseqs_bin) convertmsa $seed_msa_sto $seed_db`, "convertmsa", logs_dir)
 
     profile_cmd = `$(mmseqs_bin) msa2profile $seed_db $profile_db --match-mode $(match_mode)`
     match_ratio !== nothing &&
         (profile_cmd = `$profile_cmd --match-ratio $(Float64(match_ratio))`)
-    run_labeled(profile_cmd, "msa2profile", logs_dir)
+    _run_labeled(profile_cmd, "msa2profile", logs_dir)
 
     search_cmd = `$(mmseqs_bin) search $profile_db $base_db $search_result_db $tmp_dir -a`
     threads !== nothing && (search_cmd = `$search_cmd --threads $(Int(threads))`)
-    run_labeled(search_cmd, "search", logs_dir)
+    _run_labeled(search_cmd, "search", logs_dir)
 
     expandaln_cmd = `$(mmseqs_bin) expandaln $profile_db $base_db $search_result_db $aln_db $expanded_result_db`
     threads !== nothing && (expandaln_cmd = `$expandaln_cmd --threads $(Int(threads))`)
-    run_labeled(expandaln_cmd, "expandaln", logs_dir)
+    _run_labeled(expandaln_cmd, "expandaln", logs_dir)
 
     align_cmd = `$(mmseqs_bin) align $profile_db $seq_db $expanded_result_db $realigned_result_db`
     threads !== nothing && (align_cmd = `$align_cmd --threads $(Int(threads))`)
-    run_labeled(align_cmd, "align", logs_dir)
+    _run_labeled(align_cmd, "align", logs_dir)
 
     return (; seed_db, profile_db, seq_db, search_result_db,
         expanded_result_db, realigned_result_db)
 end
 
-function reorder_alignment(msa::AbstractMultipleSequenceAlignment, priority::Vector{String})
+function _reorder_alignment(msa::AbstractMultipleSequenceAlignment, priority::Vector{String})
     name_to_idx = Dict(String(name) => idx for (idx, name) in enumerate(sequencenames(msa)))
     priority_idx = Int[]
     seen = Set{Int}()
@@ -204,7 +204,7 @@ function reorder_alignment(msa::AbstractMultipleSequenceAlignment, priority::Vec
     return msa[vcat(priority_idx, remaining), :]
 end
 
-function collect_hits(hits_tsv::AbstractString, seed_set::Set{String})
+function _collect_hits(hits_tsv::AbstractString, seed_set::Set{String})
     all_hits = Tuple{String, String}[]
     filtered_hits = Tuple{String, String}[]
     seen_all = Set{String}()
@@ -213,7 +213,7 @@ function collect_hits(hits_tsv::AbstractString, seed_set::Set{String})
         for line in eachline(io)
             parts = split(line, '\t')
             length(parts) < 3 && continue
-            target_name = normalize_id(strip(parts[2]))
+            target_name = _normalize_id(strip(parts[2]))
             seq = uppercase(replace(strip(parts[3]), '-' => ""))
             isempty(target_name) && continue
             occursin(r"[A-Za-z]", seq) || continue
@@ -231,17 +231,17 @@ function collect_hits(hits_tsv::AbstractString, seed_set::Set{String})
     return all_hits, filtered_hits
 end
 
-function seed_id_set(seed_stockholm::AbstractString)
+function _seed_id_set(seed_stockholm::AbstractString)
     seed_alignment = read_file(seed_stockholm, Stockholm; keepinserts = true)
-    return Set(normalize_id.(String.(sequencenames(seed_alignment))))
+    return Set(_normalize_id.(String.(sequencenames(seed_alignment))))
 end
 
-function cached_hit_counts(hits_fasta::AbstractString, seed_set::Set{String})
+function _cached_hit_counts(hits_fasta::AbstractString, seed_set::Set{String})
     if filesize(hits_fasta) == 0
         return (; n_hits = 0, n_new_hits = 0)
     end
     hits_msa = read_file(hits_fasta, FASTA)
-    hit_names = normalize_id.(String.(sequencenames(hits_msa)))
+    hit_names = _normalize_id.(String.(sequencenames(hits_msa)))
     return (;
         n_hits = nsequences(hits_msa),
         n_new_hits = count(name -> !(name in seed_set), hit_names)
@@ -259,14 +259,14 @@ function expand_msa(target::ResolvedTarget,
         threads::Union{Nothing, Integer} = Threads.nthreads())
     ensure_mmseqs_db(mmseqs_db)
 
-    run_dir = joinpath(expansion_root(workdir), target.ensembl_gene_id, target.transcript_id)
+    run_dir = joinpath(_expansion_root(workdir), target.ensembl_gene_id, target.transcript_id)
     unpack_dir = joinpath(run_dir, "expanded_msa")
     logs_dir = joinpath(run_dir, "logs")
     if overwrite && isdir(run_dir)
         safe_rm(run_dir, workdir)
-    elseif !overwrite && expanded_outputs_exist(unpack_dir, target.transcript_id)
+    elseif !overwrite && _expanded_outputs_exist(unpack_dir, target.transcript_id)
         hits_fasta = joinpath(unpack_dir, "$(target.transcript_id)_hits_raw.fasta")
-        counts = cached_hit_counts(hits_fasta, seed_id_set(seed.stockholm_path))
+        counts = _cached_hit_counts(hits_fasta, _seed_id_set(seed.stockholm_path))
         return ExpansionResult(;
             run_dir,
             seed_stockholm = seed.stockholm_path,
@@ -302,18 +302,18 @@ function expand_msa(target::ResolvedTarget,
         joinpath(seed_dir, "$(seed_label)_mmseqs.sto"))
     seed_alignment = read_file(archived_seed_sto, Stockholm; keepinserts = true)
     seed_names = String.(sequencenames(seed_alignment))
-    seed_set = Set(normalize_id.(seed_names))
+    seed_set = Set(_normalize_id.(seed_names))
 
     tmp_dir = mktempdir(tmp_root; prefix = "mmseqs_tmp_")
     try
-        db_paths = mmseqs_search(sanitized_seed, mmseqs_db, db_dir, tmp_dir, logs_dir;
+        db_paths = _mmseqs_search(sanitized_seed, mmseqs_db, db_dir, tmp_dir, logs_dir;
             match_mode, match_ratio, threads)
         hits_tsv = joinpath(run_dir, "mmseqs_hits_raw.tsv")
-        run_labeled(
+        _run_labeled(
             `$(MMseqs2_jll.mmseqs()) convertalis $(db_paths.profile_db) $(db_paths.seq_db) $(db_paths.realigned_result_db) $hits_tsv --format-output query,target,tseq`,
             "convertalis", logs_dir)
 
-        all_hits, filtered_hits = collect_hits(hits_tsv, seed_set)
+        all_hits, filtered_hits = _collect_hits(hits_tsv, seed_set)
         raw_hits_fasta = joinpath(run_dir, "mmseqs_hits_raw.fasta")
         filtered_fasta = joinpath(hmm_dir, "mmseqs_hits_filtered.fasta")
         write_fasta(raw_hits_fasta, all_hits)
@@ -323,7 +323,7 @@ function expand_msa(target::ResolvedTarget,
         annotated_seed = joinpath(seed_dir, "seed_annotated.sto")
         0.0 <= hmmbuild_symfrac <= 1.0 ||
             error("hmmbuild_symfrac must be between 0.0 and 1.0.")
-        run_labeled(
+        _run_labeled(
             `$(HMMER_jll.hmmbuild()) --symfrac $(Float64(hmmbuild_symfrac)) -O $annotated_seed $hmm_path $sanitized_seed`,
             "hmmbuild", logs_dir)
         normalize_stockholm_annotations!(annotated_seed)
@@ -333,13 +333,13 @@ function expand_msa(target::ResolvedTarget,
         if isempty(filtered_hits)
             cp(annotated_seed, aligned_sto; force = true)
         else
-            run_labeled(
+            _run_labeled(
                 `$(HMMER_jll.hmmalign()) --mapali $sanitized_seed --trim --outformat stockholm -o $aligned_sto $hmm_path $filtered_fasta`,
                 "hmmalign", logs_dir)
             aligned_msa = read_file(aligned_sto, Stockholm; keepinserts = true)
             hit_indices = [i
                            for (i, name) in enumerate(sequencenames(aligned_msa))
-                           if !(normalize_id(String(name)) in seed_set)]
+                           if !(_normalize_id(String(name)) in seed_set)]
             write_file(hits_aligned_sto, aligned_msa[hit_indices, :], Stockholm)
         end
         normalize_stockholm_annotations!(aligned_sto)
@@ -351,8 +351,8 @@ function expand_msa(target::ResolvedTarget,
         normalize_stockholm_annotations!(match_stockholm)
 
         full_stockholm = joinpath(unpack_dir, "$(target.transcript_id)_full.sto")
-        full_alignment = reorder_alignment(read_file(aligned_sto, Stockholm; keepinserts = true), seed_names)
-        match_alignment = reorder_alignment(
+        full_alignment = _reorder_alignment(read_file(aligned_sto, Stockholm; keepinserts = true), seed_names)
+        match_alignment = _reorder_alignment(
             read_file(match_stockholm, Stockholm; keepinserts = true), seed_names)
         write_file(full_stockholm, full_alignment, Stockholm)
         write_file(match_stockholm, match_alignment, Stockholm)

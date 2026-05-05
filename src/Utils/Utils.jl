@@ -39,18 +39,18 @@ export DEFAULT_PID_THRESHOLDS,
        format_pid
 
 const DEFAULT_PID_THRESHOLDS = Float64[10, 20, 30, 60, 80]
-const PROTEIN_ALIGNMENT_SCORE_MODEL = AffineGapScoreModel(BLOSUM62, gap_open = -10, gap_extend = -1)
+const _PROTEIN_ALIGNMENT_SCORE_MODEL = AffineGapScoreModel(BLOSUM62, gap_open = -10, gap_extend = -1)
 
 strip_ensembl_version(id::AbstractString)::String = String(split(String(id), '.'; limit = 2)[1])
 
-function strip_numeric_prefix(id::AbstractString)
+function _strip_numeric_prefix(id::AbstractString)
     parts = split(String(id), '|'; limit = 2)
     return length(parts) == 2 && all(isdigit, parts[1]) ? String(parts[2]) : String(id)
 end
 
 function sequence_name_variants(id::AbstractString)
     variants = String[]
-    for base in (String(id), strip_numeric_prefix(id))
+    for base in (String(id), _strip_numeric_prefix(id))
         push!(variants, base)
         core = strip_ensembl_version(base)
         core == base || push!(variants, core)
@@ -82,7 +82,7 @@ function protein_alignment_stats(query_seq::AbstractString,
         reference_seq::AbstractString;
         include_alignment::Bool = false)
     result = pairalign(GlobalAlignment(), LongAA(uppercase(String(reference_seq))),
-        LongAA(uppercase(String(query_seq))), PROTEIN_ALIGNMENT_SCORE_MODEL)
+        LongAA(uppercase(String(query_seq))), _PROTEIN_ALIGNMENT_SCORE_MODEL)
     aln = alignment(result)
     mismatches = count_mismatches(aln)
     insertions = count_insertions(aln)
@@ -184,7 +184,7 @@ function fasta_sequence(content::AbstractString)::Union{Nothing, String}
     return uppercase(join(seq))
 end
 
-function wrap_sequence(seq::AbstractString; width::Int = 60)
+function _wrap_sequence(seq::AbstractString; width::Int = 60)
     io = IOBuffer()
     i = firstindex(seq)
     while i <= lastindex(seq)
@@ -196,14 +196,14 @@ function wrap_sequence(seq::AbstractString; width::Int = 60)
 end
 
 format_fasta(id::AbstractString,
-    seq::AbstractString)::String = string(">", id, "\n", wrap_sequence(uppercase(String(seq))))
+    seq::AbstractString)::String = string(">", id, "\n", _wrap_sequence(uppercase(String(seq))))
 
 function write_fasta(path::AbstractString, records)
     mkpath(dirname(path))
     open(path, "w") do io
         for (name, seq) in records
             println(io, '>', name)
-            println(io, wrap_sequence(uppercase(String(seq))))
+            println(io, _wrap_sequence(uppercase(String(seq))))
         end
     end
     return path

@@ -1,6 +1,6 @@
 @testset "App" begin
     @testset "minimal CLI" begin
-        kwargs = Iduna.parse_app_args(["P20963", "--mmseqs-db", "db"])
+        kwargs = Iduna._parse_app_args(["P20963", "--mmseqs-db", "db"])
         @test kwargs[:id] == "P20963"
         @test kwargs[:mmseqs_db] == "db"
         @test kwargs[:overwrite] === false
@@ -10,7 +10,7 @@
     end
 
     @testset "option mapping" begin
-        kwargs = Iduna.parse_app_args([
+        kwargs = Iduna._parse_app_args([
             "P20963",
             "--mmseqs-db", "db",
             "--workdir", "work",
@@ -29,7 +29,7 @@
     end
 
     @testset "custom value parsing" begin
-        kwargs = Iduna.parse_app_args([
+        kwargs = Iduna._parse_app_args([
             "P20963",
             "--mmseqs-db", "db",
             "--pid-thresholds", "10,20,30",
@@ -44,8 +44,8 @@
     end
 
     @testset "required arguments" begin
-        @test_throws Iduna.ArgParse.ArgParseError Iduna.parse_app_args(["P20963"])
-        @test_throws Iduna.ArgParse.ArgParseError Iduna.parse_app_args([
+        @test_throws Iduna.ArgParse.ArgParseError Iduna._parse_app_args(["P20963"])
+        @test_throws Iduna.ArgParse.ArgParseError Iduna._parse_app_args([
             "--mmseqs-db", "db"])
     end
 end

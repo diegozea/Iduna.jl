@@ -41,7 +41,7 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
         hmmbuild_symfrac::Real = 0.0,
         threads::Union{Nothing, Integer} = Threads.nthreads())
     primary, disambiguating_transcript,
-    supplied_uniprot = normalize_primary_input(;
+    supplied_uniprot = _normalize_primary_input(;
         id, uniprot_id, ensembl_transcript_id, transcript_id)
     root = Utils.prepare_output_dir(primary; workdir, output_dir, overwrite)
 
@@ -52,7 +52,7 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
         ensembl_protein_id,
         transcript_id = disambiguating_transcript,
         species)
-    Utils.write_json(joinpath(root, "target.json"), target_summary(target))
+    Utils.write_json(joinpath(root, "target.json"), _target_summary(target))
 
     thoraxe = ThorAxeMSA.build_thoraxe_msa(target, root;
         pid_thresholds,
@@ -75,7 +75,7 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
 
     validation = ResultsValidation.validate_results(target, thoraxe.best_seed, expansion, root)
     warnings = vcat(target.warnings, thoraxe.warnings, validation.warnings)
-    status = pipeline_status(warnings)
+    status = _pipeline_status(warnings)
     result = Utils.IdunaResult(;
         input_id = primary,
         workdir = root,
@@ -92,11 +92,11 @@ end
 
 iduna(id::AbstractString; kwargs...) = iduna(; id, kwargs...)
 
-function pipeline_status(warnings::AbstractVector{<:AbstractString})
+function _pipeline_status(warnings::AbstractVector{<:AbstractString})
     isempty(warnings) ? :ok : :warn
 end
 
-function normalize_primary_input(; id, uniprot_id, ensembl_transcript_id, transcript_id)
+function _normalize_primary_input(; id, uniprot_id, ensembl_transcript_id, transcript_id)
     provided_primary = Pair{Symbol, String}[]
     id !== nothing && push!(provided_primary, :id => String(id))
     ensembl_transcript_id !== nothing &&
@@ -125,7 +125,7 @@ function normalize_primary_input(; id, uniprot_id, ensembl_transcript_id, transc
     return first_value, disambiguating_transcript, supplied_uniprot
 end
 
-function target_summary(target::Utils.ResolvedTarget)
+function _target_summary(target::Utils.ResolvedTarget)
     return (;
         input_id = target.input_id,
         input_kind = String(target.input_kind),

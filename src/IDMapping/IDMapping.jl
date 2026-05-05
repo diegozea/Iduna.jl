@@ -13,10 +13,10 @@ export EnsemblCandidate,
        resolve_transcript_gene,
        sequences_match
 
-const UNIPROT_BASE = "https://rest.uniprot.org"
-const ENSEMBL_REST_BASE = "https://rest.ensembl.org"
-const JSON_HEADERS = ["Accept" => "application/json"]
-const FASTA_HEADERS = ["Accept" => "text/x-fasta"]
+const _UNIPROT_BASE = "https://rest.uniprot.org"
+const _ENSEMBL_REST_BASE = "https://rest.ensembl.org"
+const _JSON_HEADERS = ["Accept" => "application/json"]
+const _FASTA_HEADERS = ["Accept" => "text/x-fasta"]
 
 Base.@kwdef struct EnsemblCandidate
     transcript_id::String
@@ -28,13 +28,13 @@ Base.@kwdef struct EnsemblCandidate
     mapping_confirmed::Union{Nothing, Bool} = nothing
 end
 
-Base.@kwdef struct EnsemblTranscriptLookup
+Base.@kwdef struct _EnsemblTranscriptLookup
     transcript_id::String
     ensembl_gene_id::String
     species::Union{Nothing, String} = nothing
 end
 
-Base.@kwdef struct UniProtEntry
+Base.@kwdef struct _UniProtEntry
     id::String
     species::Union{Nothing, String}
     gene_ids::Vector{String}
@@ -45,7 +45,7 @@ Base.@kwdef struct UniProtEntry
     protein_sequence::Union{Nothing, String}
 end
 
-function http_get(url::AbstractString, headers = JSON_HEADERS; retries::Int = 4, sleep_seconds::Real = 1.5)
+function _http_get(url::AbstractString, headers = _JSON_HEADERS; retries::Int = 4, sleep_seconds::Real = 1.5)
     last_status = nothing
     for attempt in 1:max(retries, 1)
         resp = HTTP.get(url; headers = headers, retry = false, status_exception = false)
@@ -62,40 +62,40 @@ function http_get(url::AbstractString, headers = JSON_HEADERS; retries::Int = 4,
     return nothing
 end
 
-function fetch_uniprot_entry(uniprot_id::AbstractString)::UniProtEntry
-    url = "$(UNIPROT_BASE)/uniprotkb/$(strip(String(uniprot_id))).json"
-    resp = http_get(url)
+function fetch_uniprot_entry(uniprot_id::AbstractString)::_UniProtEntry
+    url = "$(_UNIPROT_BASE)/uniprotkb/$(strip(String(uniprot_id))).json"
+    resp = _http_get(url)
     resp === nothing && error("Could not fetch UniProt metadata for $(uniprot_id).")
     data = JSON3.read(decode_body(resp))
     gene_ids, transcripts, transcript_to_protein,
-    transcript_to_gene, transcript_to_isoform = parse_xrefs(data)
-    return UniProtEntry(;
+    transcript_to_gene, transcript_to_isoform = _parse_xrefs(data)
+    return _UniProtEntry(;
         id = String(uniprot_id),
-        species = get_species(data),
+        species = _get_species(data),
         gene_ids,
         transcript_ids = transcripts,
         transcript_to_protein,
         transcript_to_gene,
         transcript_to_isoform,
-        protein_sequence = extract_uniprot_sequence(data)
+        protein_sequence = _extract_uniprot_sequence(data)
     )
 end
 
-function get_species(data)::Union{Nothing, String}
+function _get_species(data)::Union{Nothing, String}
     organism = get(data, "organism", nothing)
     organism === nothing && return nothing
     scientific = get(organism, "scientificName", nothing)
     return scientific isa AbstractString ? String(scientific) : nothing
 end
 
-function extract_uniprot_sequence(data)::Union{Nothing, String}
+function _extract_uniprot_sequence(data)::Union{Nothing, String}
     seq = get(data, "sequence", nothing)
     seq === nothing && return nothing
     value = get(seq, "value", nothing)
     return value isa AbstractString ? uppercase(String(value)) : nothing
 end
 
-function parse_xrefs(data)
+function _parse_xrefs(data)
     gene_ids = String[]
     transcripts = String[]
     transcript_to_protein = Dict{String, String}()
@@ -140,17 +140,17 @@ function parse_xrefs(data)
     transcript_to_isoform
 end
 
-function fetch_ensembl_protein_sequence(protein_id::AbstractString)::Union{Nothing, String}
+function _fetch_ensembl_protein_sequence(protein_id::AbstractString)::Union{Nothing, String}
     core = strip_ensembl_version(protein_id)
-    url = "$(ENSEMBL_REST_BASE)/sequence/id/$(core)?type=protein"
-    resp = http_get(url, FASTA_HEADERS)
+    url = "$(_ENSEMBL_REST_BASE)/sequence/id/$(core)?type=protein"
+    resp = _http_get(url, _FASTA_HEADERS)
     resp === nothing && return nothing
     return fasta_sequence(decode_body(resp))
 end
 
-function fetch_uniprot_fasta_sequence(uniprot_id::AbstractString)::String
-    url = "$(UNIPROT_BASE)/uniprotkb/$(strip(String(uniprot_id))).fasta"
-    resp = http_get(url, FASTA_HEADERS; retries = 5, sleep_seconds = 2.0)
+function _fetch_uniprot_fasta_sequence(uniprot_id::AbstractString)::String
+    url = "$(_UNIPROT_BASE)/uniprotkb/$(strip(String(uniprot_id))).fasta"
+    resp = _http_get(url, _FASTA_HEADERS; retries = 5, sleep_seconds = 2.0)
     resp === nothing && error("Could not fetch UniProt FASTA for $(uniprot_id).")
     seq = fasta_sequence(decode_body(resp))
     seq === nothing && error("UniProt FASTA for $(uniprot_id) did not contain a sequence.")
@@ -161,9 +161,9 @@ function sequences_match(uniprot_seq::AbstractString, ensembl_seq::AbstractStrin
     protein_alignment_stats(ensembl_seq, uniprot_seq).identical
 end
 
-function validate_candidates(entry::UniProtEntry, sequence_dir::AbstractString)
+function _validate_candidates(entry::_UniProtEntry, sequence_dir::AbstractString)
     uniprot_seq = entry.protein_sequence === nothing ?
-                  fetch_uniprot_fasta_sequence(entry.id) : entry.protein_sequence
+                  _fetch_uniprot_fasta_sequence(entry.id) : entry.protein_sequence
     uniprot_path = joinpath(sequence_dir, "uniprot", "$(entry.id).fasta")
     write_text(uniprot_path, format_fasta(entry.id, uniprot_seq))
 
@@ -171,7 +171,7 @@ function validate_candidates(entry::UniProtEntry, sequence_dir::AbstractString)
     for transcript in entry.transcript_ids
         protein_id = get(entry.transcript_to_protein, transcript, nothing)
         protein_id === nothing && continue
-        protein_seq = fetch_ensembl_protein_sequence(protein_id)
+        protein_seq = _fetch_ensembl_protein_sequence(protein_id)
         protein_seq === nothing && continue
         protein_path = joinpath(sequence_dir, "ensembl_proteins", "$(protein_id).fasta")
         write_text(protein_path, format_fasta(protein_id, protein_seq))
@@ -192,7 +192,7 @@ function validate_candidates(entry::UniProtEntry, sequence_dir::AbstractString)
     return candidates, uniprot_path
 end
 
-function choose_candidate(candidates::Vector{EnsemblCandidate}, transcript_id::Union{
+function _choose_candidate(candidates::Vector{EnsemblCandidate}, transcript_id::Union{
         Nothing, AbstractString})
     isempty(candidates) &&
         error("No Ensembl transcript/protein candidates passed sequence validation.")
@@ -214,30 +214,30 @@ function choose_candidate(candidates::Vector{EnsemblCandidate}, transcript_id::U
     return first(candidates), warnings
 end
 
-function parse_transcript_lookup(data, transcript_id::AbstractString)::EnsemblTranscriptLookup
+function _parse_transcript_lookup(data, transcript_id::AbstractString)::_EnsemblTranscriptLookup
     parent = get(data, "Parent", nothing)
     parent isa AbstractString ||
         error("Ensembl lookup for $(transcript_id) did not include a parent gene ID.")
     species = get(data, "species", nothing)
-    return EnsemblTranscriptLookup(;
+    return _EnsemblTranscriptLookup(;
         transcript_id = String(transcript_id),
         ensembl_gene_id = String(parent),
         species = species isa AbstractString ? String(species) : nothing
     )
 end
 
-function resolve_transcript_metadata(transcript_id::AbstractString)::EnsemblTranscriptLookup
+function _resolve_transcript_metadata(transcript_id::AbstractString)::_EnsemblTranscriptLookup
     core = strip_ensembl_version(transcript_id)
-    url = "$(ENSEMBL_REST_BASE)/lookup/id/$(core)?expand=0"
-    resp = http_get(url)
+    url = "$(_ENSEMBL_REST_BASE)/lookup/id/$(core)?expand=0"
+    resp = _http_get(url)
     resp === nothing &&
         error("Could not resolve Ensembl metadata for transcript $(transcript_id).")
     data = JSON3.read(decode_body(resp))
-    return parse_transcript_lookup(data, transcript_id)
+    return _parse_transcript_lookup(data, transcript_id)
 end
 
 function resolve_transcript_gene(transcript_id::AbstractString)::String
-    return resolve_transcript_metadata(transcript_id).ensembl_gene_id
+    return _resolve_transcript_metadata(transcript_id).ensembl_gene_id
 end
 
 function resolve_target(input_id::AbstractString;
@@ -247,14 +247,14 @@ function resolve_target(input_id::AbstractString;
         ensembl_protein_id::Union{Nothing, AbstractString} = nothing,
         transcript_id::Union{Nothing, AbstractString} = nothing,
         species::Union{Nothing, AbstractString} = nothing,
-        _transcript_metadata_resolver::Function = resolve_transcript_metadata)
+        _transcript_metadata_resolver::Function = _resolve_transcript_metadata)
     kind = id_kind(input_id)
     sequence_dir = joinpath(workdir, "sequences")
 
     if kind === :uniprot
         entry = fetch_uniprot_entry(input_id)
-        candidates, uniprot_path = validate_candidates(entry, sequence_dir)
-        chosen, warnings = choose_candidate(candidates, transcript_id)
+        candidates, uniprot_path = _validate_candidates(entry, sequence_dir)
+        chosen, warnings = _choose_candidate(candidates, transcript_id)
         gene = ensembl_gene_id === nothing ? chosen.ensembl_gene_id :
                String(ensembl_gene_id)
         gene === nothing && error("Could not resolve an Ensembl gene ID for $(input_id).")

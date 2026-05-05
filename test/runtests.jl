@@ -4,6 +4,7 @@ using TestItemRunner
 
 @testset "Iduna.jl" begin
     include("aqua.jl")
+    include("namespace.jl")
     include("App/app.jl")
     include("API/api.jl")
     include("Utils/utils.jl")
