@@ -4,6 +4,7 @@ using TestItemRunner
 
 @testset "Iduna.jl" begin
     include("aqua.jl")
+    include("App/runtests.jl")
     include("API/runtests.jl")
     include("Utils/runtests.jl")
     include("IDMapping/runtests.jl")

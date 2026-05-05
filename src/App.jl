@@ -1,36 +1,11 @@
+using ArgParse
 using JSON3
 
-function app_help()
-    return """
-    Usage:
-      iduna <UniProt-or-Ensembl-transcript-ID> --mmseqs-db <path> [options]
-
-    Required:
-      --mmseqs-db <path>              MMseqs2 database prefix.
-
-    Options:
-      --workdir <path>                Output/work directory.
-      --output-dir <path>             Alias for --workdir.
-      --overwrite                     Regenerate package-owned outputs in workdir.
-      --pid-thresholds <list>         Comma-separated thresholds, default 10,20,30,60,80.
-      --transcript-id <id>            Ensembl transcript used to disambiguate UniProt input.
-      --ensembl-gene-id <id>          Explicit Ensembl gene ID.
-      --ensembl-protein-id <id>       Explicit Ensembl protein ID.
-      --species <name>                Species name passed to transcript_query.
-      --specieslist <path-or-list>    Species list passed to ThorAxe.
-      --thoraxe-input-dir <path>      Reuse a complete transcript_query bundle.
-      --transcript-query-timeout-seconds <n>
-                                      Stop transcript_query after n seconds.
-      --transcript-query-timeout-max-seconds <n>
-                                      Maximum timeout after retry backoff.
-      --transcript-query-retries <n>  Number of transcript_query attempts.
-      --no-specieslist-timeout-fallback
-                                      Keep specieslist after transcript_query timeout.
-      --thoraxe-timeout-seconds <n>   Stop each thoraxe run after n seconds.
-      --threads <n>                   Threads for MMseqs2.
-      --help                          Show this message.
-    """
-end
+const APP_TIMEOUT_KEYS = Set([
+    :transcript_query_timeout_seconds,
+    :transcript_query_timeout_max_seconds,
+    :thoraxe_timeout_seconds
+])
 
 function parse_pid_thresholds(value::AbstractString)
     vals = parse.(Float64, strip.(split(value, ',')))
@@ -46,56 +21,144 @@ function parse_timeout_value(value::AbstractString)
     return parsed
 end
 
-function parse_app_args(args::Vector{String})
+function throw_parse_error(settings, err)
+    throw(err)
+end
+
+function app_arg_settings(;
+        exc_handler::Function = throw_parse_error,
+        exit_after_help::Bool = false)
+    settings = ArgParseSettings(;
+        prog = "iduna",
+        description = "Build and expand one ThorAxe-based MSA from a UniProt accession or an Ensembl transcript ID.",
+        usage = "iduna <UniProt-or-Ensembl-transcript-ID> --mmseqs-db <path> [options]",
+        autofix_names = true,
+        exc_handler,
+        exit_after_help,
+        help_alignment_width = 36
+    )
+    @add_arg_table! settings begin
+        "id"
+        help = "UniProt accession or Ensembl transcript ID."
+        metavar = "UniProt-or-Ensembl-transcript-ID"
+        arg_type = String
+        required = true
+
+        "--mmseqs-db"
+        help = "MMseqs2 database prefix."
+        metavar = "path"
+        arg_type = String
+        required = true
+
+        "--workdir"
+        help = "Output/work directory."
+        metavar = "path"
+        arg_type = String
+
+        "--output-dir"
+        help = "Alias for --workdir."
+        metavar = "path"
+        arg_type = String
+
+        "--overwrite"
+        help = "Regenerate package-owned outputs in workdir."
+        action = :store_true
+
+        "--pid-thresholds"
+        help = "Comma-separated thresholds, default 10,20,30,60,80."
+        metavar = "list"
+        arg_type = String
+
+        "--transcript-id"
+        help = "Ensembl transcript used to disambiguate UniProt input."
+        metavar = "id"
+        arg_type = String
+
+        "--ensembl-gene-id"
+        help = "Explicit Ensembl gene ID."
+        metavar = "id"
+        arg_type = String
+
+        "--ensembl-protein-id"
+        help = "Explicit Ensembl protein ID."
+        metavar = "id"
+        arg_type = String
+
+        "--species"
+        help = "Species name passed to transcript_query."
+        metavar = "name"
+        arg_type = String
+
+        "--specieslist"
+        help = "Species list passed to ThorAxe."
+        metavar = "path-or-list"
+        arg_type = String
+
+        "--thoraxe-input-dir"
+        help = "Reuse a complete transcript_query bundle."
+        metavar = "path"
+        arg_type = String
+
+        "--transcript-query-timeout-seconds"
+        help = "Stop transcript_query after n seconds."
+        metavar = "n"
+        arg_type = String
+
+        "--transcript-query-timeout-max-seconds"
+        help = "Maximum timeout after retry backoff."
+        metavar = "n"
+        arg_type = String
+
+        "--transcript-query-retries"
+        help = "Number of transcript_query attempts."
+        metavar = "n"
+        arg_type = Int
+
+        "--no-specieslist-timeout-fallback"
+        help = "Keep specieslist after transcript_query timeout."
+        dest_name = "allow_specieslist_timeout_fallback"
+        action = :store_false
+
+        "--thoraxe-timeout-seconds"
+        help = "Stop each thoraxe run after n seconds."
+        metavar = "n"
+        arg_type = String
+
+        "--threads"
+        help = "Threads for MMseqs2."
+        metavar = "n"
+        arg_type = Int
+    end
+    return settings
+end
+
+function postprocess_app_args(parsed::Dict{Symbol, Any})
     kwargs = Dict{Symbol, Any}()
-    positional = String[]
-    i = 1
-    while i <= length(args)
-        arg = args[i]
-        if arg == "--help" || arg == "-h"
-            kwargs[:help] = true
-            i += 1
-        elseif arg == "--overwrite"
-            kwargs[:overwrite] = true
-            i += 1
-        elseif arg == "--no-specieslist-timeout-fallback"
-            kwargs[:allow_specieslist_timeout_fallback] = false
-            i += 1
-        elseif startswith(arg, "--")
-            key = Symbol(replace(arg[3:end], '-' => '_'))
-            i += 1
-            i <= length(args) || error("Missing value for $(arg).")
-            value = args[i]
-            if key === :pid_thresholds
-                kwargs[key] = parse_pid_thresholds(value)
-            elseif key === :threads || key === :transcript_query_retries
-                kwargs[key] = parse(Int, value)
-            elseif key === :transcript_query_timeout_seconds ||
-                   key === :transcript_query_timeout_max_seconds ||
-                   key === :thoraxe_timeout_seconds
-                kwargs[key] = parse_timeout_value(value)
-            else
-                kwargs[key] = value
-            end
-            i += 1
+    for (key, value) in parsed
+        value === nothing && continue
+        if key === :pid_thresholds
+            kwargs[key] = parse_pid_thresholds(value)
+        elseif key in APP_TIMEOUT_KEYS
+            kwargs[key] = parse_timeout_value(value)
         else
-            push!(positional, arg)
-            i += 1
+            kwargs[key] = value
         end
     end
-    if get(kwargs, :help, false)
-        return kwargs
-    end
-    length(positional) <= 1 || error("Pass only one positional input ID.")
-    !isempty(positional) && (kwargs[:id] = first(positional))
-    haskey(kwargs, :mmseqs_db) || error("--mmseqs-db is required.")
     return kwargs
 end
 
+function parse_app_args(args::Vector{String};
+        exc_handler::Function = throw_parse_error,
+        exit_after_help::Bool = false)
+    parsed = parse_args(args, app_arg_settings(; exc_handler, exit_after_help);
+        as_symbols = true)
+    parsed === nothing && return Dict{Symbol, Any}(:help => true)
+    return postprocess_app_args(parsed)
+end
+
 function run_app(args::Vector{String} = ARGS)
-    kwargs = parse_app_args(args)
+    kwargs = parse_app_args(args; exc_handler = ArgParse.default_handler)
     if get(kwargs, :help, false)
-        print(app_help())
         return nothing
     end
     result = iduna(; kwargs...)

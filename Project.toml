@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["Diego Javier Zea <diegozea@gmail.com> and contributors"]
 
 [deps]
+ArgParse = "c7e460c6-2fb9-53a9-8c5b-16f535851c63"
 BioAlignments = "00701ae9-d1dc-5365-b64a-a3a3ebf5695e"
 BioSequences = "7e6ae17a-c86d-528c-b3b9-7f778a29fe59"
 CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
@@ -23,6 +24,7 @@ ThorAxe = "cf6a4a95-c6c1-4b3e-818d-24edc886ccb5"
 ThorAxe = {url = "https://github.com/diegozea/ThorAxe.jl"}
 
 [compat]
+ArgParse = "1.2"
 BioAlignments = "3"
 BioSequences = "3"
 CSV = "0.10"
