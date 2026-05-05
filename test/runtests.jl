@@ -4,13 +4,13 @@ using TestItemRunner
 
 @testset "Iduna.jl" begin
     include("aqua.jl")
-    include("App/runtests.jl")
-    include("API/runtests.jl")
-    include("Utils/runtests.jl")
-    include("IDMapping/runtests.jl")
-    include("ThorAxeMSA/runtests.jl")
-    include("MSAExpansion/runtests.jl")
-    include("ResultsValidation/runtests.jl")
+    include("App/app.jl")
+    include("API/api.jl")
+    include("Utils/utils.jl")
+    include("IDMapping/id_mapping.jl")
+    include("ThorAxeMSA/thoraxe_msa.jl")
+    include("MSAExpansion/msa_expansion.jl")
+    include("ResultsValidation/results_validation.jl")
 end
 
 @run_package_tests
