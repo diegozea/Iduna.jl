@@ -48,6 +48,24 @@
     @test transcript === nothing
     @test supplied_uniprot == "P20963"
 
+    primary, transcript,
+    supplied_uniprot = Iduna._normalize_primary_input(;
+        id = nothing,
+        uniprot_id = nothing,
+        ensembl_transcript_id = nothing,
+        transcript_id = "ENST00000362089.10"
+    )
+    @test primary == "ENST00000362089.10"
+    @test transcript === nothing
+    @test supplied_uniprot === nothing
+
+    @test_throws ErrorException Iduna._normalize_primary_input(;
+        id = nothing,
+        uniprot_id = nothing,
+        ensembl_transcript_id = nothing,
+        transcript_id = nothing
+    )
+
     @test_throws ErrorException Iduna._normalize_primary_input(;
         id = "P20963",
         uniprot_id = "Q9UKL0",

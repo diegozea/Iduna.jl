@@ -39,6 +39,35 @@
         write(uniprot, ">P20963\nAAC\n")
         @test_throws ErrorException Iduna.ThorAxeMSA._validate_transcript_translation(
             target, msa)
+
+        missing_uniprot = Iduna.ResolvedTarget(;
+            input_id = "P20963",
+            input_kind = :uniprot,
+            uniprot_id = "P20963",
+            ensembl_gene_id = "ENSG00000000001.1",
+            transcript_id = "ENST00000000001.1",
+            uniprot_sequence_path = joinpath(tmp, "missing.fasta"))
+        missing_warnings = Iduna.ThorAxeMSA._validate_transcript_translation(
+            missing_uniprot, msa)
+        @test length(missing_warnings) == 1
+        @test occursin("UniProt sequence file is missing", only(missing_warnings))
+
+        no_uniprot = Iduna.ResolvedTarget(;
+            input_id = "ENST00000000001.1",
+            input_kind = :ensembl_transcript,
+            ensembl_gene_id = "ENSG00000000001.1",
+            transcript_id = "ENST00000000001.1")
+        @test isempty(Iduna.ThorAxeMSA._validate_transcript_translation(no_uniprot, msa))
+
+        missing_reference = Iduna.ResolvedTarget(;
+            input_id = "P20963",
+            input_kind = :uniprot,
+            uniprot_id = "P20963",
+            ensembl_gene_id = "ENSG_MISSING",
+            transcript_id = "ENST_MISSING",
+            uniprot_sequence_path = uniprot)
+        @test_throws ErrorException Iduna.ThorAxeMSA._validate_transcript_translation(
+            missing_reference, msa)
     end
 
     mktempdir() do tmp
@@ -64,6 +93,16 @@
             timeout_seconds = 10)
         @test read(stdout_log, String) == "ok\n"
         @test isempty(read(stderr_log, String))
+
+        no_timeout_stdout = joinpath(tmp, "no_timeout_stdout.log")
+        no_timeout_stderr = joinpath(tmp, "no_timeout_stderr.log")
+        Iduna.ThorAxeMSA._run_logged_command(
+            `sh -c "printf no-timeout"`,
+            no_timeout_stdout,
+            no_timeout_stderr;
+            timeout_seconds = nothing)
+        @test read(no_timeout_stdout, String) == "no-timeout"
+        @test isempty(read(no_timeout_stderr, String))
 
         @test_throws Iduna.ThorAxeMSA._CommandTimeoutError Iduna.ThorAxeMSA._run_logged_command(
             `$(Base.julia_cmd()) --startup-file=no -e "sleep(2)"`,
@@ -91,6 +130,10 @@
         @test copied == joinpath(workdir, "thoraxe_input")
         @test isfile(joinpath(copied, "Ensembl", "sequences.fasta"))
         @test isdir(source)
+        reused = Iduna.ThorAxeMSA._ensure_transcript_query(target, workdir;
+            cached_input_dir = source,
+            overwrite = false)
+        @test reused == copied
 
         @test_throws ErrorException Iduna.ThorAxeMSA._ensure_transcript_query(
             target, joinpath(tmp, "bad_work");
@@ -99,6 +142,9 @@
     end
 
     @testset "orthology specieslist filter helpers" begin
+        @test Iduna.ThorAxeMSA._normalize_species_name(nothing) === nothing
+        @test Iduna.ThorAxeMSA._prepend_query_species(["mus_musculus"], nothing) ==
+              ["mus_musculus"]
         @test Iduna.ThorAxeMSA._orthology_relationships("1:1") ==
               ["ortholog_one2one"]
         @test Iduna.ThorAxeMSA._orthology_relationships("1:n") ==
@@ -163,6 +209,9 @@
 
         @test_throws ErrorException Iduna.ThorAxeMSA._resolve_effective_specieslist(
             target, "Canis lupus", "1:1"; homology_species_fetcher = fetcher)
+        @test_throws ErrorException Iduna.ThorAxeMSA._resolve_effective_specieslist(
+            target, nothing, "1:1";
+            homology_species_fetcher = (target, orthology) -> String[])
 
         fallback = Iduna.ThorAxeMSA._resolve_effective_specieslist(
             target, "Canis lupus", "1:1";

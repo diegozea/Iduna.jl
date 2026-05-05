@@ -11,9 +11,15 @@
         fragmented = joinpath(tmp, "fragmented.sto")
         write(fragmented, """
         # STOCKHOLM 1.0
+        # source comment
+        #=GF ID family1
+        #=GF DE first description
+        #=GS seq1 AC accession1
         seq1 AC
         #=GR seq1 PP 99
         #=GC RF xx
+        #=GF
+        #=GS seq1
         seq1 DE
         #=GR seq1 PP **
         #=GC RF yy
@@ -21,6 +27,10 @@
         """)
         Iduna.MSAExpansion.normalize_stockholm_annotations!(fragmented)
         normalized = read(fragmented, String)
+        @test occursin("# source comment", normalized)
+        @test occursin("#=GF ID family1", normalized)
+        @test occursin("#=GF DE first description", normalized)
+        @test occursin("#=GS seq1 AC accession1", normalized)
         @test occursin("seq1\tACDE", normalized)
         @test occursin("#=GC RF xxyy", normalized)
         @test occursin("#=GR seq1 PP 99**", normalized)
@@ -30,6 +40,18 @@
         all_hits, filtered_hits = Iduna.MSAExpansion._collect_hits(hits_tsv, Set(["seed"]))
         @test all_hits == [("seed", "ACD"), ("hit", "ACDF")]
         @test filtered_hits == [("hit", "ACDF")]
+
+        empty_hits = joinpath(tmp, "empty_hits.fasta")
+        touch(empty_hits)
+        @test Iduna.MSAExpansion._cached_hit_counts(empty_hits, Set(["seed"])) ==
+              (n_hits = 0, n_new_hits = 0)
+
+        reorder_sto = joinpath(tmp, "reorder.sto")
+        write(reorder_sto, "# STOCKHOLM 1.0\nb AC\na AC\nc AC\n//\n")
+        reordered = Iduna.MSAExpansion._reorder_alignment(
+            Iduna.MSAExpansion.read_file(reorder_sto, Iduna.MSAExpansion.Stockholm),
+            ["a", "missing"])
+        @test String.(Iduna.MSAExpansion.sequencenames(reordered)) == ["a", "b", "c"]
 
         gene_id = "ENSG00000198821"
         transcript_id = "ENST00000362089.10"

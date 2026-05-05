@@ -62,9 +62,10 @@ function _http_get(url::AbstractString, headers = _JSON_HEADERS; retries::Int = 
     return nothing
 end
 
-function fetch_uniprot_entry(uniprot_id::AbstractString)::_UniProtEntry
+function fetch_uniprot_entry(uniprot_id::AbstractString;
+        _http_get_fn::Function = _http_get)::_UniProtEntry
     url = "$(_UNIPROT_BASE)/uniprotkb/$(strip(String(uniprot_id))).json"
-    resp = _http_get(url)
+    resp = _http_get_fn(url)
     resp === nothing && error("Could not fetch UniProt metadata for $(uniprot_id).")
     data = JSON3.read(decode_body(resp))
     gene_ids, transcripts, transcript_to_protein,
@@ -140,17 +141,19 @@ function _parse_xrefs(data)
     transcript_to_isoform
 end
 
-function _fetch_ensembl_protein_sequence(protein_id::AbstractString)::Union{Nothing, String}
+function _fetch_ensembl_protein_sequence(protein_id::AbstractString;
+        _http_get_fn::Function = _http_get)::Union{Nothing, String}
     core = strip_ensembl_version(protein_id)
     url = "$(_ENSEMBL_REST_BASE)/sequence/id/$(core)?type=protein"
-    resp = _http_get(url, _FASTA_HEADERS)
+    resp = _http_get_fn(url, _FASTA_HEADERS)
     resp === nothing && return nothing
     return fasta_sequence(decode_body(resp))
 end
 
-function _fetch_uniprot_fasta_sequence(uniprot_id::AbstractString)::String
+function _fetch_uniprot_fasta_sequence(uniprot_id::AbstractString;
+        _http_get_fn::Function = _http_get)::String
     url = "$(_UNIPROT_BASE)/uniprotkb/$(strip(String(uniprot_id))).fasta"
-    resp = _http_get(url, _FASTA_HEADERS; retries = 5, sleep_seconds = 2.0)
+    resp = _http_get_fn(url, _FASTA_HEADERS; retries = 5, sleep_seconds = 2.0)
     resp === nothing && error("Could not fetch UniProt FASTA for $(uniprot_id).")
     seq = fasta_sequence(decode_body(resp))
     seq === nothing && error("UniProt FASTA for $(uniprot_id) did not contain a sequence.")
@@ -161,9 +164,11 @@ function sequences_match(uniprot_seq::AbstractString, ensembl_seq::AbstractStrin
     protein_alignment_stats(ensembl_seq, uniprot_seq).identical
 end
 
-function _validate_candidates(entry::_UniProtEntry, sequence_dir::AbstractString)
+function _validate_candidates(entry::_UniProtEntry, sequence_dir::AbstractString;
+        _uniprot_fasta_fetcher::Function = _fetch_uniprot_fasta_sequence,
+        _ensembl_protein_fetcher::Function = _fetch_ensembl_protein_sequence)
     uniprot_seq = entry.protein_sequence === nothing ?
-                  _fetch_uniprot_fasta_sequence(entry.id) : entry.protein_sequence
+                  _uniprot_fasta_fetcher(entry.id) : entry.protein_sequence
     uniprot_path = joinpath(sequence_dir, "uniprot", "$(entry.id).fasta")
     write_text(uniprot_path, format_fasta(entry.id, uniprot_seq))
 
@@ -171,7 +176,7 @@ function _validate_candidates(entry::_UniProtEntry, sequence_dir::AbstractString
     for transcript in entry.transcript_ids
         protein_id = get(entry.transcript_to_protein, transcript, nothing)
         protein_id === nothing && continue
-        protein_seq = _fetch_ensembl_protein_sequence(protein_id)
+        protein_seq = _ensembl_protein_fetcher(protein_id)
         protein_seq === nothing && continue
         protein_path = joinpath(sequence_dir, "ensembl_proteins", "$(protein_id).fasta")
         write_text(protein_path, format_fasta(protein_id, protein_seq))
@@ -247,13 +252,15 @@ function resolve_target(input_id::AbstractString;
         ensembl_protein_id::Union{Nothing, AbstractString} = nothing,
         transcript_id::Union{Nothing, AbstractString} = nothing,
         species::Union{Nothing, AbstractString} = nothing,
-        _transcript_metadata_resolver::Function = _resolve_transcript_metadata)
+        _transcript_metadata_resolver::Function = _resolve_transcript_metadata,
+        _uniprot_entry_fetcher::Function = fetch_uniprot_entry,
+        _candidate_validator::Function = _validate_candidates)
     kind = id_kind(input_id)
     sequence_dir = joinpath(workdir, "sequences")
 
     if kind === :uniprot
-        entry = fetch_uniprot_entry(input_id)
-        candidates, uniprot_path = _validate_candidates(entry, sequence_dir)
+        entry = _uniprot_entry_fetcher(input_id)
+        candidates, uniprot_path = _candidate_validator(entry, sequence_dir)
         chosen, warnings = _choose_candidate(candidates, transcript_id)
         gene = ensembl_gene_id === nothing ? chosen.ensembl_gene_id :
                String(ensembl_gene_id)
