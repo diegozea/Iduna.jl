@@ -89,7 +89,7 @@
         cd_stderr = joinpath(tmp, "logs", "pwd_stderr.log")
         Iduna.Utils.run_logged(`pwd`; stdout_path = cd_stdout, stderr_path = cd_stderr,
             workdir)
-        @test chomp(read(cd_stdout, String)) == workdir
+        @test realpath(chomp(read(cd_stdout, String))) == realpath(workdir)
         @test isempty(read(cd_stderr, String))
     end
 end
