@@ -6,3 +6,27 @@
 [![Coverage](https://codecov.io/gh/diegozea/Iduna.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/diegozea/Iduna.jl)
 [![Coverage](https://coveralls.io/repos/github/diegozea/Iduna.jl/badge.svg?branch=main)](https://coveralls.io/github/diegozea/Iduna.jl?branch=main)
 [![Aqua](https://raw.githubusercontent.com/JuliaTesting/Aqua.jl/master/badge.svg)](https://github.com/JuliaTesting/Aqua.jl)
+
+Iduna builds a ThorAxe MSA for one UniProt accession or Ensembl transcript ID
+and expands the selected seed MSA with MMseqs2/HMMER. For transcript inputs,
+Iduna resolves the parent Ensembl gene and species before calling ThorAxe.
+
+```julia
+using Iduna
+
+result = iduna("P20963"; mmseqs_db="/path/to/mmseqs/db", workdir="P20963")
+expanded = load_expanded_msa(result)
+```
+
+The package writes a stable work directory containing ThorAxe outputs, PID seed
+MSAs, expansion outputs, logs, and validation stats. It does not implement DCA,
+ZMIp, plots, or batch recovery tables.
+
+`transcript_query_timeout_seconds` bounds each Ensembl download attempt and
+Iduna can retry without the species list after a timeout. Set
+`thoraxe_timeout_seconds` when individual ThorAxe runs should also have a
+wall-clock limit.
+
+If a complete ThorAxe `transcript_query` bundle is already available, pass it as
+`thoraxe_input_dir`; Iduna copies it into the work directory and still runs the
+ThorAxe MSA and MMseqs/HMMER expansion stages normally.

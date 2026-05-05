@@ -1,7 +1,42 @@
 name = "Iduna"
 uuid = "a1090517-0d21-41a4-b698-8a258aa9b9e4"
-authors = ["Diego Javier Zea <diegozea@gmail.com> and contributors"]
 version = "0.1.0"
+authors = ["Diego Javier Zea <diegozea@gmail.com> and contributors"]
+
+[deps]
+BioAlignments = "00701ae9-d1dc-5365-b64a-a3a3ebf5695e"
+BioSequences = "7e6ae17a-c86d-528c-b3b9-7f778a29fe59"
+CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
+CodecZlib = "944b1d66-785c-5afd-91f1-9de20f533193"
+DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+HHsuite_jll = "fcf42798-af55-56d4-b791-3d7c12f793a1"
+HMMER_jll = "9a00dd6d-eebd-547e-8f34-c9aea159fd8a"
+HTTP = "cd3eb016-35fb-5094-929b-558a96fad6f3"
+JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
+MIToS = "51bafb47-8a16-5ded-8b04-24ef4eede0b5"
+MMseqs2_jll = "2f0138a6-2765-53ae-bca2-2fe9d5077335"
+Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
+ThorAxe = "cf6a4a95-c6c1-4b3e-818d-24edc886ccb5"
+
+[sources]
+ThorAxe = {url = "https://github.com/diegozea/ThorAxe.jl"}
 
 [compat]
-julia = "1.10.10"
+BioAlignments = "3"
+BioSequences = "3"
+CSV = "0.10"
+CodecZlib = "0.7"
+DataFrames = "1"
+HHsuite_jll = "3"
+HMMER_jll = "3"
+HTTP = "1"
+JSON3 = "1"
+MIToS = "3.7"
+MMseqs2_jll = "15"
+Printf = "1"
+Statistics = "1"
+ThorAxe = "0.9"
+julia = "1.12"
+
+[apps.iduna]
