@@ -215,9 +215,10 @@ function _collect_hits(hits_tsv::AbstractString, seed_set::Set{String})
         for line in eachline(io)
             parts = split(line, '\t')
             length(parts) < 3 && continue
-            target_name = _normalize_id(strip(parts[2]))
+            target_field = strip(parts[2])
+            isempty(target_field) && continue
+            target_name = _normalize_id(target_field)
             seq = uppercase(replace(strip(parts[3]), '-' => ""))
-            isempty(target_name) && continue
             occursin(r"[A-Za-z]", seq) || continue
             if !(target_name in seen_all)
                 push!(all_hits, (target_name, seq))
@@ -259,6 +260,8 @@ function expand_msa(target::ResolvedTarget,
         match_ratio::Union{Nothing, Real} = nothing,
         hmmbuild_symfrac::Real = 0.0,
         threads::Union{Nothing, Integer} = Threads.nthreads())
+    0.0 <= hmmbuild_symfrac <= 1.0 ||
+        error("hmmbuild_symfrac must be between 0.0 and 1.0.")
     ensure_mmseqs_db(mmseqs_db)
 
     run_dir = joinpath(_expansion_root(workdir), target.ensembl_gene_id, target.transcript_id)
@@ -323,8 +326,6 @@ function expand_msa(target::ResolvedTarget,
 
         hmm_path = joinpath(seed_dir, "seed.hmm")
         annotated_seed = joinpath(seed_dir, "seed_annotated.sto")
-        0.0 <= hmmbuild_symfrac <= 1.0 ||
-            error("hmmbuild_symfrac must be between 0.0 and 1.0.")
         _run_labeled(
             `$(HMMER_jll.hmmbuild()) --symfrac $(Float64(hmmbuild_symfrac)) -O $annotated_seed $hmm_path $sanitized_seed`,
             "hmmbuild", logs_dir)

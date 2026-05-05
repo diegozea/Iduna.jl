@@ -8,6 +8,18 @@
         @test startswith(text, "# STOCKHOLM 1.0")
         @test endswith(chomp(text), "//")
 
+        complete = joinpath(tmp, "complete.sto")
+        complete_out = joinpath(tmp, "complete_out.sto")
+        write(complete, "# STOCKHOLM 1.0\nseq1 AC\n//\n")
+        Iduna.MSAExpansion.prepare_stockholm_for_mmseqs(complete, complete_out)
+        complete_text = read(complete_out, String)
+        @test complete_text == "# STOCKHOLM 1.0\nseq1 AC\n//\n"
+
+        empty_sto = joinpath(tmp, "empty.sto")
+        touch(empty_sto)
+        @test Iduna.MSAExpansion.normalize_stockholm_annotations!(empty_sto) == empty_sto
+        @test isempty(read(empty_sto, String))
+
         fragmented = joinpath(tmp, "fragmented.sto")
         write(fragmented, """
         # STOCKHOLM 1.0
@@ -40,6 +52,28 @@
         all_hits, filtered_hits = Iduna.MSAExpansion._collect_hits(hits_tsv, Set(["seed"]))
         @test all_hits == [("seed", "ACD"), ("hit", "ACDF")]
         @test filtered_hits == [("hit", "ACDF")]
+
+        noisy_hits_tsv = joinpath(tmp, "noisy_hits.tsv")
+        write(noisy_hits_tsv, """
+        too-short
+        query\t\tACDE
+        query\thit one\t---
+        query\thit one\tACD-
+        query\thit one\tACDE
+        query\tseed one\tACDF
+        query\tnew_hit\tacdg
+        """)
+        noisy_all_hits,
+        noisy_filtered_hits = Iduna.MSAExpansion._collect_hits(noisy_hits_tsv, Set(["seed"]))
+        @test noisy_all_hits ==
+              [("hit", "ACD"), ("seed", "ACDF"), ("new_hit", "ACDG")]
+        @test noisy_filtered_hits == [("hit", "ACD"), ("new_hit", "ACDG")]
+
+        logs_dir = joinpath(tmp, "run_logs")
+        @test Iduna.MSAExpansion._run_labeled(
+            `sh -c "printf msa-out; printf msa-err >&2"`, "mock", logs_dir) === nothing
+        @test read(joinpath(logs_dir, "mock_stdout.log"), String) == "msa-out"
+        @test read(joinpath(logs_dir, "mock_stderr.log"), String) == "msa-err"
 
         empty_hits = joinpath(tmp, "empty_hits.fasta")
         touch(empty_hits)
@@ -75,6 +109,11 @@
         touch("$(db).dbtype")
         touch("$(db)_aln.dbtype")
         touch("$(db)_seq.dbtype")
+
+        @test_throws ErrorException Iduna.MSAExpansion.expand_msa(
+            target, seed, joinpath(tmp, "invalid_symfrac"); mmseqs_db = db,
+            hmmbuild_symfrac = 1.1)
+        @test !isdir(joinpath(tmp, "invalid_symfrac", "expansion"))
 
         cached_dir = joinpath(tmp, "expansion", gene_id, transcript_id, "expanded_msa")
         mkpath(cached_dir)
