@@ -313,8 +313,7 @@ function expand_msa(target::ResolvedTarget,
     seed_names = String.(sequencenames(seed_alignment))
     seed_set = Set(_normalize_id.(seed_names))
 
-    tmp_dir = mktempdir(tmp_root; prefix = "mmseqs_tmp_")
-    try
+    mktempdir(tmp_root; prefix = "mmseqs_tmp_") do tmp_dir
         # MMseqs finds candidate homologs; HMMER maps them back to seed columns.
         db_paths = _mmseqs_search(sanitized_seed, mmseqs_db, db_dir, tmp_dir, logs_dir;
             match_mode, match_ratio, threads)
@@ -386,9 +385,6 @@ function expand_msa(target::ResolvedTarget,
             n_new_hits = length(filtered_hits),
             status = :ok
         )
-    finally
-        # The MMseqs temporary database can be large and is never an output.
-        isdir(tmp_dir) && rm(tmp_dir; recursive = true, force = true)
     end
 end
 

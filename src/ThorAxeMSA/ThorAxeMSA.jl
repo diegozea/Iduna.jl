@@ -533,8 +533,6 @@ function _ensure_transcript_query(target::ResolvedTarget, workdir::AbstractStrin
 
     isdir(input_dir) && safe_rm(input_dir, workdir)
     gene_core = strip_ensembl_version(target.ensembl_gene_id)
-    tmp_gene_dir = joinpath(workdir, gene_core)
-    isdir(tmp_gene_dir) && safe_rm(tmp_gene_dir, workdir)
 
     logs = _thoraxe_logs_dir(workdir)
     stdout_log = joinpath(logs, "transcript_query_stdout.log")
@@ -545,45 +543,49 @@ function _ensure_transcript_query(target::ResolvedTarget, workdir::AbstractStrin
     active_specieslist = _normalized_specieslist(specieslist)
     current_timeout = timeout_seconds
     # Retry transcript_query because BioMart downloads often fail transiently.
-    for attempt in 1:attempts
-        isdir(tmp_gene_dir) && safe_rm(tmp_gene_dir, workdir)
-        try
-            _run_transcript_query_once(gene_core, workdir, species, active_specieslist,
-                stdout_log, stderr_log; timeout_seconds = current_timeout, orthology)
-            if _has_valid_ensembl_bundle(tmp_gene_dir)
-                break
-            elseif attempt < attempts
-                @warn "transcript_query produced an invalid bundle; retrying." gene=gene_core attempt
-                active_specieslist = nothing
-                sleep(_retry_wait_seconds(attempt))
-                continue
-            end
-        catch err
-            if err isa _CommandTimeoutError && _has_valid_ensembl_bundle(tmp_gene_dir)
-                @warn "transcript_query timed out but produced a usable Ensembl bundle." gene=gene_core attempt
-                break
-            end
-            if err isa _CommandTimeoutError && attempt < attempts
-                if active_specieslist !== nothing && allow_specieslist_timeout_fallback
-                    # A large species list can be the slow part, so retry once without it.
-                    @warn "transcript_query timed out with a species list; retrying without it." gene=gene_core attempt
+    return mktempdir(workdir; prefix = "transcript_query_") do query_workdir
+        tmp_gene_dir = joinpath(query_workdir, gene_core)
+        for attempt in 1:attempts
+            isdir(tmp_gene_dir) && rm(tmp_gene_dir; recursive = true, force = true)
+            try
+                _run_transcript_query_once(
+                    gene_core, query_workdir, species, active_specieslist,
+                    stdout_log, stderr_log; timeout_seconds = current_timeout, orthology)
+                if _has_valid_ensembl_bundle(tmp_gene_dir)
+                    break
+                elseif attempt < attempts
+                    @warn "transcript_query produced an invalid bundle; retrying." gene=gene_core attempt
                     active_specieslist = nothing
-                    current_timeout = timeout_max_seconds === nothing ?
-                                      timeout_seconds : timeout_max_seconds
-                else
-                    current_timeout = _next_timeout(current_timeout, timeout_max_seconds)
+                    sleep(_retry_wait_seconds(attempt))
+                    continue
                 end
-                sleep(_retry_wait_seconds(attempt))
-                continue
+            catch err
+                if err isa _CommandTimeoutError && _has_valid_ensembl_bundle(tmp_gene_dir)
+                    @warn "transcript_query timed out but produced a usable Ensembl bundle." gene=gene_core attempt
+                    break
+                end
+                if err isa _CommandTimeoutError && attempt < attempts
+                    if active_specieslist !== nothing && allow_specieslist_timeout_fallback
+                        # A large species list can be the slow part, so retry once without it.
+                        @warn "transcript_query timed out with a species list; retrying without it." gene=gene_core attempt
+                        active_specieslist = nothing
+                        current_timeout = timeout_max_seconds === nothing ?
+                                          timeout_seconds : timeout_max_seconds
+                    else
+                        current_timeout = _next_timeout(current_timeout, timeout_max_seconds)
+                    end
+                    sleep(_retry_wait_seconds(attempt))
+                    continue
+                end
+                rethrow(err)
             end
-            rethrow(err)
         end
-    end
 
-    _has_valid_ensembl_bundle(tmp_gene_dir) ||
-        error("transcript_query did not create a valid Ensembl bundle at $(tmp_gene_dir). See $(stderr_log).")
-    mv(tmp_gene_dir, input_dir; force = true)
-    return input_dir
+        _has_valid_ensembl_bundle(tmp_gene_dir) ||
+            error("transcript_query did not create a valid Ensembl bundle at $(tmp_gene_dir). See $(stderr_log).")
+        mv(tmp_gene_dir, input_dir; force = true)
+        return input_dir
+    end
 end
 
 function _species_from_biomart_errors_file(errors_path::AbstractString)
