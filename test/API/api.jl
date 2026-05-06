@@ -129,4 +129,70 @@
     @test summary.status == "warn"
     @test summary.thoraxe_msa.status == "warn"
     @test summary.thoraxe_msa.warnings == thoraxe.warnings
+
+    @testset "failure result artifacts" begin
+        _read_result(path) = Iduna.JSON3.read(read(joinpath(path, "result.json"), String))
+
+        mktempdir() do tmp
+            workdir = joinpath(tmp, "target_failure")
+            target_failure = (args...; kwargs...) -> error("target boom")
+            @test_throws ErrorException Iduna.iduna(;
+                id = "P20963",
+                mmseqs_db = "db",
+                workdir,
+                _resolve_target = target_failure)
+
+            failed = _read_result(workdir)
+            @test failed.status == "error"
+            @test failed.failed_stage == "resolve_target"
+            @test failed.target === nothing
+            @test failed.exception.type == "ErrorException"
+            @test failed.exception.message == "target boom"
+            @test !isfile(joinpath(workdir, "target.json"))
+        end
+
+        mktempdir() do tmp
+            workdir = joinpath(tmp, "thoraxe_failure")
+            thoraxe_failure = (args...; kwargs...) -> error("thoraxe boom")
+            @test_throws ErrorException Iduna.iduna(;
+                id = "P20963",
+                mmseqs_db = "db",
+                workdir,
+                _resolve_target = (args...; kwargs...) -> target,
+                _build_thoraxe_msa = thoraxe_failure)
+
+            failed = _read_result(workdir)
+            @test failed.status == "error"
+            @test failed.failed_stage == "thoraxe_msa"
+            @test failed.target.uniprot_id == "Q13148"
+            @test failed.warnings == String[]
+            @test failed.exception.type == "ErrorException"
+            @test failed.exception.message == "thoraxe boom"
+            @test isfile(joinpath(workdir, "target.json"))
+        end
+
+        mktempdir() do tmp
+            workdir = joinpath(tmp, "timeout_failure")
+            stdout_log = joinpath(workdir, "logs", "thoraxe", "stdout.log")
+            stderr_log = joinpath(workdir, "logs", "thoraxe", "stderr.log")
+            timeout_failure = (args...; kwargs...) -> throw(
+                Iduna.ThorAxeMSA._CommandTimeoutError(
+                    "thoraxe --example", 12.0, stdout_log, stderr_log))
+            @test_throws Iduna.ThorAxeMSA._CommandTimeoutError Iduna.iduna(;
+                id = "P20963",
+                mmseqs_db = "db",
+                workdir,
+                _resolve_target = (args...; kwargs...) -> target,
+                _build_thoraxe_msa = timeout_failure)
+
+            failed = _read_result(workdir)
+            @test failed.status == "error"
+            @test failed.failed_stage == "thoraxe_msa"
+            @test failed.exception.type == "Iduna.ThorAxeMSA._CommandTimeoutError"
+            @test failed.exception.command == "thoraxe --example"
+            @test failed.exception.stdout_log == stdout_log
+            @test failed.exception.stderr_log == stderr_log
+            @test occursin("timed out after 12.0 seconds", failed.exception.message)
+        end
+    end
 end

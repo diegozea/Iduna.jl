@@ -46,64 +46,136 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
         match_mode::Integer = 1,
         match_ratio::Union{Nothing, Real} = nothing,
         hmmbuild_symfrac::Real = 0.0,
-        threads::Union{Nothing, Integer} = Threads.nthreads())
+        threads::Union{Nothing, Integer} = Threads.nthreads(),
+        _resolve_target::Function = IDMapping.resolve_target,
+        _build_thoraxe_msa::Function = ThorAxeMSA.build_thoraxe_msa,
+        _expand_msa::Function = MSAExpansion.expand_msa,
+        _validate_results::Function = ResultsValidation.validate_results)
     primary, disambiguating_transcript,
     supplied_uniprot = _normalize_primary_input(;
         id, uniprot_id, ensembl_transcript_id, transcript_id)
-    root = Utils.prepare_output_dir(primary; workdir, output_dir, overwrite)
+    root = nothing
+    target = nothing
+    thoraxe = nothing
+    validation = nothing
+    failed_stage = "prepare_output_dir"
 
-    target = IDMapping.resolve_target(primary;
-        workdir = root,
-        uniprot_id = supplied_uniprot,
-        ensembl_gene_id,
-        ensembl_protein_id,
-        transcript_id = disambiguating_transcript,
-        species)
-    Utils.write_json(joinpath(root, "target.json"), _target_summary(target))
+    try
+        root = Utils.prepare_output_dir(primary; workdir, output_dir, overwrite)
 
-    thoraxe = ThorAxeMSA.build_thoraxe_msa(target, root;
-        pid_thresholds,
-        specieslist,
-        orthology,
-        specieslist_filter,
-        biomart_datasets_filter,
-        cached_thoraxe_input_dir = thoraxe_input_dir,
-        overwrite,
-        transcript_query_timeout_seconds,
-        transcript_query_timeout_max_seconds,
-        transcript_query_retries,
-        allow_specieslist_timeout_fallback,
-        thoraxe_timeout_seconds)
+        failed_stage = "resolve_target"
+        target = _resolve_target(primary;
+            workdir = root,
+            uniprot_id = supplied_uniprot,
+            ensembl_gene_id,
+            ensembl_protein_id,
+            transcript_id = disambiguating_transcript,
+            species)
+        Utils.write_json(joinpath(root, "target.json"), _target_summary(target))
 
-    expansion = MSAExpansion.expand_msa(target, thoraxe.best_seed, root;
-        mmseqs_db,
-        overwrite,
-        match_mode,
-        match_ratio,
-        hmmbuild_symfrac,
-        threads)
+        failed_stage = "thoraxe_msa"
+        thoraxe = _build_thoraxe_msa(target, root;
+            pid_thresholds,
+            specieslist,
+            orthology,
+            specieslist_filter,
+            biomart_datasets_filter,
+            cached_thoraxe_input_dir = thoraxe_input_dir,
+            overwrite,
+            transcript_query_timeout_seconds,
+            transcript_query_timeout_max_seconds,
+            transcript_query_retries,
+            allow_specieslist_timeout_fallback,
+            thoraxe_timeout_seconds)
 
-    validation = ResultsValidation.validate_results(target, thoraxe.best_seed, expansion, root)
-    warnings = vcat(target.warnings, thoraxe.warnings, validation.warnings)
-    status = _pipeline_status(warnings)
-    result = Utils.IdunaResult(;
-        input_id = primary,
-        workdir = root,
-        target,
-        thoraxe_msa = thoraxe,
-        expansion,
-        validation,
-        warnings,
-        status
-    )
-    Utils.write_json(joinpath(root, "result.json"), Utils.result_summary(result))
-    return result
+        failed_stage = "msa_expansion"
+        expansion = _expand_msa(target, thoraxe.best_seed, root;
+            mmseqs_db,
+            overwrite,
+            match_mode,
+            match_ratio,
+            hmmbuild_symfrac,
+            threads)
+
+        failed_stage = "validation"
+        validation = _validate_results(target, thoraxe.best_seed, expansion, root)
+        warnings = vcat(target.warnings, thoraxe.warnings, validation.warnings)
+        status = _pipeline_status(warnings)
+        result = Utils.IdunaResult(;
+            input_id = primary,
+            workdir = root,
+            target,
+            thoraxe_msa = thoraxe,
+            expansion,
+            validation,
+            warnings,
+            status
+        )
+        Utils.write_json(joinpath(root, "result.json"), Utils.result_summary(result))
+        return result
+    catch err
+        if root !== nothing
+            _write_failure_result(primary, root, failed_stage, err; target, thoraxe, validation)
+        end
+        rethrow()
+    end
 end
 
 iduna(id::AbstractString; kwargs...) = iduna(; id, kwargs...)
 
 function _pipeline_status(warnings::AbstractVector{<:AbstractString})
     isempty(warnings) ? :ok : :warn
+end
+
+function _write_failure_result(input_id::AbstractString, workdir::AbstractString,
+        failed_stage::AbstractString, err; target = nothing, thoraxe = nothing,
+        validation = nothing)
+    try
+        Utils.write_json(joinpath(workdir, "result.json"),
+            _failure_result_summary(input_id, workdir, failed_stage, err;
+                target, thoraxe, validation))
+    catch write_err
+        @warn "Could not write failure result artifact." workdir exception=(write_err,
+            catch_backtrace())
+    end
+    return nothing
+end
+
+function _failure_result_summary(input_id::AbstractString, workdir::AbstractString,
+        failed_stage::AbstractString, err; target = nothing, thoraxe = nothing,
+        validation = nothing)
+    return (;
+        input_id = String(input_id),
+        workdir = String(workdir),
+        status = "error",
+        failed_stage = String(failed_stage),
+        warnings = _partial_warnings(target, thoraxe, validation),
+        target = target === nothing ? nothing : _target_summary(target),
+        exception = _exception_summary(err)
+    )
+end
+
+function _partial_warnings(target, thoraxe, validation)
+    warnings = String[]
+    target !== nothing && append!(warnings, target.warnings)
+    thoraxe !== nothing && append!(warnings, thoraxe.warnings)
+    validation !== nothing && append!(warnings, validation.warnings)
+    return warnings
+end
+
+function _exception_summary(err)
+    summary = (;
+        type = string(typeof(err)),
+        message = sprint(showerror, err)
+    )
+    if err isa ThorAxeMSA._CommandTimeoutError
+        return merge(summary, (;
+            command = err.command,
+            stdout_log = err.stdout_log,
+            stderr_log = err.stderr_log
+        ))
+    end
+    return summary
 end
 
 function _normalize_primary_input(; id, uniprot_id, ensembl_transcript_id, transcript_id)

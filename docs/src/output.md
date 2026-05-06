@@ -37,6 +37,14 @@ The output layout is part of the API. `overwrite=true` rebuilds package-owned
 subdirectories, but Iduna does not delete files outside the selected work
 directory.
 
+After the work directory is created, Iduna always attempts to write
+`result.json`. Successful runs keep the returned [`IdunaResult`](@ref) summary
+there. Failed runs still throw the original exception, but leave a
+machine-readable `result.json` with `status: "error"`, `failed_stage`, any
+available partial `target` metadata, accumulated warnings, and exception
+details. Timeout failures from logged ThorAxe commands also include the command
+and stdout/stderr log paths.
+
 When `thoraxe_input_dir` is supplied, that source bundle is treated as read-only
 and copied into `thoraxe_input/`; the copied layout is then preserved like a
 fresh `transcript_query` result.
