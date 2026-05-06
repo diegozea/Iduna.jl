@@ -295,6 +295,7 @@ function result_summary(result::IdunaResult)
             pid_summary = result.thoraxe_msa.pid_summary,
             best_pid = result.thoraxe_msa.best_seed.pid,
             best_seed_stockholm = result.thoraxe_msa.best_seed.stockholm_path,
+            warnings = result.thoraxe_msa.warnings,
             status = String(result.thoraxe_msa.status)
         ),
         expansion = (;

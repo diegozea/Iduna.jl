@@ -351,13 +351,24 @@ TableSet\tptroglodytes_gene_ensembl\tChimpanzee genes (Pan_tro_3.0)\t1
             write(joinpath(ensembl_dir, "errors.csv"),
                 "Species,GeneID\nmus_spretus,ENSMSPG00010016579\n")
             write(joinpath(logs_dir, "transcript_query_stderr.log"),
-                "Download failed for ENSPTRG00000006744 in pan_troglodytes!\n")
+                """
+                transcript_query.py:304: UserWarning: It can not found nomascus_leucogenys in biomart (tried: ['nleucogenys_gene_ensembl', 'nleucogenys_eg_gene']).
+                Last response:
+                Query ERROR: caught BioMart::Exception::Usage: Dataset nleucogenys_eg_gene NOT FOUND
+                  warnings.warn(...)
+                transcript_query.py:728: UserWarning: Download failed for ENSPTRG00000006744 in pan_troglodytes!
+                  warnings.warn(...)
+                transcript_query.py:728: UserWarning: Download failed for ENSMSPG00010016579 in mus_spretus!
+                  warnings.warn(...)
+                """)
             warnings = Iduna.ThorAxeMSA._biomart_transcript_query_warnings(
                 input_dir, logs_dir)
             @test length(warnings) == 1
             @test occursin("mus_spretus", only(warnings))
+            @test occursin("nomascus_leucogenys", only(warnings))
             @test occursin("pan_troglodytes", only(warnings))
             @test occursin("errors.csv", only(warnings))
+            @test occursin("transcript_query_stderr.log", only(warnings))
         end
     end
 

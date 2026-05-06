@@ -966,6 +966,7 @@ function build_thoraxe_msa(target::ResolvedTarget, workdir::AbstractString;
         biomart_filter.warnings,
         _biomart_transcript_query_warnings(input_dir, _thoraxe_logs_dir(workdir)),
         _validate_transcript_translation(target, msa))
+    status = isempty(warnings) ? :ok : :warn
     baseline_fasta, baseline_sto,
     sequence_fasta, species_file = _save_baseline_msa(workdir, msa, species; overwrite)
 
@@ -1007,7 +1008,7 @@ function build_thoraxe_msa(target::ResolvedTarget, workdir::AbstractString;
         best_seed = best,
         logs_dir = _thoraxe_logs_dir(workdir),
         warnings,
-        status = :ok
+        status
     )
 end
 
