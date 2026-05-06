@@ -1,4 +1,4 @@
-# Iduna
+# Iduna 🍎
 
 [![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://diegozea.github.io/Iduna.jl/stable/)
 [![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://diegozea.github.io/Iduna.jl/dev/)
@@ -7,9 +7,10 @@
 [![Coverage](https://coveralls.io/repos/github/diegozea/Iduna.jl/badge.svg?branch=main)](https://coveralls.io/github/diegozea/Iduna.jl?branch=main)
 [![Aqua](https://raw.githubusercontent.com/JuliaTesting/Aqua.jl/master/badge.svg)](https://github.com/JuliaTesting/Aqua.jl)
 
-Iduna builds a ThorAxe MSA for one UniProt accession or Ensembl transcript ID
-and expands the selected seed MSA with MMseqs2/HMMER. For transcript inputs,
-Iduna resolves the parent Ensembl gene and species before calling ThorAxe.
+Iduna _(Intrinsically Disordered Unit Aligner)_ builds a ThorAxe MSA for one UniProt 
+accession or Ensembl transcript ID and expands the selected seed MSA with MMseqs2/HMMER. 
+For transcript inputs, Iduna resolves the parent Ensembl gene and species before 
+calling [ThorAxe](https://github.com/diegozea/ThorAxe.jl).
 
 ```julia
 using Iduna
@@ -19,8 +20,7 @@ expanded = load_expanded_msa(result)
 ```
 
 The package writes a stable work directory containing ThorAxe outputs, PID seed
-MSAs, expansion outputs, logs, and validation stats. It does not implement DCA,
-ZMIp, plots, or batch recovery tables.
+MSAs, expansion outputs, logs, and validation stats.
 
 By default, Iduna filters the ThorAxe species list with Ensembl homology using
 `orthology="1:1"`, then checks BioMart Ensembl Gene dataset availability with
