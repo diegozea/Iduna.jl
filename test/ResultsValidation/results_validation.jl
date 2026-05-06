@@ -64,5 +64,17 @@
         @test occursin("substitutions", only(validation.warnings))
         @test isfile(validation.stats_path)
         @test isfile(validation.query_vs_uniprot_path)
+
+        transcript_target = Iduna.ResolvedTarget(;
+            input_id = "ENST000001",
+            input_kind = :ensembl_transcript,
+            uniprot_id = "P20963",
+            ensembl_gene_id = "seq1",
+            transcript_id = "ENST000001"
+        )
+        transcript_validation = Iduna.ResultsValidation.validate_results(
+            transcript_target, seed, expansion, joinpath(tmp, "transcript"))
+        @test transcript_validation.status === :ok
+        @test isfile(transcript_validation.stats_path)
     end
 end

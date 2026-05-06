@@ -160,7 +160,8 @@ function validate_results(target::ResolvedTarget,
             aln_mismatches = [aln_mismatches],
             aln_insertions = [aln_insertions],
             aln_deletions = [aln_deletions]
-        ))
+        );
+        transform = (_, val) -> something(val, missing))
 
     status = isempty(warnings) ? :ok : :warn
     return ValidationResult(;

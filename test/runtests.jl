@@ -12,6 +12,7 @@ using TestItemRunner
     include("ThorAxeMSA/thoraxe_msa.jl")
     include("MSAExpansion/msa_expansion.jl")
     include("ResultsValidation/results_validation.jl")
+    include("Integration/mapk8_smoke.jl")
 end
 
 @run_package_tests
