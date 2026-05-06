@@ -22,9 +22,6 @@ Scratch = "6c6a2e73-6563-6170-7368-637461726353"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 ThorAxe = "cf6a4a95-c6c1-4b3e-818d-24edc886ccb5"
 
-[sources]
-ThorAxe = {url = "https://github.com/diegozea/ThorAxe.jl"}
-
 [compat]
 ArgParse = "1.2"
 BioAlignments = "3"
