@@ -16,6 +16,61 @@
     gzipped = Iduna.Utils.HTTP.Response(200, gzip_body)
     @test Iduna.Utils.decode_body(gzipped) == "gzipped body"
 
+    @testset "HTTP download retries" begin
+        response(status::Integer, body::AbstractString = "") =
+            Iduna.Utils.HTTP.Response(status, Vector{UInt8}(body))
+
+        attempts = Ref(0)
+        transient_then_success = (url; headers, retry, status_exception) -> begin
+            attempts[] += 1
+            @test url == "https://example.test/data"
+            @test headers == ["Accept" => "text/plain"]
+            @test retry == false
+            @test status_exception == false
+            attempts[] == 1 ? response(503) : response(200, "ok")
+        end
+        resp = Iduna.Utils._http_get_with_retries(
+            "https://example.test/data", ["Accept" => "text/plain"];
+            retries = 3,
+            sleep_seconds = 0,
+            http_get = transient_then_success)
+        @test resp.status == 200
+        @test Iduna.Utils.decode_body(resp) == "ok"
+        @test attempts[] == 2
+
+        attempts[] = 0
+        non_transient = (url; kwargs...) -> begin
+            attempts[] += 1
+            response(404)
+        end
+        @test Iduna.Utils._http_get_with_retries(
+            "https://example.test/missing", [];
+            retries = 3,
+            sleep_seconds = 0,
+            http_get = non_transient).status == 404
+        @test attempts[] == 1
+
+        attempts[] = 0
+        exhausted = (url; kwargs...) -> begin
+            attempts[] += 1
+            response(503)
+        end
+        @test Iduna.Utils._http_get_with_retries(
+            "https://example.test/unavailable", [];
+            retries = 2,
+            sleep_seconds = 0,
+            http_get = exhausted).status == 503
+        @test attempts[] == 2
+
+        attempts[] = 0
+        @test Iduna.Utils._http_get_with_retries(
+            "https://example.test/once", [];
+            retries = 1,
+            sleep_seconds = 0,
+            http_get = exhausted).status == 503
+        @test attempts[] == 1
+    end
+
     identical = Iduna.Utils.protein_alignment_stats("ACDE", "ACDE")
     @test identical.identical
     @test identical.mismatches == 0

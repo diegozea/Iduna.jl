@@ -23,8 +23,12 @@ MSAs, expansion outputs, logs, and validation stats. It does not implement DCA,
 ZMIp, plots, or batch recovery tables.
 
 By default, Iduna filters the ThorAxe species list with Ensembl homology using
-`orthology="1:1"`. Use `orthology="1:n"` or `"m:n"` to keep broader ortholog
-relationships, or set `specieslist_filter=false` to skip this filtering.
+`orthology="1:1"`, then checks BioMart Ensembl Gene dataset availability with
+`biomart_datasets_filter=true`. BioMart dataset names are only used internally;
+ThorAxe still receives species names. Use `orthology="1:n"` or `"m:n"` to keep
+broader ortholog relationships, set `specieslist_filter=false` to skip the
+Ensembl step, or set `biomart_datasets_filter=false` to skip the BioMart
+dataset preflight.
 `transcript_query_timeout_seconds` bounds each Ensembl download attempt and
 Iduna can retry without the species list after a timeout. Set
 `thoraxe_timeout_seconds` when individual ThorAxe runs should also have a

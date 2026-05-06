@@ -38,6 +38,7 @@ end
 
 function alignment_stats(path::AbstractString; cluster_threshold::Real = 62.0, neff_threshold::Real = 80.0)
     msa = load_msa(path; keepinserts = true)
+    # Hobohm clustering gives a compact diversity summary for the alignment.
     clusters = hobohmI(namedmatrix(msa), cluster_threshold)
     return (;
         msa,
@@ -114,6 +115,7 @@ function validate_results(target::ResolvedTarget,
     warnings = String[]
 
     if target.uniprot_sequence_path !== nothing && isfile(target.uniprot_sequence_path)
+        # Compare the final query sequence against UniProt when a reference exists.
         query_name,
         query_seq = _extract_query_sequence(expanded_stats.msa,
             target.ensembl_gene_id, target.transcript_id)

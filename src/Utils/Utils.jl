@@ -40,6 +40,42 @@ export DEFAULT_PID_THRESHOLDS,
 
 const DEFAULT_PID_THRESHOLDS = Float64[10, 20, 30, 60, 80]
 const _PROTEIN_ALIGNMENT_SCORE_MODEL = AffineGapScoreModel(BLOSUM62, gap_open = -10, gap_extend = -1)
+const _TRANSIENT_HTTP_STATUSES = Set([429, 500, 502, 503, 504])
+
+struct _RetryableHTTPStatus <: Exception
+    response::HTTP.Response
+end
+
+# Julia's retry helper retries exceptions, so transient statuses are wrapped.
+_is_transient_http_status(status::Integer)::Bool = status in _TRANSIENT_HTTP_STATUSES
+_is_retryable_http_exception(_state, err)::Bool = err isa _RetryableHTTPStatus
+
+function _http_get_with_retries(url::AbstractString,
+        headers;
+        retries::Integer = 4,
+        sleep_seconds::Real = 1.5,
+        max_delay::Real = 30.0,
+        http_get::Function = HTTP.get)
+    attempts = max(Int(retries), 1)
+    try
+        # Return the final HTTP response so callers decide what status means success.
+        return retry(;
+            delays = Base.ExponentialBackOff(;
+                n = attempts - 1,
+                first_delay = Float64(sleep_seconds),
+                max_delay = Float64(max_delay),
+                factor = 2.0,
+                jitter = 0.0),
+            check = _is_retryable_http_exception) do
+            resp = http_get(url; headers = headers, retry = false, status_exception = false)
+            _is_transient_http_status(resp.status) && throw(_RetryableHTTPStatus(resp))
+            return resp
+        end()
+    catch err
+        err isa _RetryableHTTPStatus && return err.response
+        rethrow()
+    end
+end
 
 strip_ensembl_version(id::AbstractString)::String = String(split(String(id), '.'; limit = 2)[1])
 
@@ -63,6 +99,7 @@ function resolve_sequence_name(msa::AbstractMultipleSequenceAlignment,
         fallback::Bool = false)
     names = String.(sequencenames(msa))
     lookup = Dict{String, String}()
+    # Store both full and version-stripped names for Ensembl IDs.
     for name in names
         for variant in sequence_name_variants(name)
             haskey(lookup, variant) || (lookup[variant] = name)
@@ -145,6 +182,7 @@ function safe_rm(path::AbstractString, root::AbstractString)
     abs_path = abspath(path)
     abs_root = abspath(root)
     rel = relpath(abs_path, abs_root)
+    # Deletions are allowed only inside the active work directory.
     if rel == "." || startswith(rel, "..") || isabspath(rel)
         error("Refusing to remove $(abs_path) because it is outside workdir $(abs_root).")
     end

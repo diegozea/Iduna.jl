@@ -1,9 +1,11 @@
 module ThorAxeMSA
 
 import CSV
+import Dates
 import HHsuite_jll
 import HTTP
 import JSON3
+import Scratch
 import ThorAxe
 
 using DataFrames: DataFrame
@@ -12,8 +14,9 @@ using MIToS.MSA: AbstractMultipleSequenceAlignment, FASTA, Stockholm, join_msas,
                  stringsequence, write_file
 
 using ..Utils: DEFAULT_PID_THRESHOLDS, ResolvedTarget, SeedSelection, ThorAxeMSAResult,
-               decode_body, fasta_sequence, format_pid, protein_alignment_stats,
-               resolve_sequence_name, safe_rm, strip_ensembl_version, write_fasta
+               _http_get_with_retries, decode_body, fasta_sequence, format_pid,
+               protein_alignment_stats, resolve_sequence_name, safe_rm,
+               strip_ensembl_version, write_fasta
 
 export assemble_transcript_msa,
        build_thoraxe_msa,
@@ -45,7 +48,10 @@ const _ENSEMBL_JSON_HEADERS = [
     "Accept" => "application/json",
     "Content-Type" => "application/json"
 ]
-const _TRANSIENT_HTTP_STATUSES = Set([429, 500, 502, 503, 504])
+const _BIOMART_DATASETS_URL = "https://www.ensembl.org/biomart/martservice?type=datasets&mart=ENSEMBL_MART_ENSEMBL"
+const _BIOMART_TEXT_HEADERS = ["Accept" => "text/plain"]
+const _BIOMART_DATASETS_FILE = "ENSEMBL_MART_ENSEMBL_datasets.tsv"
+const _BIOMART_DATASETS_METADATA_FILE = "ENSEMBL_MART_ENSEMBL_datasets.json"
 
 _normalize_species_name(species::Nothing) = nothing
 function _normalize_species_name(species::AbstractString)
@@ -61,6 +67,7 @@ _thoraxe_logs_dir(workdir::AbstractString) = joinpath(workdir, "logs", "thoraxe"
 function _has_valid_ensembl_bundle(bundle_root::AbstractString)::Bool
     ensembl_dir = joinpath(bundle_root, "Ensembl")
     isdir(ensembl_dir) || return false
+    # ThorAxe needs all of these files before downstream steps can run.
     for file in _REQUIRED_ENSEMBL_FILES
         path = joinpath(ensembl_dir, file)
         isfile(path) && filesize(path) > 0 || return false
@@ -92,6 +99,7 @@ function _wait_logged_command(process, timeout_seconds::Union{Nothing, Float64})
     end
 
     deadline = time() + timeout_seconds
+    # Poll so we can kill long external commands and still collect logs.
     while process_running(process)
         if time() >= deadline
             kill(process)
@@ -141,6 +149,10 @@ function _retry_wait_seconds(attempt::Integer)
     return min(30.0, 2.0^(attempt - 1))
 end
 
+function _biomart_cache_dir()
+    return Scratch.@get_scratch!("biomart_datasets")
+end
+
 function _normalized_specieslist(specieslist::Union{Nothing, AbstractString})
     specieslist === nothing && return nothing
     stripped = strip(String(specieslist))
@@ -178,6 +190,7 @@ function _parse_specieslist(specieslist::Union{Nothing, AbstractString})
     normalized === nothing && return nothing
 
     raw_species = String[]
+    # The same option accepts a comma list, a file path, or one species name.
     if occursin(',', normalized)
         append!(raw_species, split(normalized, ','))
     elseif isfile(normalized)
@@ -193,6 +206,174 @@ end
 function _specieslist_string(species::AbstractVector{<:AbstractString})
     isempty(species) && return nothing
     return join(species, ",")
+end
+
+function _fetch_biomart_datasets_text(;
+        url::AbstractString = _BIOMART_DATASETS_URL,
+        retries::Integer = 4,
+        http_get::Function = HTTP.get)
+    # BioMart can return temporary 5xx/429 responses, so fetch through retry.
+    resp = _http_get_with_retries(
+        url, _BIOMART_TEXT_HEADERS; retries, sleep_seconds = 1.0, http_get)
+    resp.status == 200 && return decode_body(resp)
+    error("BioMart datasets metadata request failed with HTTP status $(resp.status).")
+end
+
+function _parse_biomart_gene_datasets(text::AbstractString)
+    datasets = Set{String}()
+    for line in split(String(text), '\n')
+        fields = split(strip(line), '\t')
+        length(fields) >= 2 || continue
+        fields[1] == "TableSet" || continue
+        dataset = strip(fields[2])
+        endswith(dataset, "_gene_ensembl") || continue
+        push!(datasets, dataset)
+    end
+    return datasets
+end
+
+function _read_biomart_cache_date(metadata_path::AbstractString)
+    isfile(metadata_path) || return nothing
+    try
+        metadata = JSON3.read(read(metadata_path, String))
+        date = get(metadata, :download_date, nothing)
+        date === nothing && return nothing
+        return String(date)
+    catch err
+        err isa InterruptException && rethrow()
+        return nothing
+    end
+end
+
+function _write_biomart_datasets_cache!(cache_dir::AbstractString,
+        text::AbstractString;
+        today::Dates.Date = Dates.today(),
+        url::AbstractString = _BIOMART_DATASETS_URL)
+    mkpath(cache_dir)
+    datasets_path = joinpath(cache_dir, _BIOMART_DATASETS_FILE)
+    metadata_path = joinpath(cache_dir, _BIOMART_DATASETS_METADATA_FILE)
+    tmp_datasets = string(datasets_path, ".tmp")
+    open(tmp_datasets, "w") do io
+        write(io, text)
+    end
+    mv(tmp_datasets, datasets_path; force = true)
+    metadata = (;
+        download_date = string(today),
+        download_time = string(Dates.now()),
+        url,
+        status = 200
+    )
+    tmp_metadata = string(metadata_path, ".tmp")
+    open(tmp_metadata, "w") do io
+        JSON3.pretty(io, metadata)
+        println(io)
+    end
+    mv(tmp_metadata, metadata_path; force = true)
+    return datasets_path
+end
+
+function _read_cached_biomart_datasets(cache_dir::AbstractString)
+    datasets_path = joinpath(cache_dir, _BIOMART_DATASETS_FILE)
+    isfile(datasets_path) || return nothing
+    datasets = _parse_biomart_gene_datasets(read(datasets_path, String))
+    isempty(datasets) && return nothing
+    return datasets
+end
+
+function _load_biomart_gene_datasets(;
+        cache_dir::AbstractString = _biomart_cache_dir(),
+        today::Dates.Date = Dates.today(),
+        fetcher::Function = _fetch_biomart_datasets_text)
+    datasets_path = joinpath(cache_dir, _BIOMART_DATASETS_FILE)
+    metadata_path = joinpath(cache_dir, _BIOMART_DATASETS_METADATA_FILE)
+    cached_date = _read_biomart_cache_date(metadata_path)
+    cached_is_current = isfile(datasets_path) && cached_date == string(today)
+    # Use one fresh BioMart dataset list per day to avoid repeated network hits.
+    if cached_is_current
+        cached = _read_cached_biomart_datasets(cache_dir)
+        cached !== nothing && return (datasets = cached, warnings = String[])
+    end
+
+    try
+        text = fetcher()
+        datasets = _parse_biomart_gene_datasets(text)
+        isempty(datasets) &&
+            error("BioMart datasets metadata did not contain Ensembl Gene datasets.")
+        _write_biomart_datasets_cache!(cache_dir, text; today)
+        return (datasets = datasets, warnings = String[])
+    catch err
+        err isa InterruptException && rethrow()
+        cached = _read_cached_biomart_datasets(cache_dir)
+        if cached !== nothing
+            stale_date = cached_date === nothing ? "unknown date" : cached_date
+            warning = "BioMart datasets metadata refresh failed; using stale cache from $(stale_date). $(sprint(showerror, err))"
+            return (datasets = cached, warnings = [warning])
+        end
+        warning = "BioMart datasets metadata refresh failed; using the unfiltered specieslist. $(sprint(showerror, err))"
+        return (datasets = nothing, warnings = [warning])
+    end
+end
+
+function _biomart_gene_dataset_for_species(species::AbstractString)
+    normalized = _normalize_species_name(species)
+    normalized === nothing && return nothing
+    parts = split(normalized, '_')
+    length(parts) == 2 || return nothing
+    isempty(parts[1]) && return nothing
+    isempty(parts[2]) && return nothing
+    return string(first(parts[1]), parts[2], "_gene_ensembl")
+end
+
+function _resolve_biomart_datasets_specieslist(target::ResolvedTarget,
+        specieslist::Union{Nothing, AbstractString};
+        dataset_loader::Function = _load_biomart_gene_datasets)
+    requested_species = _parse_specieslist(specieslist)
+    requested_species === nothing &&
+        return (specieslist = _normalized_specieslist(specieslist), warnings = String[])
+
+    loaded = dataset_loader()
+    warnings = String.(loaded.warnings)
+    datasets = loaded.datasets
+    datasets === nothing &&
+        return (specieslist = _normalized_specieslist(specieslist), warnings = warnings)
+
+    query_species = _normalize_species_name(target.species)
+    kept = String[]
+    removed = String[]
+    unchecked = String[]
+    missing_query_dataset = false
+    # Drop species that BioMart cannot serve, but keep aliases we cannot prove.
+    for species in requested_species
+        dataset = _biomart_gene_dataset_for_species(species)
+        if dataset === nothing
+            push!(kept, species)
+            push!(unchecked, species)
+            continue
+        end
+        if dataset in datasets
+            push!(kept, species)
+        elseif species == query_species
+            push!(kept, species)
+            missing_query_dataset = true
+        else
+            push!(removed, species)
+        end
+    end
+
+    if !isempty(removed)
+        push!(warnings,
+            "BioMart datasets filter removed species without matching Ensembl Gene datasets or recognized aliases: $(join(removed, ", ")).")
+    end
+    if !isempty(unchecked)
+        push!(warnings,
+            "BioMart datasets filter could not derive Ensembl Gene dataset names for possible species aliases: $(join(unchecked, ", ")); keeping them unchanged.")
+    end
+    if missing_query_dataset && query_species !== nothing
+        push!(warnings,
+            "BioMart datasets filter did not find an Ensembl Gene dataset for query species $(query_species); keeping it because transcript_query requires the query species.")
+    end
+    isempty(kept) && error("BioMart datasets filter removed all requested species.")
+    return (specieslist = _specieslist_string(kept), warnings = warnings)
 end
 
 function _homology_species(data, orthology::AbstractString)
@@ -215,21 +396,14 @@ end
 function _fetch_ensembl_homology_data(species::AbstractString,
         gene_id::AbstractString;
         retries::Integer = 4,
-        sleep_seconds::Real = 1.5)
+        sleep_seconds::Real = 1.5,
+        http_get::Function = HTTP.get)
     gene_core = strip_ensembl_version(gene_id)
     url = "$(_ENSEMBL_REST_BASE)/homology/id/$(species)/$(gene_core)?type=orthologues;sequence=none"
-    last_status = nothing
-    for attempt in 1:max(Int(retries), 1)
-        resp = HTTP.get(url; headers = _ENSEMBL_JSON_HEADERS, retry = false,
-            status_exception = false)
-        if resp.status == 200
-            return JSON3.read(decode_body(resp))
-        end
-        last_status = resp.status
-        resp.status in _TRANSIENT_HTTP_STATUSES || break
-        sleep(sleep_seconds * attempt)
-    end
-    error("Ensembl homology specieslist filter failed for $(gene_core) in $(species) with HTTP status $(last_status).")
+    resp = _http_get_with_retries(
+        url, _ENSEMBL_JSON_HEADERS; retries, sleep_seconds, http_get)
+    resp.status == 200 && return JSON3.read(decode_body(resp))
+    error("Ensembl homology specieslist filter failed for $(gene_core) in $(species) with HTTP status $(resp.status).")
 end
 
 function _fetch_ortholog_species(target::ResolvedTarget, orthology::AbstractString)
@@ -252,6 +426,7 @@ function _resolve_effective_specieslist(target::ResolvedTarget,
         homology_species_fetcher::Function = _fetch_ortholog_species)
     _orthology_relationships(orthology)
     query_species = _normalize_species_name(target.species)
+    # If Ensembl homology is unavailable, fall back to the user's species list.
     ortholog_species = try
         homology_species_fetcher(target, orthology)
     catch err
@@ -369,6 +544,7 @@ function _ensure_transcript_query(target::ResolvedTarget, workdir::AbstractStrin
     attempts = max(Int(max_retries), 1)
     active_specieslist = _normalized_specieslist(specieslist)
     current_timeout = timeout_seconds
+    # Retry transcript_query because BioMart downloads often fail transiently.
     for attempt in 1:attempts
         isdir(tmp_gene_dir) && safe_rm(tmp_gene_dir, workdir)
         try
@@ -389,6 +565,7 @@ function _ensure_transcript_query(target::ResolvedTarget, workdir::AbstractStrin
             end
             if err isa _CommandTimeoutError && attempt < attempts
                 if active_specieslist !== nothing && allow_specieslist_timeout_fallback
+                    # A large species list can be the slow part, so retry once without it.
                     @warn "transcript_query timed out with a species list; retrying without it." gene=gene_core attempt
                     active_specieslist = nothing
                     current_timeout = timeout_max_seconds === nothing ?
@@ -407,6 +584,52 @@ function _ensure_transcript_query(target::ResolvedTarget, workdir::AbstractStrin
         error("transcript_query did not create a valid Ensembl bundle at $(tmp_gene_dir). See $(stderr_log).")
     mv(tmp_gene_dir, input_dir; force = true)
     return input_dir
+end
+
+function _species_from_biomart_errors_file(errors_path::AbstractString)
+    isfile(errors_path) || return String[]
+    species = String[]
+    try
+        for row in CSV.File(errors_path)
+            value = getproperty(row, :Species)
+            value === missing && continue
+            normalized = _normalize_species_name(String(value))
+            normalized === nothing && continue
+            push!(species, normalized)
+        end
+    catch err
+        err isa InterruptException && rethrow()
+        return String[]
+    end
+    return _unique_nonempty_species(species)
+end
+
+function _species_from_biomart_stderr(stderr_log::AbstractString)
+    isfile(stderr_log) || return String[]
+    species = String[]
+    for line in eachline(stderr_log)
+        found = match(r"It can not found ([A-Za-z0-9_]+) in biomart", line)
+        if found !== nothing
+            push!(species, _normalize_species_name(found.captures[1]))
+            continue
+        end
+        found = match(r"Download failed for \S+ in ([A-Za-z0-9_]+)", line)
+        found !== nothing && push!(species, _normalize_species_name(found.captures[1]))
+    end
+    return _unique_nonempty_species(species)
+end
+
+function _biomart_transcript_query_warnings(input_dir::AbstractString,
+        logs_dir::AbstractString)
+    errors_path = joinpath(input_dir, "Ensembl", "errors.csv")
+    stderr_log = joinpath(logs_dir, "transcript_query_stderr.log")
+    error_species = _species_from_biomart_errors_file(errors_path)
+    stderr_species = _species_from_biomart_stderr(stderr_log)
+    species = _unique_nonempty_species(Iterators.flatten((error_species, stderr_species)))
+    isempty(species) && return String[]
+    return [
+        "BioMart transcript_query failures recorded for species: $(join(species, ", ")). See $(errors_path) and $(stderr_log)."
+    ]
 end
 
 function _ensure_baseline_thoraxe(target::ResolvedTarget,
@@ -461,6 +684,7 @@ function assemble_transcript_msa(thoraxe_dir::AbstractString,
     transcript_path = String(path_table.Path[only(matches)])
     exon_tokens = split(replace(transcript_path, "start/" => "", "/stop" => ""), "/")
     exon_files = String[]
+    # The path table lists s-exons; each one has a matching FASTA alignment.
     for exon in exon_tokens
         startswith(exon, "0_") && continue
         push!(exon_files, joinpath(thoraxe_dir, "msa", "msa_s_exon_$(exon).fasta"))
@@ -702,17 +926,27 @@ function build_thoraxe_msa(target::ResolvedTarget, workdir::AbstractString;
         overwrite::Bool = false,
         orthology::AbstractString = "1:1",
         specieslist_filter::Bool = true,
+        biomart_datasets_filter::Bool = true,
         transcript_query_timeout_seconds::Union{Nothing, Real} = 180,
         transcript_query_timeout_max_seconds::Union{Nothing, Real} = 240,
         transcript_query_retries::Integer = 2,
         allow_specieslist_timeout_fallback::Bool = true,
         thoraxe_timeout_seconds::Union{Nothing, Real} = nothing)
     _orthology_relationships(orthology)
-    species_filter = cached_thoraxe_input_dir === nothing && specieslist_filter ?
-                     _resolve_effective_specieslist(target, specieslist, orthology) :
-                     (
-        specieslist = _normalized_specieslist(specieslist), warnings = String[])
-    effective_specieslist = species_filter.specieslist
+    # Species filters run only when transcript_query will create new input.
+    if cached_thoraxe_input_dir === nothing && specieslist_filter
+        species_filter = _resolve_effective_specieslist(target, specieslist, orthology)
+    else
+        species_filter = (specieslist = _normalized_specieslist(specieslist),
+            warnings = String[])
+    end
+    if cached_thoraxe_input_dir === nothing && biomart_datasets_filter
+        biomart_filter = _resolve_biomart_datasets_specieslist(
+            target, species_filter.specieslist)
+    else
+        biomart_filter = (specieslist = species_filter.specieslist, warnings = String[])
+    end
+    effective_specieslist = biomart_filter.specieslist
     input_dir = _ensure_transcript_query(target, workdir;
         specieslist = effective_specieslist, overwrite,
         cached_input_dir = cached_thoraxe_input_dir,
@@ -726,7 +960,10 @@ function build_thoraxe_msa(target::ResolvedTarget, workdir::AbstractString;
         timeout_seconds = thoraxe_timeout_seconds)
     msa,
     species = assemble_transcript_msa(thoraxe_dir, target.ensembl_gene_id, target.transcript_id)
-    warnings = vcat(species_filter.warnings, _validate_transcript_translation(target, msa))
+    warnings = vcat(species_filter.warnings,
+        biomart_filter.warnings,
+        _biomart_transcript_query_warnings(input_dir, _thoraxe_logs_dir(workdir)),
+        _validate_transcript_translation(target, msa))
     baseline_fasta, baseline_sto,
     sequence_fasta, species_file = _save_baseline_msa(workdir, msa, species; overwrite)
 

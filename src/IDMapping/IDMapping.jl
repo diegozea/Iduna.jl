@@ -3,9 +3,10 @@ module IDMapping
 import HTTP
 import JSON3
 
-using ..Utils: ResolvedTarget, decode_body, fasta_sequence, format_fasta, id_kind,
-               is_ensembl_transcript_id, protein_alignment_stats, strip_ensembl_version,
-               write_text
+using ..Utils: ResolvedTarget, _http_get_with_retries, _is_transient_http_status,
+               decode_body, fasta_sequence, format_fasta, id_kind,
+               is_ensembl_transcript_id, protein_alignment_stats,
+               strip_ensembl_version, write_text
 
 export EnsemblCandidate,
        fetch_uniprot_entry,
@@ -45,20 +46,17 @@ Base.@kwdef struct _UniProtEntry
     protein_sequence::Union{Nothing, String}
 end
 
-function _http_get(url::AbstractString, headers = _JSON_HEADERS; retries::Int = 4, sleep_seconds::Real = 1.5)
-    last_status = nothing
-    for attempt in 1:max(retries, 1)
-        resp = HTTP.get(url; headers = headers, retry = false, status_exception = false)
-        if resp.status == 200
-            return resp
-        elseif resp.status in (429, 500, 502, 503, 504)
-            last_status = resp.status
-            sleep(sleep_seconds * attempt)
-        else
-            return nothing
-        end
+function _http_get(url::AbstractString,
+        headers = _JSON_HEADERS;
+        retries::Int = 4,
+        sleep_seconds::Real = 1.5,
+        http_get::Function = HTTP.get)
+    resp = _http_get_with_retries(url, headers; retries, sleep_seconds, http_get)
+    if resp.status == 200
+        return resp
+    elseif _is_transient_http_status(resp.status)
+        @warn "HTTP request failed after retries." url status=resp.status
     end
-    @warn "HTTP request failed after retries." url status=last_status
     return nothing
 end
 
@@ -103,6 +101,7 @@ function _parse_xrefs(data)
     transcript_to_gene = Dict{String, String}()
     transcript_to_isoform = Dict{String, String}()
 
+    # UniProt stores Ensembl links as cross-references with extra properties.
     for ref in get(data, "uniProtKBCrossReferences", Any[])
         get(ref, "database", "") == "Ensembl" || continue
         transcript = get(ref, "id", nothing)
@@ -167,6 +166,7 @@ end
 function _validate_candidates(entry::_UniProtEntry, sequence_dir::AbstractString;
         _uniprot_fasta_fetcher::Function = _fetch_uniprot_fasta_sequence,
         _ensembl_protein_fetcher::Function = _fetch_ensembl_protein_sequence)
+    # Keep only Ensembl proteins that exactly match the UniProt sequence.
     uniprot_seq = entry.protein_sequence === nothing ?
                   _uniprot_fasta_fetcher(entry.id) : entry.protein_sequence
     uniprot_path = joinpath(sequence_dir, "uniprot", "$(entry.id).fasta")
@@ -202,6 +202,7 @@ function _choose_candidate(candidates::Vector{EnsemblCandidate}, transcript_id::
     isempty(candidates) &&
         error("No Ensembl transcript/protein candidates passed sequence validation.")
     if transcript_id !== nothing
+        # A user-supplied transcript must match either the full or core ID.
         wanted = String(transcript_id)
         idx = findfirst(
             c -> c.transcript_id == wanted ||

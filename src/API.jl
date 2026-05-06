@@ -13,7 +13,8 @@ the resolved identifiers and validation statistics.
 
 `orthology` controls the ThorAxe relationship filter (`"1:1"`, `"1:n"`, or
 `"m:n"`). By default, Iduna filters the ThorAxe species list with Ensembl
-homology before `transcript_query`. `transcript_query_timeout_seconds` limits
+homology and then filters against currently available BioMart Ensembl Gene
+datasets before `transcript_query`. `transcript_query_timeout_seconds` limits
 each Ensembl query attempt. Iduna retries that step and can retry without
 `specieslist` after a timeout. Set `thoraxe_timeout_seconds` to give the
 baseline and PID ThorAxe runs the same kind of wall-clock guard. Pass
@@ -35,6 +36,7 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
         specieslist::Union{Nothing, AbstractString} = nothing,
         orthology::AbstractString = "1:1",
         specieslist_filter::Bool = true,
+        biomart_datasets_filter::Bool = true,
         thoraxe_input_dir::Union{Nothing, AbstractString} = nothing,
         transcript_query_timeout_seconds::Union{Nothing, Real} = 180,
         transcript_query_timeout_max_seconds::Union{Nothing, Real} = 240,
@@ -64,6 +66,7 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
         specieslist,
         orthology,
         specieslist_filter,
+        biomart_datasets_filter,
         cached_thoraxe_input_dir = thoraxe_input_dir,
         overwrite,
         transcript_query_timeout_seconds,
@@ -104,6 +107,7 @@ function _pipeline_status(warnings::AbstractVector{<:AbstractString})
 end
 
 function _normalize_primary_input(; id, uniprot_id, ensembl_transcript_id, transcript_id)
+    # Accept old and new argument names, but still require one clear input.
     provided_primary = Pair{Symbol, String}[]
     id !== nothing && push!(provided_primary, :id => String(id))
     ensembl_transcript_id !== nothing &&
@@ -123,6 +127,7 @@ function _normalize_primary_input(; id, uniprot_id, ensembl_transcript_id, trans
     end
 
     kind = Utils.id_kind(first_value)
+    # For UniProt input, transcript_id is only a tie-breaker among candidates.
     if kind === :uniprot && uniprot_id !== nothing && String(uniprot_id) != first_value
         error("Conflicting UniProt identifiers were provided: id=$(first_value), uniprot_id=$(uniprot_id).")
     end

@@ -38,8 +38,16 @@ For an Ensembl transcript input, Iduna resolves the parent Ensembl gene ID and
 species needed by ThorAxe. It does not require UniProt mapping on that path.
 
 Iduna filters the ThorAxe species list with Ensembl homology by default using
-`orthology="1:1"`. Use `orthology="1:n"` or `"m:n"` for broader ortholog
-relationships, or set `specieslist_filter=false` to skip this step.
+`orthology="1:1"`, then applies `biomart_datasets_filter=true` as a second
+preflight against the current BioMart Ensembl Gene dataset list. BioMart dataset
+names are used only internally; species names are still passed to ThorAxe. Use
+`orthology="1:n"` or `"m:n"` for broader ortholog relationships, set
+`specieslist_filter=false` to skip the Ensembl homology step, or set
+`biomart_datasets_filter=false` to skip the BioMart dataset preflight.
+The BioMart dataset list is cached in package scratch space and refreshed when
+used on a later calendar date. Iduna also reports species recorded in
+`transcript_query` BioMart failure outputs when a run completes with partial
+BioMart failures.
 `transcript_query_timeout_seconds` defaults to 180 seconds, with a bounded retry
 that can drop the species list after a timeout.
 `thoraxe_timeout_seconds` is unset by default because ThorAxe runtime depends on

@@ -221,6 +221,178 @@
         @test occursin("Ensembl specieslist filter failed", only(fallback.warnings))
     end
 
+    @testset "BioMart datasets filter" begin
+        biomart_text = """
+
+TableSet\thsapiens_gene_ensembl\tHuman genes (GRCh38.p14)\t1
+TableSet\tmmusculus_gene_ensembl\tMouse genes (GRCm39)\t1
+TableSet\tptroglodytes_gene_ensembl\tChimpanzee genes (Pan_tro_3.0)\t1
+"""
+        datasets = Iduna.ThorAxeMSA._parse_biomart_gene_datasets(biomart_text)
+        @test "hsapiens_gene_ensembl" in datasets
+        @test "mmusculus_gene_ensembl" in datasets
+        @test "ptroglodytes_gene_ensembl" in datasets
+        @test Iduna.ThorAxeMSA._biomart_gene_dataset_for_species("Homo sapiens") ==
+              "hsapiens_gene_ensembl"
+        @test Iduna.ThorAxeMSA._biomart_gene_dataset_for_species("mus_musculus") ==
+              "mmusculus_gene_ensembl"
+
+        target = Iduna.ResolvedTarget(;
+            input_id = "ENST00000000001.1",
+            input_kind = :ensembl_transcript,
+            ensembl_gene_id = "ENSG00000000001.1",
+            transcript_id = "ENST00000000001.1",
+            species = "Homo sapiens")
+        loader = () -> (
+            datasets = Set(["hsapiens_gene_ensembl", "mmusculus_gene_ensembl"]),
+            warnings = String[])
+        filtered = Iduna.ThorAxeMSA._resolve_biomart_datasets_specieslist(
+            target, "Homo sapiens,Mus musculus,Canis lupus";
+            dataset_loader = loader)
+        @test filtered.specieslist == "homo_sapiens,mus_musculus"
+        @test length(filtered.warnings) == 1
+        @test occursin("canis_lupus", only(filtered.warnings))
+
+        missing_query = Iduna.ThorAxeMSA._resolve_biomart_datasets_specieslist(
+            target, "Homo sapiens,Mus musculus";
+            dataset_loader = () -> (datasets = Set(["mmusculus_gene_ensembl"]),
+                warnings = String[]))
+        @test missing_query.specieslist == "homo_sapiens,mus_musculus"
+        @test any(w -> occursin("query species homo_sapiens", w),
+            missing_query.warnings)
+
+        unchecked = Iduna.ThorAxeMSA._resolve_biomart_datasets_specieslist(
+            target, "homo_sapiens,canis_lupus_familiaris";
+            dataset_loader = loader)
+        @test unchecked.specieslist == "homo_sapiens,canis_lupus_familiaris"
+        @test any(w -> occursin("possible species aliases", w), unchecked.warnings)
+
+        fallback = Iduna.ThorAxeMSA._resolve_biomart_datasets_specieslist(
+            target, "Homo sapiens,Mus musculus";
+            dataset_loader = () -> (datasets = nothing,
+                warnings = ["BioMart datasets metadata refresh failed"]))
+        @test fallback.specieslist == "Homo sapiens,Mus musculus"
+        @test only(fallback.warnings) == "BioMart datasets metadata refresh failed"
+    end
+
+    @testset "BioMart datasets dated cache" begin
+        response(status::Integer, body::AbstractString = "") =
+            Iduna.ThorAxeMSA.HTTP.Response(status, Vector{UInt8}(body))
+
+        attempts = Ref(0)
+        biomart_text = "TableSet\thsapiens_gene_ensembl\tHuman genes\t1\n"
+        text = Iduna.ThorAxeMSA._fetch_biomart_datasets_text(;
+            retries = 3,
+            http_get = (url; kwargs...) -> begin
+                attempts[] += 1
+                attempts[] == 1 ? response(503) : response(200, biomart_text)
+            end)
+        @test text == biomart_text
+        @test attempts[] == 2
+
+        attempts[] = 0
+        @test_throws ErrorException Iduna.ThorAxeMSA._fetch_biomart_datasets_text(;
+            retries = 3,
+            http_get = (url; kwargs...) -> begin
+                attempts[] += 1
+                response(404)
+            end)
+        @test attempts[] == 1
+
+        mktempdir() do tmp
+            biomart_text = "TableSet\thsapiens_gene_ensembl\tHuman genes\t1\n"
+            fetches = Ref(0)
+            fetcher = () -> begin
+                fetches[] += 1
+                biomart_text
+            end
+            loaded = Iduna.ThorAxeMSA._load_biomart_gene_datasets(;
+                cache_dir = tmp,
+                today = Iduna.ThorAxeMSA.Dates.Date(2026, 5, 6),
+                fetcher)
+            @test fetches[] == 1
+            @test "hsapiens_gene_ensembl" in loaded.datasets
+            @test isempty(loaded.warnings)
+
+            same_day = Iduna.ThorAxeMSA._load_biomart_gene_datasets(;
+                cache_dir = tmp,
+                today = Iduna.ThorAxeMSA.Dates.Date(2026, 5, 6),
+                fetcher = () -> error("should not refetch"))
+            @test fetches[] == 1
+            @test "hsapiens_gene_ensembl" in same_day.datasets
+
+            stale = Iduna.ThorAxeMSA._load_biomart_gene_datasets(;
+                cache_dir = tmp,
+                today = Iduna.ThorAxeMSA.Dates.Date(2026, 5, 7),
+                fetcher = () -> error("temporary failure"))
+            @test "hsapiens_gene_ensembl" in stale.datasets
+            @test length(stale.warnings) == 1
+            @test occursin("stale cache from 2026-05-06", only(stale.warnings))
+        end
+
+        mktempdir() do tmp
+            failed = Iduna.ThorAxeMSA._load_biomart_gene_datasets(;
+                cache_dir = tmp,
+                today = Iduna.ThorAxeMSA.Dates.Date(2026, 5, 6),
+                fetcher = () -> error("temporary failure"))
+            @test failed.datasets === nothing
+            @test length(failed.warnings) == 1
+            @test occursin("using the unfiltered specieslist", only(failed.warnings))
+        end
+    end
+
+    @testset "BioMart transcript_query warnings" begin
+        mktempdir() do tmp
+            input_dir = joinpath(tmp, "thoraxe_input")
+            ensembl_dir = joinpath(input_dir, "Ensembl")
+            logs_dir = joinpath(tmp, "logs", "thoraxe")
+            mkpath(ensembl_dir)
+            mkpath(logs_dir)
+            write(joinpath(ensembl_dir, "errors.csv"),
+                "Species,GeneID\nmus_spretus,ENSMSPG00010016579\n")
+            write(joinpath(logs_dir, "transcript_query_stderr.log"),
+                "Download failed for ENSPTRG00000006744 in pan_troglodytes!\n")
+            warnings = Iduna.ThorAxeMSA._biomart_transcript_query_warnings(
+                input_dir, logs_dir)
+            @test length(warnings) == 1
+            @test occursin("mus_spretus", only(warnings))
+            @test occursin("pan_troglodytes", only(warnings))
+            @test occursin("errors.csv", only(warnings))
+        end
+    end
+
+    @testset "Ensembl homology download retries" begin
+        response(status::Integer, body::AbstractString = "") =
+            Iduna.ThorAxeMSA.HTTP.Response(status, Vector{UInt8}(body))
+
+        attempts = Ref(0)
+        data = Iduna.ThorAxeMSA._fetch_ensembl_homology_data(
+            "homo_sapiens", "ENSG00000000001.1";
+            retries = 3,
+            sleep_seconds = 0,
+            http_get = (url; headers, retry, status_exception) -> begin
+                attempts[] += 1
+                @test occursin("/homology/id/homo_sapiens/ENSG00000000001", url)
+                @test headers == Iduna.ThorAxeMSA._ENSEMBL_JSON_HEADERS
+                @test retry == false
+                @test status_exception == false
+                attempts[] == 1 ? response(500) : response(200, """{"data": []}""")
+            end)
+        @test get(data, :data, nothing) !== nothing
+        @test attempts[] == 2
+
+        attempts[] = 0
+        @test_throws ErrorException Iduna.ThorAxeMSA._fetch_ensembl_homology_data(
+            "homo_sapiens", "ENSG00000000001.1";
+            retries = 3,
+            sleep_seconds = 0,
+            http_get = (url; kwargs...) -> begin
+                attempts[] += 1
+                response(400)
+            end)
+        @test attempts[] == 1
+    end
+
     @testset "transcript_query receives orthology and effective species list" begin
         mktempdir() do tmp
             captured = Ref{Cmd}()

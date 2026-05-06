@@ -106,6 +106,11 @@ function _app_arg_settings(;
         dest_name = "specieslist_filter"
         action = :store_false
 
+        "--no-biomart-datasets-filter"
+        help = "Skip BioMart dataset availability specieslist filtering."
+        dest_name = "biomart_datasets_filter"
+        action = :store_false
+
         "--thoraxe-input-dir"
         help = "Reuse a complete transcript_query bundle."
         metavar = "path"
@@ -148,6 +153,7 @@ function _postprocess_app_args(parsed::Dict{Symbol, Any})
     kwargs = Dict{Symbol, Any}()
     for (key, value) in parsed
         value === nothing && continue
+        # ArgParse reads a few options as strings so users can pass "none".
         if key === :pid_thresholds
             kwargs[key] = _parse_pid_thresholds(value)
         elseif key in _APP_TIMEOUT_KEYS

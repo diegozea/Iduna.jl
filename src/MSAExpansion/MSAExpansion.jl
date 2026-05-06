@@ -34,6 +34,7 @@ function prepare_stockholm_for_mmseqs(source::AbstractString, dest::AbstractStri
     lines = readlines(source)
     has_header = !isempty(lines) && startswith(strip(lines[1]), "# STOCKHOLM")
     open(dest, "w") do io
+        # MMseqs expects a complete Stockholm file with header and terminator.
         has_header || println(io, "# STOCKHOLM 1.0")
         for line in lines
             println(io, line)
@@ -61,6 +62,7 @@ function normalize_stockholm_annotations!(path::AbstractString)
     seq_order = String[]
     seq_data = Dict{String, String}()
 
+    # Merge split Stockholm records while keeping the original output order.
     for line in lines
         stripped = strip(line)
         isempty(stripped) && continue
@@ -169,6 +171,7 @@ function _mmseqs_search(seed_msa_sto::AbstractString,
     aln_db = string(base_db, "_aln")
     seq_db = string(base_db, "_seq")
 
+    # Build a profile from the seed MSA and search it against the MMseqs DB.
     _run_labeled(`$(mmseqs_bin) convertmsa $seed_msa_sto $seed_db`, "convertmsa", logs_dir)
 
     profile_cmd = `$(mmseqs_bin) msa2profile $seed_db $profile_db --match-mode $(match_mode)`
@@ -212,6 +215,7 @@ function _collect_hits(hits_tsv::AbstractString, seed_set::Set{String})
     seen_all = Set{String}()
     seen_filtered = Set{String}()
     open(hits_tsv, "r") do io
+        # Keep all hits for reporting, but align only hits not already in the seed.
         for line in eachline(io)
             parts = split(line, '\t')
             length(parts) < 3 && continue
@@ -311,6 +315,7 @@ function expand_msa(target::ResolvedTarget,
 
     tmp_dir = mktempdir(tmp_root; prefix = "mmseqs_tmp_")
     try
+        # MMseqs finds candidate homologs; HMMER maps them back to seed columns.
         db_paths = _mmseqs_search(sanitized_seed, mmseqs_db, db_dir, tmp_dir, logs_dir;
             match_mode, match_ratio, threads)
         hits_tsv = joinpath(run_dir, "mmseqs_hits_raw.tsv")
@@ -334,6 +339,7 @@ function expand_msa(target::ResolvedTarget,
         aligned_sto = joinpath(hmm_dir, "alignment_with_hits.sto")
         hits_aligned_sto = joinpath(hmm_dir, "aligned_hits_only.sto")
         if isempty(filtered_hits)
+            # With no new hits, the expanded alignment is just the annotated seed.
             cp(annotated_seed, aligned_sto; force = true)
         else
             _run_labeled(
@@ -381,6 +387,7 @@ function expand_msa(target::ResolvedTarget,
             status = :ok
         )
     finally
+        # The MMseqs temporary database can be large and is never an output.
         isdir(tmp_dir) && rm(tmp_dir; recursive = true, force = true)
     end
 end
