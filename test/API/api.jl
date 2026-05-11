@@ -129,6 +129,7 @@
     @test summary.status == "warn"
     @test summary.thoraxe_msa.status == "warn"
     @test summary.thoraxe_msa.warnings == thoraxe.warnings
+    @test summary.expansion.match_stockholm == "match.sto"
 
     @testset "centroids option forwarding" begin
         mktempdir() do tmp
@@ -140,7 +141,8 @@
                 centroids = true,
                 _resolve_target = (args...; kwargs...) -> target,
                 _build_thoraxe_msa = (args...; kwargs...) -> thoraxe,
-                _expand_msa = (args...; kwargs...) -> begin
+                _expand_msa = (
+                    args...; kwargs...) -> begin
                     captured[] = Dict{Symbol, Any}(kwargs)
                     expansion
                 end,
@@ -149,6 +151,62 @@
             @test result.expansion === expansion
             @test captured[][:centroids] === true
             @test captured[][:mmseqs_db] == "db"
+        end
+    end
+
+    @testset "no expansion option" begin
+        @test_throws ErrorException Iduna.iduna(; id = "Q13148")
+        @test_throws ErrorException Iduna.iduna(;
+            id = "Q13148",
+            no_expansion = true,
+            centroids = true)
+
+        mktempdir() do tmp
+            expand_called = Ref(false)
+            validation_expansion = Ref{Any}(:unset)
+            result = Iduna.iduna(;
+                id = "Q13148",
+                workdir = joinpath(tmp, "no_expansion"),
+                no_expansion = true,
+                _resolve_target = (args...; kwargs...) -> target,
+                _build_thoraxe_msa = (args...; kwargs...) -> thoraxe,
+                _expand_msa = (args...; kwargs...) -> begin
+                    expand_called[] = true
+                    expansion
+                end,
+                _validate_results = (target, seed, expansion_arg,
+                    workdir) -> begin
+                    validation_expansion[] = expansion_arg
+                    validation
+                end)
+
+            @test expand_called[] === false
+            @test validation_expansion[] === nothing
+            @test result.expansion === nothing
+            @test Iduna.Utils.result_summary(result).expansion === nothing
+            written = Iduna.JSON3.read(
+                read(joinpath(result.workdir, "result.json"), String))
+            @test written.expansion === nothing
+            @test_throws ErrorException Iduna.load_expanded_msa(result)
+        end
+
+        mktempdir() do tmp
+            expand_called = Ref(false)
+            result = Iduna.iduna(;
+                id = "Q13148",
+                mmseqs_db = "ignored_db",
+                workdir = joinpath(tmp, "no_expansion_with_db"),
+                no_expansion = true,
+                _resolve_target = (args...; kwargs...) -> target,
+                _build_thoraxe_msa = (args...; kwargs...) -> thoraxe,
+                _expand_msa = (args...; kwargs...) -> begin
+                    expand_called[] = true
+                    expansion
+                end,
+                _validate_results = (args...; kwargs...) -> validation)
+
+            @test expand_called[] === false
+            @test result.expansion === nothing
         end
     end
 
@@ -197,9 +255,10 @@
             workdir = joinpath(tmp, "timeout_failure")
             stdout_log = joinpath(workdir, "logs", "thoraxe", "stdout.log")
             stderr_log = joinpath(workdir, "logs", "thoraxe", "stderr.log")
-            timeout_failure = (args...; kwargs...) -> throw(
+            timeout_failure = (args...;
+                kwargs...) -> throw(
                 Iduna.ThorAxeMSA._CommandTimeoutError(
-                    "thoraxe --example", 12.0, stdout_log, stderr_log))
+                "thoraxe --example", 12.0, stdout_log, stderr_log))
             @test_throws Iduna.ThorAxeMSA._CommandTimeoutError Iduna.iduna(;
                 id = "P20963",
                 mmseqs_db = "db",

@@ -21,7 +21,7 @@ around it. By default, `workdir` is a directory named after the input ID.
   thoraxe_msa/
     seeds/
     best_seed.csv
-  expansion/
+  expansion/  # absent when no_expansion=true / --no-expansion
     <gene>/<transcript>/
       seeds/
       dbs/
@@ -50,13 +50,24 @@ When `thoraxe_input_dir` is supplied, that source bundle is treated as read-only
 and copied into `thoraxe_input/`; the copied layout is then preserved like a
 fresh `transcript_query` result.
 
-The final MSA paths are also available from the returned [`IdunaResult`](@ref):
+MSA paths are also available from the returned [`IdunaResult`](@ref):
 
 ```julia
+result.thoraxe_msa.baseline_stockholm
+result.thoraxe_msa.baseline_fasta
 result.thoraxe_msa.best_seed.stockholm_path
+result.thoraxe_msa.best_seed.fasta_path
+
+# Full expansion runs only:
 result.expansion.match_stockholm
 result.expansion.a3m_path
 ```
+
+When `no_expansion=true` or `--no-expansion` is used, Iduna stops after the
+ThorAxe MSA stage. `result.expansion === nothing`, `result.json` contains
+`"expansion": null`, and no `expansion/` directory is written. Validation still
+writes seed statistics to `validation/stats.csv`, with expanded-MSA fields left
+missing.
 
 `expanded_msa/` is the full MMseqs2 cluster-expanded MSA and remains the main
 Iduna result. When `centroids=true` or `--centroids` is used, Iduna also writes

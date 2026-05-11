@@ -7,9 +7,10 @@
 [![Coverage](https://coveralls.io/repos/github/diegozea/Iduna.jl/badge.svg?branch=main)](https://coveralls.io/github/diegozea/Iduna.jl?branch=main)
 [![Aqua](https://raw.githubusercontent.com/JuliaTesting/Aqua.jl/master/badge.svg)](https://github.com/JuliaTesting/Aqua.jl)
 
-Iduna _(Intrinsically Disordered Unit Aligner)_ builds a ThorAxe MSA for one UniProt 
-accession or Ensembl transcript ID and expands the selected seed MSA with MMseqs2/HMMER. 
-For transcript inputs, Iduna resolves the parent Ensembl gene and species before 
+Iduna _(Intrinsically Disordered Unit Aligner)_ builds a ThorAxe MSA for one UniProt
+accession or Ensembl transcript ID and, by default, expands the selected seed MSA
+with MMseqs2/HMMER.
+For transcript inputs, Iduna resolves the parent Ensembl gene and species before
 calling [ThorAxe](https://github.com/diegozea/ThorAxe.jl).
 
 ```julia
@@ -21,6 +22,20 @@ expanded = load_expanded_msa(result)
 
 The package writes a stable work directory containing ThorAxe outputs, PID seed
 MSAs, expansion outputs, logs, and validation stats.
+
+To stop after the ThorAxe MSA stage, use `no_expansion=true` in Julia or
+`--no-expansion` in the app. In that mode `mmseqs_db` is not required,
+`result.expansion === nothing`, and the ThorAxe MSA paths are available from
+`result.thoraxe_msa.baseline_stockholm`,
+`result.thoraxe_msa.baseline_fasta`,
+`result.thoraxe_msa.best_seed.stockholm_path`, and
+`result.thoraxe_msa.best_seed.fasta_path`.
+
+```julia
+thoraxe_only = iduna("ENST00000362089.10"; no_expansion=true,
+    workdir="ENST00000362089_thoraxe")
+seed = load_seed_msa(thoraxe_only)
+```
 
 Pass `centroids=true` in Julia, or `--centroids` in the app, to also save a
 centroid-level MSA before MMseqs2 expands centroid hits to cluster members. This
@@ -40,4 +55,5 @@ wall-clock limit.
 
 If a complete ThorAxe `transcript_query` bundle is already available, pass it as
 `thoraxe_input_dir`; Iduna copies it into the work directory and still runs the
-ThorAxe MSA and MMseqs/HMMER expansion stages normally.
+ThorAxe MSA stage. Unless `no_expansion=true`, it then continues with the
+MMseqs/HMMER expansion stages normally.

@@ -103,14 +103,15 @@ end
     IdunaResult
 
 Top-level result returned by `Iduna.iduna`. It keeps the full pipeline status
-and links to the per-stage result objects.
+and links to the per-stage result objects. `expansion` is `nothing` when the
+run was requested with `no_expansion=true`.
 """
 Base.@kwdef struct IdunaResult
     input_id::String
     workdir::String
     target::ResolvedTarget
     thoraxe_msa::ThorAxeMSAResult
-    expansion::ExpansionResult
+    expansion::Union{Nothing, ExpansionResult}
     validation::ValidationResult
     warnings::Vector{String} = String[]
     status::Symbol = :ok

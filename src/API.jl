@@ -1,11 +1,12 @@
 using Base.Threads
 
 """
-    iduna(; id, mmseqs_db, kwargs...) -> IdunaResult
-    iduna(id; mmseqs_db, kwargs...) -> IdunaResult
+    iduna(; id, mmseqs_db=nothing, no_expansion=false, kwargs...) -> IdunaResult
+    iduna(id; mmseqs_db=nothing, no_expansion=false, kwargs...) -> IdunaResult
 
-Build and expand one ThorAxe-based MSA from a UniProt accession or an Ensembl
-transcript ID.
+Build one ThorAxe-based MSA from a UniProt accession or an Ensembl transcript
+ID and, by default, expand it with MMseqs2/HMMER. Set `no_expansion=true` to
+stop after the ThorAxe MSA stage without requiring an MMseqs2 database.
 
 The function is file-first: every external tool writes its inputs, outputs, and
 logs under `workdir`, and the returned [`IdunaResult`](@ref) stores paths plus
@@ -21,7 +22,8 @@ baseline and PID ThorAxe runs the same kind of wall-clock guard. Pass
 `thoraxe_input_dir` to reuse a complete transcript_query bundle instead of
 fetching it again. Set `centroids=true` to also save the centroid-level MSA
 before MMseqs2 expands centroid hits to cluster members; the main expansion and
-validation still use the full expanded MSA.
+validation still use the full expanded MSA. `centroids=true` requires
+expansion and cannot be combined with `no_expansion=true`.
 """
 function iduna(; id::Union{Nothing, AbstractString} = nothing,
         uniprot_id::Union{Nothing, AbstractString} = nothing,
@@ -29,7 +31,8 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
         transcript_id::Union{Nothing, AbstractString} = nothing,
         ensembl_gene_id::Union{Nothing, AbstractString} = nothing,
         ensembl_protein_id::Union{Nothing, AbstractString} = nothing,
-        mmseqs_db::AbstractString,
+        mmseqs_db::Union{Nothing, AbstractString} = nothing,
+        no_expansion::Bool = false,
         workdir::Union{Nothing, AbstractString} = nothing,
         output_dir::Union{Nothing, AbstractString} = nothing,
         overwrite::Bool = false,
@@ -57,6 +60,7 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
     primary, disambiguating_transcript,
     supplied_uniprot = _normalize_primary_input(;
         id, uniprot_id, ensembl_transcript_id, transcript_id)
+    _validate_expansion_options(; mmseqs_db, no_expansion, centroids)
     root = nothing
     target = nothing
     thoraxe = nothing
@@ -91,15 +95,18 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
             allow_specieslist_timeout_fallback,
             thoraxe_timeout_seconds)
 
-        failed_stage = "msa_expansion"
-        expansion = _expand_msa(target, thoraxe.best_seed, root;
-            mmseqs_db,
-            overwrite,
-            match_mode,
-            match_ratio,
-            hmmbuild_symfrac,
-            centroids,
-            threads)
+        expansion = nothing
+        if !no_expansion
+            failed_stage = "msa_expansion"
+            expansion = _expand_msa(target, thoraxe.best_seed, root;
+                mmseqs_db,
+                overwrite,
+                match_mode,
+                match_ratio,
+                hmmbuild_symfrac,
+                centroids,
+                threads)
+        end
 
         failed_stage = "validation"
         validation = _validate_results(target, thoraxe.best_seed, expansion, root)
@@ -119,13 +126,24 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
         return result
     catch err
         if root !== nothing
-            _write_failure_result(primary, root, failed_stage, err; target, thoraxe, validation)
+            _write_failure_result(
+                primary, root, failed_stage, err; target, thoraxe, validation)
         end
         rethrow()
     end
 end
 
 iduna(id::AbstractString; kwargs...) = iduna(; id, kwargs...)
+
+function _validate_expansion_options(; mmseqs_db, no_expansion::Bool, centroids::Bool)
+    if no_expansion && centroids
+        error("centroids=true requires MMseqs expansion; use no_expansion=false.")
+    end
+    if !no_expansion && mmseqs_db === nothing
+        error("Pass mmseqs_db for expansion, or set no_expansion=true to stop after the ThorAxe MSA stage.")
+    end
+    return nothing
+end
 
 function _pipeline_status(warnings::AbstractVector{<:AbstractString})
     isempty(warnings) ? :ok : :warn
@@ -173,11 +191,12 @@ function _exception_summary(err)
         message = sprint(showerror, err)
     )
     if err isa ThorAxeMSA._CommandTimeoutError
-        return merge(summary, (;
-            command = err.command,
-            stdout_log = err.stdout_log,
-            stderr_log = err.stderr_log
-        ))
+        return merge(
+            summary, (;
+                command = err.command,
+                stdout_log = err.stdout_log,
+                stderr_log = err.stderr_log
+            ))
     end
     return summary
 end
@@ -245,5 +264,7 @@ end
 Load the expanded match-column MSA from an [`IdunaResult`](@ref) as a MIToS MSA.
 """
 function load_expanded_msa(result::Utils.IdunaResult; keepinserts::Bool = true)
+    result.expansion === nothing &&
+        error("This IdunaResult has no expanded MSA because it was run with no_expansion=true; use load_seed_msa(result) instead.")
     ResultsValidation.load_expanded_msa(result.expansion; keepinserts)
 end

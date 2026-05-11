@@ -65,6 +65,19 @@
         @test isfile(validation.stats_path)
         @test isfile(validation.query_vs_uniprot_path)
 
+        seed_only_validation = Iduna.ResultsValidation.validate_results(
+            target, seed, nothing, joinpath(tmp, "seed_only"))
+        @test seed_only_validation.status === :warn
+        @test seed_only_validation.query_name == "seq1"
+        @test seed_only_validation.seed_nseq == 2
+        @test seed_only_validation.expanded_nseq === nothing
+        @test seed_only_validation.expanded_ncol === nothing
+        @test seed_only_validation.expanded_clusters62 === nothing
+        @test seed_only_validation.expanded_neff80 === nothing
+        @test occursin("Seed query has substitutions", only(seed_only_validation.warnings))
+        @test isfile(seed_only_validation.stats_path)
+        @test isfile(seed_only_validation.query_vs_uniprot_path)
+
         transcript_target = Iduna.ResolvedTarget(;
             input_id = "ENST000001",
             input_kind = :ensembl_transcript,

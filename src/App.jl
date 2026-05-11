@@ -32,8 +32,9 @@ function _app_arg_settings(;
         exit_after_help::Bool = false)
     settings = ArgParseSettings(;
         prog = "iduna",
-        description = "Build and expand one ThorAxe-based MSA from a UniProt accession or an Ensembl transcript ID.",
-        usage = "iduna <UniProt-or-Ensembl-transcript-ID> --mmseqs-db <path> [options]",
+        description = "Build one ThorAxe-based MSA from a UniProt accession or an Ensembl transcript ID, " *
+                      "optionally expanding it with MMseqs2/HMMER.",
+        usage = "iduna <UniProt-or-Ensembl-transcript-ID> [--mmseqs-db <path>] [--no-expansion] [options]",
         autofix_names = true,
         exc_handler,
         exit_after_help,
@@ -47,10 +48,13 @@ function _app_arg_settings(;
         required = true
 
         "--mmseqs-db"
-        help = "MMseqs2 database prefix."
+        help = "MMseqs2 database prefix. Required unless --no-expansion is used."
         metavar = "path"
         arg_type = String
-        required = true
+
+        "--no-expansion"
+        help = "Stop after the ThorAxe MSA stage without MMseqs2/HMMER expansion."
+        action = :store_true
 
         "--workdir"
         help = "Output/work directory."

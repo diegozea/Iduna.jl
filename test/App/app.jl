@@ -8,8 +8,16 @@
         @test kwargs[:specieslist_filter] === true
         @test kwargs[:biomart_datasets_filter] === true
         @test kwargs[:centroids] === false
+        @test kwargs[:no_expansion] === false
         @test !haskey(kwargs, :pid_thresholds)
         @test !haskey(kwargs, :transcript_query_retries)
+    end
+
+    @testset "no expansion CLI" begin
+        kwargs = Iduna._parse_app_args(["P20963", "--no-expansion"])
+        @test kwargs[:id] == "P20963"
+        @test kwargs[:no_expansion] === true
+        @test !haskey(kwargs, :mmseqs_db)
     end
 
     @testset "option mapping" begin
@@ -55,7 +63,6 @@
     end
 
     @testset "required arguments" begin
-        @test_throws Iduna.ArgParse.ArgParseError Iduna._parse_app_args(["P20963"])
         @test_throws Iduna.ArgParse.ArgParseError Iduna._parse_app_args([
             "--mmseqs-db", "db"])
     end

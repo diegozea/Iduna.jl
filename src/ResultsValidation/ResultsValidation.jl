@@ -101,10 +101,12 @@ end
 
 function validate_results(target::ResolvedTarget,
         seed::SeedSelection,
-        expansion::ExpansionResult,
+        expansion::Union{Nothing, ExpansionResult},
         workdir::AbstractString)
     seed_stats = alignment_stats(seed.stockholm_path)
-    expanded_stats = alignment_stats(expansion.match_stockholm)
+    expanded_stats = expansion === nothing ? nothing :
+                     alignment_stats(expansion.match_stockholm)
+    final_stats = expansion === nothing ? seed_stats : expanded_stats
 
     query_name = nothing
     aln_path = nothing
@@ -115,9 +117,9 @@ function validate_results(target::ResolvedTarget,
     warnings = String[]
 
     if target.uniprot_sequence_path !== nothing && isfile(target.uniprot_sequence_path)
-        # Compare the final query sequence against UniProt when a reference exists.
+        # Compare the final available query sequence against UniProt when a reference exists.
         query_name,
-        query_seq = _extract_query_sequence(expanded_stats.msa,
+        query_seq = _extract_query_sequence(final_stats.msa,
             target.ensembl_gene_id, target.transcript_id)
         uniprot_seq = _read_fasta_sequence(target.uniprot_sequence_path)
         aln_stats = _align_sequences(query_seq, uniprot_seq)
@@ -129,14 +131,21 @@ function validate_results(target::ResolvedTarget,
         aln_insertions = aln_stats.insertions
         aln_deletions = aln_stats.deletions
         if aln_insertions != 0 || aln_deletions != 0
-            push!(warnings, "Expanded query has indels relative to the UniProt sequence.")
+            label = expansion === nothing ? "Seed query" : "Expanded query"
+            push!(warnings, "$(label) has indels relative to the UniProt sequence.")
         elseif aln_identical == false
-            push!(warnings, "Expanded query has substitutions relative to the UniProt sequence.")
+            label = expansion === nothing ? "Seed query" : "Expanded query"
+            push!(warnings, "$(label) has substitutions relative to the UniProt sequence.")
         end
     end
 
     stats_path = joinpath(workdir, "validation", "stats.csv")
     mkpath(dirname(stats_path))
+    expanded_path = expansion === nothing ? nothing : expansion.match_stockholm
+    expanded_nseq = expanded_stats === nothing ? nothing : expanded_stats.n_sequences
+    expanded_ncol = expanded_stats === nothing ? nothing : expanded_stats.n_columns
+    expanded_clusters62 = expanded_stats === nothing ? nothing : expanded_stats.n_clusters
+    expanded_neff80 = expanded_stats === nothing ? nothing : expanded_stats.neff
     CSV.write(stats_path,
         DataFrame(
             input_id = [target.input_id],
@@ -145,15 +154,15 @@ function validate_results(target::ResolvedTarget,
             transcript_id = [target.transcript_id],
             pid = [seed.pid],
             seed_path = [seed.stockholm_path],
-            expanded_path = [expansion.match_stockholm],
+            expanded_path = [expanded_path],
             seed_nseq = [seed_stats.n_sequences],
-            expanded_nseq = [expanded_stats.n_sequences],
+            expanded_nseq = [expanded_nseq],
             seed_ncol = [seed_stats.n_columns],
-            expanded_ncol = [expanded_stats.n_columns],
+            expanded_ncol = [expanded_ncol],
             seed_clusters62 = [seed_stats.n_clusters],
-            expanded_clusters62 = [expanded_stats.n_clusters],
+            expanded_clusters62 = [expanded_clusters62],
             seed_neff80 = [seed_stats.neff],
-            expanded_neff80 = [expanded_stats.neff],
+            expanded_neff80 = [expanded_neff80],
             query_name = [query_name],
             query_vs_uniprot_path = [aln_path],
             aln_identical = [aln_identical],
@@ -172,10 +181,10 @@ function validate_results(target::ResolvedTarget,
         seed_ncol = seed_stats.n_columns,
         seed_clusters62 = seed_stats.n_clusters,
         seed_neff80 = seed_stats.neff,
-        expanded_nseq = expanded_stats.n_sequences,
-        expanded_ncol = expanded_stats.n_columns,
-        expanded_clusters62 = expanded_stats.n_clusters,
-        expanded_neff80 = expanded_stats.neff,
+        expanded_nseq,
+        expanded_ncol,
+        expanded_clusters62,
+        expanded_neff80,
         aln_identical,
         aln_mismatches,
         aln_insertions,

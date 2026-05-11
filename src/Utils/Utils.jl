@@ -298,7 +298,8 @@ function result_summary(result::IdunaResult)
             warnings = result.thoraxe_msa.warnings,
             status = String(result.thoraxe_msa.status)
         ),
-        expansion = (;
+        expansion = result.expansion === nothing ? nothing :
+                    (;
             match_stockholm = result.expansion.match_stockholm,
             full_stockholm = result.expansion.full_stockholm,
             a3m_path = result.expansion.a3m_path,

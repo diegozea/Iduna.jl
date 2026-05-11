@@ -4,10 +4,10 @@ CurrentModule = Iduna
 
 # Iduna
 
-Iduna builds one ThorAxe-based multiple sequence alignment and expands it with
-MMseqs2/HMMER. The public API is centered on [`iduna`](@ref), which accepts one
-UniProt accession or Ensembl transcript ID and writes a reproducible work
-directory.
+Iduna builds one ThorAxe-based multiple sequence alignment and, by default,
+expands it with MMseqs2/HMMER. The public API is centered on [`iduna`](@ref),
+which accepts one UniProt accession or Ensembl transcript ID and writes a
+reproducible work directory.
 
 The package is file-first. External tools write logs and intermediate files
 under the chosen `workdir`, and the returned result stores paths plus the
@@ -40,6 +40,27 @@ centroid-level MSA. This is a side output built from MMseqs2 centroid or
 consensus hits before cluster expansion; the regular expanded MSA remains the
 main result used by validation.
 
+Use `no_expansion=true` in Julia, or `--no-expansion` in the app, to stop after
+the ThorAxe MSA stage. In that mode `mmseqs_db` is not required,
+`result.expansion === nothing`, and `load_seed_msa(result)` loads the selected
+ThorAxe PID seed.
+
+```julia
+thoraxe_only = iduna(
+    "ENST00000362089.10";
+    no_expansion=true,
+    workdir="ENST00000362089_thoraxe",
+)
+
+seed = load_seed_msa(thoraxe_only)
+thoraxe_only.thoraxe_msa.baseline_stockholm
+thoraxe_only.thoraxe_msa.best_seed.stockholm_path
+```
+
+```bash
+julia --project=. -m Iduna ENST00000362089.10 --no-expansion
+```
+
 For an Ensembl transcript input, Iduna resolves the parent Ensembl gene ID and
 species needed by ThorAxe. It does not require UniProt mapping on that path.
 
@@ -61,7 +82,8 @@ gene complexity and the selected PID thresholds.
 
 If the ThorAxe `transcript_query` bundle has already been created, pass it with
 `thoraxe_input_dir`. Iduna copies that bundle into `workdir/thoraxe_input` and
-continues with the same ThorAxe MSA, PID seed, expansion, and validation stages.
+continues with the same ThorAxe MSA and PID seed stages. Unless
+`no_expansion=true`, it also runs expansion and expanded-MSA validation.
 
 ```@index
 ```
