@@ -183,6 +183,8 @@ function _mmseqs_search(seed_msa_sto::AbstractString,
     threads !== nothing && (search_cmd = `$search_cmd --threads $(Int(threads))`)
     _run_labeled(search_cmd, "search", logs_dir)
 
+    # The search results are centroid/consensus hits. `expandaln` expands those
+    # hits to all cluster members, which remains Iduna's main MSA output.
     expandaln_cmd = `$(mmseqs_bin) expandaln $profile_db $base_db $search_result_db $aln_db $expanded_result_db`
     threads !== nothing && (expandaln_cmd = `$expandaln_cmd --threads $(Int(threads))`)
     _run_labeled(expandaln_cmd, "expandaln", logs_dir)
@@ -255,6 +257,65 @@ function _cached_hit_counts(hits_fasta::AbstractString, seed_set::Set{String})
     )
 end
 
+function _write_centroid_msa(transcript_id::AbstractString,
+        mmseqs_db::AbstractString,
+        db_paths,
+        tmp_dir::AbstractString,
+        centroid_dir::AbstractString,
+        seed_set::Set{String},
+        seed_names::Vector{String},
+        sanitized_seed::AbstractString,
+        hmm_path::AbstractString,
+        annotated_seed::AbstractString,
+        logs_dir::AbstractString)
+    mkpath(centroid_dir)
+
+    # Keep working files in the MMseqs temp area; only final centroid files go here.
+    mktempdir(tmp_dir; prefix = "centroid_msa_") do centroid_tmp
+        centroid_hits_tsv = joinpath(centroid_tmp, "mmseqs_centroid_hits_raw.tsv")
+        # Reuse the existing search result: this saves a side MSA without
+        # rerunning MMseqs search or changing the full expansion.
+        _run_labeled(
+            `$(MMseqs2_jll.mmseqs()) convertalis $(db_paths.profile_db) $(mmseqs_db) $(db_paths.search_result_db) $centroid_hits_tsv --format-output query,target,tseq`,
+            "convertalis_centroids", logs_dir)
+
+        # Save every centroid hit for auditing, but align only hits not already in the seed.
+        all_hits, filtered_hits = _collect_hits(centroid_hits_tsv, seed_set)
+        raw_hits_fasta = joinpath(centroid_dir, "$(transcript_id)_centroid_hits_raw.fasta")
+        filtered_fasta = joinpath(centroid_tmp, "mmseqs_centroid_hits_filtered.fasta")
+        write_fasta(raw_hits_fasta, all_hits)
+        write_fasta(filtered_fasta, filtered_hits)
+
+        # If there are no new centroid hits, the seed alignment is already the final MSA.
+        aligned_sto = joinpath(centroid_tmp, "alignment_with_centroid_hits.sto")
+        if isempty(filtered_hits)
+            cp(annotated_seed, aligned_sto; force = true)
+        else
+            _run_labeled(
+                `$(HMMER_jll.hmmalign()) --mapali $sanitized_seed --trim --outformat stockholm -o $aligned_sto $hmm_path $filtered_fasta`,
+                "hmmalign_centroids", logs_dir)
+        end
+        normalize_stockholm_annotations!(aligned_sto)
+
+        match_stockholm = joinpath(centroid_dir, "$(transcript_id)_centroids_matchonly.sto")
+        open(match_stockholm, "w") do io
+            run(pipeline(`$(HMMER_jll.esl_alimask()) --rf-is-mask $aligned_sto`, stdout = io))
+        end
+        normalize_stockholm_annotations!(match_stockholm)
+
+        # The match-only file removes insert columns; the full file keeps them.
+        full_stockholm = joinpath(centroid_dir, "$(transcript_id)_centroids_full.sto")
+        full_alignment = _reorder_alignment(read_file(aligned_sto, Stockholm; keepinserts = true), seed_names)
+        match_alignment = _reorder_alignment(
+            read_file(match_stockholm, Stockholm; keepinserts = true), seed_names)
+        write_file(full_stockholm, full_alignment, Stockholm)
+        write_file(match_stockholm, match_alignment, Stockholm)
+        write_file(joinpath(centroid_dir, "$(transcript_id)_centroids.a3m"),
+            match_alignment, A3M)
+    end
+    return nothing
+end
+
 function expand_msa(target::ResolvedTarget,
         seed::SeedSelection,
         workdir::AbstractString;
@@ -263,6 +324,7 @@ function expand_msa(target::ResolvedTarget,
         match_mode::Integer = 1,
         match_ratio::Union{Nothing, Real} = nothing,
         hmmbuild_symfrac::Real = 0.0,
+        centroids::Bool = false,
         threads::Union{Nothing, Integer} = Threads.nthreads())
     0.0 <= hmmbuild_symfrac <= 1.0 ||
         error("hmmbuild_symfrac must be between 0.0 and 1.0.")
@@ -369,6 +431,20 @@ function expand_msa(target::ResolvedTarget,
         write_file(a3m_path, match_alignment, A3M)
         hits_copy = joinpath(unpack_dir, "$(target.transcript_id)_hits_raw.fasta")
         cp(raw_hits_fasta, hits_copy; force = true)
+
+        if centroids
+            _write_centroid_msa(target.transcript_id,
+                mmseqs_db,
+                db_paths,
+                tmp_dir,
+                joinpath(run_dir, "centroid_msa"),
+                seed_set,
+                seed_names,
+                sanitized_seed,
+                hmm_path,
+                annotated_seed,
+                logs_dir)
+        end
 
         return ExpansionResult(;
             run_dir,

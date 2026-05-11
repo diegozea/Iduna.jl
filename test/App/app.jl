@@ -7,6 +7,7 @@
         @test kwargs[:allow_specieslist_timeout_fallback] === true
         @test kwargs[:specieslist_filter] === true
         @test kwargs[:biomart_datasets_filter] === true
+        @test kwargs[:centroids] === false
         @test !haskey(kwargs, :pid_thresholds)
         @test !haskey(kwargs, :transcript_query_retries)
     end
@@ -22,6 +23,7 @@
             "--orthology", "1:n",
             "--no-specieslist-filter",
             "--no-biomart-datasets-filter",
+            "--centroids",
             "--threads", "4",
             "--transcript-query-retries", "3"
         ])
@@ -32,6 +34,7 @@
         @test kwargs[:orthology] == "1:n"
         @test kwargs[:specieslist_filter] === false
         @test kwargs[:biomart_datasets_filter] === false
+        @test kwargs[:centroids] === true
         @test kwargs[:threads] == 4
         @test kwargs[:transcript_query_retries] == 3
     end

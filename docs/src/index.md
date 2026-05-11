@@ -22,6 +22,7 @@ result = iduna(
     mmseqs_db="/path/to/mmseqs/uniref_db",
     workdir="P20963",
     overwrite=false,
+    centroids=false,
     transcript_query_timeout_seconds=180,
 )
 
@@ -33,6 +34,11 @@ The same entry point is available as a Julia 1.12 app:
 ```bash
 julia --project=. -m Iduna P20963 --mmseqs-db /path/to/mmseqs/uniref_db
 ```
+
+Add `--centroids` (or `centroids=true` in Julia) to also save a
+centroid-level MSA. This is a side output built from MMseqs2 centroid or
+consensus hits before cluster expansion; the regular expanded MSA remains the
+main result used by validation.
 
 For an Ensembl transcript input, Iduna resolves the parent Ensembl gene ID and
 species needed by ThorAxe. It does not require UniProt mapping on that path.

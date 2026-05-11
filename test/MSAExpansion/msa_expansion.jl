@@ -123,11 +123,13 @@
         hits_fasta = joinpath(cached_dir, "$(transcript_id)_hits_raw.fasta")
         write(hits_fasta, ">seed one\nACDE\n>hit one\nACDF\n>hit_two\nACDG\n")
 
-        cached = Iduna.MSAExpansion.expand_msa(target, seed, tmp; mmseqs_db = db)
+        cached = Iduna.MSAExpansion.expand_msa(target, seed, tmp; mmseqs_db = db,
+            centroids = true)
         hits_msa = Iduna.MSAExpansion.read_file(hits_fasta, Iduna.MSAExpansion.FASTA)
         @test cached.status === :skipped
         @test cached.n_hits == Iduna.MSAExpansion.nsequences(hits_msa)
         @test cached.n_hits == 3
         @test cached.n_new_hits == 2
+        @test !isdir(joinpath(tmp, "expansion", gene_id, transcript_id, "centroid_msa"))
     end
 end

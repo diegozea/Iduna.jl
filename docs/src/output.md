@@ -28,6 +28,7 @@ around it. By default, `workdir` is a directory named after the input ID.
       hmm/
       logs/
       expanded_msa/
+      centroid_msa/  # optional, written only with centroids=true / --centroids
   validation/
     stats.csv
     query_vs_uniprot_alignment.txt
@@ -56,3 +57,11 @@ result.thoraxe_msa.best_seed.stockholm_path
 result.expansion.match_stockholm
 result.expansion.a3m_path
 ```
+
+`expanded_msa/` is the full MMseqs2 cluster-expanded MSA and remains the main
+Iduna result. When `centroids=true` or `--centroids` is used, Iduna also writes
+`centroid_msa/` with the MSA built from centroid/consensus hits before cluster
+expansion. This side output reuses the same MMseqs2 search result, does not run
+a second search, and does not change validation or `result.json`. Its files are
+`<transcript>_centroids_full.sto`, `<transcript>_centroids_matchonly.sto`,
+`<transcript>_centroids.a3m`, and `<transcript>_centroid_hits_raw.fasta`.

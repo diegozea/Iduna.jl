@@ -130,6 +130,28 @@
     @test summary.thoraxe_msa.status == "warn"
     @test summary.thoraxe_msa.warnings == thoraxe.warnings
 
+    @testset "centroids option forwarding" begin
+        mktempdir() do tmp
+            captured = Ref{Dict{Symbol, Any}}()
+            result = Iduna.iduna(;
+                id = "Q13148",
+                mmseqs_db = "db",
+                workdir = joinpath(tmp, "centroids_forwarding"),
+                centroids = true,
+                _resolve_target = (args...; kwargs...) -> target,
+                _build_thoraxe_msa = (args...; kwargs...) -> thoraxe,
+                _expand_msa = (args...; kwargs...) -> begin
+                    captured[] = Dict{Symbol, Any}(kwargs)
+                    expansion
+                end,
+                _validate_results = (args...; kwargs...) -> validation)
+
+            @test result.expansion === expansion
+            @test captured[][:centroids] === true
+            @test captured[][:mmseqs_db] == "db"
+        end
+    end
+
     @testset "failure result artifacts" begin
         _read_result(path) = Iduna.JSON3.read(read(joinpath(path, "result.json"), String))
 

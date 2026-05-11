@@ -66,6 +66,10 @@ function _app_arg_settings(;
         help = "Regenerate package-owned outputs in workdir."
         action = :store_true
 
+        "--centroids"
+        help = "Also save the centroid-level MSA before MMseqs2 cluster expansion."
+        action = :store_true
+
         "--pid-thresholds"
         help = "Comma-separated thresholds, default 10,20,30,60,80."
         metavar = "list"

@@ -19,7 +19,9 @@ each Ensembl query attempt. Iduna retries that step and can retry without
 `specieslist` after a timeout. Set `thoraxe_timeout_seconds` to give the
 baseline and PID ThorAxe runs the same kind of wall-clock guard. Pass
 `thoraxe_input_dir` to reuse a complete transcript_query bundle instead of
-fetching it again.
+fetching it again. Set `centroids=true` to also save the centroid-level MSA
+before MMseqs2 expands centroid hits to cluster members; the main expansion and
+validation still use the full expanded MSA.
 """
 function iduna(; id::Union{Nothing, AbstractString} = nothing,
         uniprot_id::Union{Nothing, AbstractString} = nothing,
@@ -46,6 +48,7 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
         match_mode::Integer = 1,
         match_ratio::Union{Nothing, Real} = nothing,
         hmmbuild_symfrac::Real = 0.0,
+        centroids::Bool = false,
         threads::Union{Nothing, Integer} = Threads.nthreads(),
         _resolve_target::Function = IDMapping.resolve_target,
         _build_thoraxe_msa::Function = ThorAxeMSA.build_thoraxe_msa,
@@ -95,6 +98,7 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
             match_mode,
             match_ratio,
             hmmbuild_symfrac,
+            centroids,
             threads)
 
         failed_stage = "validation"

@@ -22,6 +22,10 @@ expanded = load_expanded_msa(result)
 The package writes a stable work directory containing ThorAxe outputs, PID seed
 MSAs, expansion outputs, logs, and validation stats.
 
+Pass `centroids=true` in Julia, or `--centroids` in the app, to also save a
+centroid-level MSA before MMseqs2 expands centroid hits to cluster members. This
+is a side output; the regular `expanded_msa/` files remain the main result.
+
 By default, Iduna filters the ThorAxe species list with Ensembl homology using
 `orthology="1:1"`, then checks BioMart Ensembl Gene dataset availability with
 `biomart_datasets_filter=true`. BioMart dataset names are only used internally;
