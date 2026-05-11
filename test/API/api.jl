@@ -131,6 +131,25 @@
     @test summary.thoraxe_msa.warnings == thoraxe.warnings
     @test summary.expansion.match_stockholm == "match.sto"
 
+    @testset "result pretty printing" begin
+        expansion_text = repr("text/plain", expansion)
+        @test startswith(expansion_text, "ExpansionResult(\n")
+        @test occursin(r"\n\s+run_dir\s+=\s+expansion", expansion_text)
+        @test occursin(r"\n\s+n_hits\s+=\s+0", expansion_text)
+        @test occursin(r"\n\s+status\s+=\s+:ok", expansion_text)
+
+        validation_text = repr("text/plain", validation)
+        @test startswith(validation_text, "ValidationResult(\n")
+        @test occursin(r"\n\s+stats_path\s+=\s+stats\.csv", validation_text)
+        @test occursin(r"\n\s+status\s+=\s+:ok", validation_text)
+
+        result_text = repr("text/plain", result)
+        @test startswith(result_text, "IdunaResult(\n")
+        @test occursin(r"\n\s+target\s+=\s+ResolvedTarget\(", result_text)
+        @test occursin(r"\n\s+expansion\s+=\s+ExpansionResult\(", result_text)
+        @test occursin(r"\n\s+validation\s+=\s+ValidationResult\(", result_text)
+    end
+
     @testset "centroids option forwarding" begin
         mktempdir() do tmp
             captured = Ref{Dict{Symbol, Any}}()

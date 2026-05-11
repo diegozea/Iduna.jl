@@ -1,10 +1,11 @@
 name = "Iduna"
 uuid = "a1090517-0d21-41a4-b698-8a258aa9b9e4"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Diego Javier Zea <diegozea@gmail.com> and contributors"]
 
 [deps]
 ArgParse = "c7e460c6-2fb9-53a9-8c5b-16f535851c63"
+AutoPrettyPrinting = "9109d3c5-9510-494f-be9f-db449708e717"
 BioAlignments = "00701ae9-d1dc-5365-b64a-a3a3ebf5695e"
 BioSequences = "7e6ae17a-c86d-528c-b3b9-7f778a29fe59"
 CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
@@ -24,6 +25,7 @@ ThorAxe = "cf6a4a95-c6c1-4b3e-818d-24edc886ccb5"
 
 [compat]
 ArgParse = "1.2"
+AutoPrettyPrinting = "0.1.8"
 BioAlignments = "3"
 BioSequences = "3"
 CSV = "0.10"

@@ -1,3 +1,5 @@
+using AutoPrettyPrinting: @def_pprint
+
 """
     ResolvedTarget
 
@@ -116,3 +118,10 @@ Base.@kwdef struct IdunaResult
     warnings::Vector{String} = String[]
     status::Symbol = :ok
 end
+
+@def_pprint mime_types="text/plain" base_show=true ResolvedTarget
+@def_pprint mime_types="text/plain" base_show=true SeedSelection
+@def_pprint mime_types="text/plain" base_show=true ThorAxeMSAResult
+@def_pprint mime_types="text/plain" base_show=true ExpansionResult
+@def_pprint mime_types="text/plain" base_show=true ValidationResult
+@def_pprint mime_types="text/plain" base_show=true IdunaResult
