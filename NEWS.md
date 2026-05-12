@@ -2,11 +2,13 @@
 
 ### Changes from v0.2.0 to v0.3.0
 
+Breaking changes:
+
 - Changed returned result artifact paths under `workdir` to be relative while
   keeping `IdunaResult.workdir` absolute, making printed result objects and
-  JSON summaries more compact.
-- Kept lower-level readers and validators compatible with returned relative
-  paths by resolving them against their associated work directory.
+  JSON summaries more compact. We have kept lower-level readers and validators 
+  compatible with returned relative paths by resolving them against their 
+  associated work directory.
 
 ### Changes from v0.1.0 to v0.2.0
 
