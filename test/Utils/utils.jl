@@ -17,11 +17,12 @@
     @test Iduna.Utils.decode_body(gzipped) == "gzipped body"
 
     @testset "HTTP download retries" begin
-        response(status::Integer, body::AbstractString = "") =
-            Iduna.Utils.HTTP.Response(status, Vector{UInt8}(body))
+        response(status::Integer,
+            body::AbstractString = "") = Iduna.Utils.HTTP.Response(status, Vector{UInt8}(body))
 
         attempts = Ref(0)
-        transient_then_success = (url; headers, retry, status_exception) -> begin
+        transient_then_success = (url; headers, retry,
+            status_exception) -> begin
             attempts[] += 1
             @test url == "https://example.test/data"
             @test headers == ["Accept" => "text/plain"]
@@ -116,6 +117,16 @@
         Iduna.Utils.safe_rm(owned, workdir)
         @test !isdir(owned)
         @test_throws ErrorException Iduna.Utils.safe_rm(tmp, workdir)
+
+        inside_path = joinpath(workdir, "nested", "artifact.txt")
+        outside_path = joinpath(tmp, "outside.txt")
+        relative_path = joinpath("nested", "artifact.txt")
+        @test Iduna.Utils._relative_artifact_path(inside_path, workdir) == relative_path
+        @test Iduna.Utils._relative_artifact_path(outside_path, workdir) == outside_path
+        @test Iduna.Utils._relative_artifact_path(relative_path, workdir) == relative_path
+        @test Iduna.Utils._relative_artifact_path(nothing, workdir) === nothing
+        @test Iduna.Utils._resolve_artifact_path(relative_path, workdir) == inside_path
+        @test Iduna.Utils._resolve_artifact_path(outside_path, workdir) == outside_path
 
         formatted = Iduna.Utils.format_fasta("seq", "acdefghijklmnopqrstuvwxyz"^3)
         @test startswith(formatted, ">seq\nACDEFGHIJKLMNOPQRSTUVWXYZ")

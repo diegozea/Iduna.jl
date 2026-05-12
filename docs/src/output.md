@@ -63,6 +63,10 @@ result.expansion.match_stockholm
 result.expansion.a3m_path
 ```
 
+`result.workdir` is stored as an absolute path. Artifact paths inside
+`workdir` are stored relative to it, so use `joinpath(result.workdir, path)` to
+open them directly. Paths outside `workdir` remain unchanged.
+
 When `no_expansion=true` or `--no-expansion` is used, Iduna stops after the
 ThorAxe MSA stage. `result.expansion === nothing`, `result.json` contains
 `"expansion": null`, and no `expansion/` directory is written. Validation still

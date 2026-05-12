@@ -30,6 +30,16 @@
             uniprot_sequence_path = uniprot)
         write(uniprot, ">P20963\nAACC\n")
         @test isempty(Iduna.ThorAxeMSA._validate_transcript_translation(target, msa))
+        relative_target = Iduna.ResolvedTarget(;
+            input_id = "P20963",
+            input_kind = :uniprot,
+            uniprot_id = "P20963",
+            ensembl_gene_id = "ENSG00000000001.1",
+            transcript_id = "ENST00000000001.1",
+            uniprot_sequence_path = "uniprot.fasta",
+            workdir = tmp)
+        @test isempty(Iduna.ThorAxeMSA._validate_transcript_translation(
+            relative_target, msa; workdir = joinpath(tmp, "new_run")))
 
         write(uniprot, ">P20963\nAAAC\n")
         warnings = Iduna.ThorAxeMSA._validate_transcript_translation(target, msa)

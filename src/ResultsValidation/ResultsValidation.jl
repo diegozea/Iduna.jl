@@ -8,7 +8,8 @@ using MIToS.MSA: A3M, AbstractMultipleSequenceAlignment, FASTA, Stockholm,
                  read_file, sequencenames, stringsequence
 
 using ..Utils: ExpansionResult, ResolvedTarget, SeedSelection, ValidationResult,
-               protein_alignment_stats, resolve_sequence_name
+               _relative_artifact_path, _resolve_artifact_path, protein_alignment_stats,
+               resolve_sequence_name
 
 export alignment_stats,
        load_expanded_msa,
@@ -28,12 +29,18 @@ function load_msa(path::AbstractString; keepinserts::Bool = true)
     error("Cannot infer MSA format from $(path).")
 end
 
-function load_seed_msa(seed::SeedSelection; keepinserts::Bool = true)
-    load_msa(seed.stockholm_path; keepinserts)
+function load_seed_msa(seed::SeedSelection; keepinserts::Bool = true,
+        workdir::Union{Nothing, AbstractString} = seed.workdir)
+    path = workdir === nothing ? seed.stockholm_path :
+           _resolve_artifact_path(seed.stockholm_path, workdir)
+    load_msa(path; keepinserts)
 end
 
-function load_expanded_msa(expansion::ExpansionResult; keepinserts::Bool = true)
-    load_msa(expansion.match_stockholm; keepinserts)
+function load_expanded_msa(expansion::ExpansionResult; keepinserts::Bool = true,
+        workdir::Union{Nothing, AbstractString} = expansion.workdir)
+    path = workdir === nothing ? expansion.match_stockholm :
+           _resolve_artifact_path(expansion.match_stockholm, workdir)
+    load_msa(path; keepinserts)
 end
 
 function alignment_stats(path::AbstractString; cluster_threshold::Real = 62.0, neff_threshold::Real = 80.0)
@@ -103,9 +110,18 @@ function validate_results(target::ResolvedTarget,
         seed::SeedSelection,
         expansion::Union{Nothing, ExpansionResult},
         workdir::AbstractString)
-    seed_stats = alignment_stats(seed.stockholm_path)
+    seed_path = _resolve_artifact_path(
+        seed.stockholm_path, seed.workdir === nothing ? workdir : seed.workdir)
+    expanded_path = expansion === nothing ? nothing :
+                    _resolve_artifact_path(expansion.match_stockholm,
+        expansion.workdir === nothing ? workdir : expansion.workdir)
+    uniprot_path = target.uniprot_sequence_path === nothing ? nothing :
+                   _resolve_artifact_path(target.uniprot_sequence_path,
+        target.workdir === nothing ? workdir : target.workdir)
+
+    seed_stats = alignment_stats(seed_path)
     expanded_stats = expansion === nothing ? nothing :
-                     alignment_stats(expansion.match_stockholm)
+                     alignment_stats(expanded_path)
     final_stats = expansion === nothing ? seed_stats : expanded_stats
 
     query_name = nothing
@@ -116,12 +132,12 @@ function validate_results(target::ResolvedTarget,
     aln_deletions = nothing
     warnings = String[]
 
-    if target.uniprot_sequence_path !== nothing && isfile(target.uniprot_sequence_path)
+    if uniprot_path !== nothing && isfile(uniprot_path)
         # Compare the final available query sequence against UniProt when a reference exists.
         query_name,
         query_seq = _extract_query_sequence(final_stats.msa,
             target.ensembl_gene_id, target.transcript_id)
-        uniprot_seq = _read_fasta_sequence(target.uniprot_sequence_path)
+        uniprot_seq = _read_fasta_sequence(uniprot_path)
         aln_stats = _align_sequences(query_seq, uniprot_seq)
         aln_path = joinpath(workdir, "validation", "query_vs_uniprot_alignment.txt")
         _write_alignment_log(
@@ -141,7 +157,9 @@ function validate_results(target::ResolvedTarget,
 
     stats_path = joinpath(workdir, "validation", "stats.csv")
     mkpath(dirname(stats_path))
-    expanded_path = expansion === nothing ? nothing : expansion.match_stockholm
+    seed_summary_path = _relative_artifact_path(seed_path, workdir)
+    expanded_summary_path = _relative_artifact_path(expanded_path, workdir)
+    aln_summary_path = _relative_artifact_path(aln_path, workdir)
     expanded_nseq = expanded_stats === nothing ? nothing : expanded_stats.n_sequences
     expanded_ncol = expanded_stats === nothing ? nothing : expanded_stats.n_columns
     expanded_clusters62 = expanded_stats === nothing ? nothing : expanded_stats.n_clusters
@@ -153,8 +171,8 @@ function validate_results(target::ResolvedTarget,
             gene_id = [target.ensembl_gene_id],
             transcript_id = [target.transcript_id],
             pid = [seed.pid],
-            seed_path = [seed.stockholm_path],
-            expanded_path = [expanded_path],
+            seed_path = [seed_summary_path],
+            expanded_path = [expanded_summary_path],
             seed_nseq = [seed_stats.n_sequences],
             expanded_nseq = [expanded_nseq],
             seed_ncol = [seed_stats.n_columns],
@@ -164,7 +182,7 @@ function validate_results(target::ResolvedTarget,
             seed_neff80 = [seed_stats.neff],
             expanded_neff80 = [expanded_neff80],
             query_name = [query_name],
-            query_vs_uniprot_path = [aln_path],
+            query_vs_uniprot_path = [aln_summary_path],
             aln_identical = [aln_identical],
             aln_mismatches = [aln_mismatches],
             aln_insertions = [aln_insertions],

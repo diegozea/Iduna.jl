@@ -6,8 +6,8 @@ import MMseqs2_jll
 using MIToS.MSA: A3M, AbstractMultipleSequenceAlignment, FASTA, Stockholm,
                  nsequences, read_file, sequencenames, write_file
 
-using ..Utils: ExpansionResult, ResolvedTarget, SeedSelection, ensure_mmseqs_db,
-               format_pid, run_logged, safe_rm, write_fasta
+using ..Utils: ExpansionResult, ResolvedTarget, SeedSelection, _resolve_artifact_path,
+               ensure_mmseqs_db, format_pid, run_logged, safe_rm, write_fasta
 
 export expand_msa,
        normalize_stockholm_annotations!,
@@ -329,6 +329,10 @@ function expand_msa(target::ResolvedTarget,
     0.0 <= hmmbuild_symfrac <= 1.0 ||
         error("hmmbuild_symfrac must be between 0.0 and 1.0.")
     ensure_mmseqs_db(mmseqs_db)
+    seed_workdir = seed.workdir === nothing ? workdir : seed.workdir
+    seed_stockholm = _resolve_artifact_path(seed.stockholm_path, seed_workdir)
+    seed_fasta = seed.fasta_path === nothing ? nothing :
+                 _resolve_artifact_path(seed.fasta_path, seed_workdir)
 
     run_dir = joinpath(_expansion_root(workdir), target.ensembl_gene_id, target.transcript_id)
     unpack_dir = joinpath(run_dir, "expanded_msa")
@@ -337,11 +341,11 @@ function expand_msa(target::ResolvedTarget,
         safe_rm(run_dir, workdir)
     elseif !overwrite && _expanded_outputs_exist(unpack_dir, target.transcript_id)
         hits_fasta = joinpath(unpack_dir, "$(target.transcript_id)_hits_raw.fasta")
-        counts = _cached_hit_counts(hits_fasta, _seed_id_set(seed.stockholm_path))
+        counts = _cached_hit_counts(hits_fasta, _seed_id_set(seed_stockholm))
         return ExpansionResult(;
             run_dir,
-            seed_stockholm = seed.stockholm_path,
-            seed_fasta = seed.fasta_path,
+            seed_stockholm,
+            seed_fasta,
             hits_fasta,
             full_stockholm = joinpath(unpack_dir, "$(target.transcript_id)_full.sto"),
             match_stockholm = joinpath(unpack_dir, "$(target.transcript_id)_matchonly.sto"),
@@ -351,7 +355,8 @@ function expand_msa(target::ResolvedTarget,
             logs_dir,
             n_hits = counts.n_hits,
             n_new_hits = counts.n_new_hits,
-            status = :skipped
+            status = :skipped,
+            workdir = String(workdir)
         )
     end
 
@@ -363,13 +368,13 @@ function expand_msa(target::ResolvedTarget,
 
     seed_label = "seed_pid$(format_pid(seed.pid))"
     archived_seed_sto = joinpath(seed_dir, "$(seed_label).sto")
-    cp(seed.stockholm_path, archived_seed_sto; force = true)
+    cp(seed_stockholm, archived_seed_sto; force = true)
     archived_seed_fasta = nothing
-    if seed.fasta_path !== nothing && isfile(seed.fasta_path)
+    if seed_fasta !== nothing && isfile(seed_fasta)
         archived_seed_fasta = joinpath(seed_dir, "$(seed_label).fasta")
-        cp(seed.fasta_path, archived_seed_fasta; force = true)
+        cp(seed_fasta, archived_seed_fasta; force = true)
     end
-    sanitized_seed = prepare_stockholm_for_mmseqs(seed.stockholm_path,
+    sanitized_seed = prepare_stockholm_for_mmseqs(seed_stockholm,
         joinpath(seed_dir, "$(seed_label)_mmseqs.sto"))
     seed_alignment = read_file(archived_seed_sto, Stockholm; keepinserts = true)
     seed_names = String.(sequencenames(seed_alignment))
@@ -459,7 +464,8 @@ function expand_msa(target::ResolvedTarget,
             logs_dir,
             n_hits = length(all_hits),
             n_new_hits = length(filtered_hits),
-            status = :ok
+            status = :ok,
+            workdir = String(workdir)
         )
     end
 end

@@ -12,7 +12,8 @@ reproducible work directory.
 The package is file-first. External tools write logs and intermediate files
 under the chosen `workdir`, and the returned result stores paths plus the
 resolved identifiers, selected seed, expansion outputs, validation statistics,
-warnings, and status.
+warnings, and status. `result.workdir` is absolute; artifact paths under it are
+reported relative to `workdir`.
 
 ```julia
 using Iduna

@@ -14,8 +14,9 @@ using MIToS.MSA: AbstractMultipleSequenceAlignment, FASTA, Stockholm, join_msas,
                  stringsequence, write_file
 
 using ..Utils: DEFAULT_PID_THRESHOLDS, ResolvedTarget, SeedSelection, ThorAxeMSAResult,
-               _http_get_with_retries, decode_body, fasta_sequence, format_pid,
-               protein_alignment_stats, resolve_sequence_name, safe_rm,
+               _http_get_with_retries, _resolve_artifact_path, decode_body,
+               fasta_sequence, format_pid, protein_alignment_stats, resolve_sequence_name,
+               safe_rm,
                strip_ensembl_version, write_fasta
 
 export assemble_transcript_msa,
@@ -764,15 +765,20 @@ function _compare_protein_sequences(query_seq::AbstractString, reference_seq::Ab
 end
 
 function _validate_transcript_translation(target::ResolvedTarget,
-        msa::AbstractMultipleSequenceAlignment)
+        msa::AbstractMultipleSequenceAlignment;
+        workdir::Union{Nothing, AbstractString} = target.workdir)
     target.uniprot_sequence_path === nothing && return String[]
-    isfile(target.uniprot_sequence_path) || return String[
+    artifact_workdir = target.workdir === nothing ? workdir : target.workdir
+    uniprot_sequence_path = artifact_workdir === nothing ? target.uniprot_sequence_path :
+                            _resolve_artifact_path(
+        target.uniprot_sequence_path, artifact_workdir)
+    isfile(uniprot_sequence_path) || return String[
         "UniProt sequence file is missing; skipped ThorAxe transcript validation."]
 
     query_name,
     query_seq = _extract_reference_sequence(msa,
         target.ensembl_gene_id, target.transcript_id)
-    reference_seq = _read_single_fasta_sequence(target.uniprot_sequence_path)
+    reference_seq = _read_single_fasta_sequence(uniprot_sequence_path)
     stats = _compare_protein_sequences(query_seq, reference_seq)
     warnings = String[]
     if stats.insertions != 0 || stats.deletions != 0
@@ -965,7 +971,8 @@ function build_thoraxe_msa(target::ResolvedTarget, workdir::AbstractString;
     warnings = vcat(species_filter.warnings,
         biomart_filter.warnings,
         _biomart_transcript_query_warnings(input_dir, _thoraxe_logs_dir(workdir)),
-        _validate_transcript_translation(target, msa))
+        _validate_transcript_translation(
+            target, msa; workdir = target.workdir === nothing ? workdir : target.workdir))
     status = isempty(warnings) ? :ok : :warn
     baseline_fasta, baseline_sto,
     sequence_fasta, species_file = _save_baseline_msa(workdir, msa, species; overwrite)

@@ -64,6 +64,46 @@
         @test occursin("substitutions", only(validation.warnings))
         @test isfile(validation.stats_path)
         @test isfile(validation.query_vs_uniprot_path)
+        stats_row = only(collect(Iduna.ResultsValidation.CSV.File(validation.stats_path)))
+        @test stats_row.seed_path == "tiny.sto"
+        @test stats_row.expanded_path == "tiny.sto"
+        @test stats_row.query_vs_uniprot_path ==
+              joinpath("validation", "query_vs_uniprot_alignment.txt")
+
+        relative_seed = Iduna.SeedSelection(;
+            pid = 10.0,
+            median_identity = 100.0,
+            mean_identity = 100.0,
+            stockholm_path = "tiny.sto",
+            summary_path = "seed_summary.csv",
+            workdir = tmp)
+        relative_expansion = Iduna.ExpansionResult(;
+            run_dir = ".",
+            seed_stockholm = "tiny.sto",
+            hits_fasta = "tiny.fasta",
+            full_stockholm = "tiny.sto",
+            match_stockholm = "tiny.sto",
+            a3m_path = "tiny.a3m",
+            db_dir = ".",
+            hmm_dir = ".",
+            logs_dir = ".",
+            workdir = tmp)
+        relative_target = Iduna.ResolvedTarget(;
+            input_id = "P20963",
+            input_kind = :uniprot,
+            uniprot_id = "P20963",
+            ensembl_gene_id = "seq1",
+            transcript_id = "ENST000001",
+            uniprot_sequence_path = "uniprot.fasta",
+            workdir = tmp)
+        @test Iduna.ResultsValidation.nsequences(
+            Iduna.ResultsValidation.load_seed_msa(relative_seed)) == 2
+        @test Iduna.ResultsValidation.nsequences(
+            Iduna.ResultsValidation.load_expanded_msa(relative_expansion)) == 2
+        relative_validation = Iduna.ResultsValidation.validate_results(
+            relative_target, relative_seed, relative_expansion, tmp)
+        @test relative_validation.status === :warn
+        @test relative_validation.query_name == "seq1"
 
         seed_only_validation = Iduna.ResultsValidation.validate_results(
             target, seed, nothing, joinpath(tmp, "seed_only"))

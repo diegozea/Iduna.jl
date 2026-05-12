@@ -150,6 +150,95 @@
         @test occursin(r"\n\s+validation\s+=\s+ValidationResult\(", result_text)
     end
 
+    @testset "returned result artifact paths are relative to workdir" begin
+        mktempdir() do tmp
+            workdir = joinpath(tmp, "relative_paths")
+            gene = "ENSG00000120948.20"
+            transcript = "ENST00000240185.8"
+            abs_target = Iduna.ResolvedTarget(;
+                input_id = "Q13148",
+                input_kind = :uniprot,
+                uniprot_id = "Q13148",
+                ensembl_gene_id = gene,
+                transcript_id = transcript,
+                ensembl_protein_id = "ENSP00000240185",
+                uniprot_sequence_path = joinpath(
+                    workdir, "sequences", "uniprot", "Q13148.fasta"),
+                ensembl_protein_sequence_path = joinpath(
+                    workdir, "sequences", "ensembl_proteins", "ENSP00000240185.fasta"))
+            abs_seed = Iduna.SeedSelection(;
+                pid = 10.0,
+                median_identity = 1.0,
+                mean_identity = 1.0,
+                stockholm_path = joinpath(workdir, "thoraxe_msa", "seeds", "pid10.sto"),
+                fasta_path = joinpath(workdir, "thoraxe_msa", "seeds", "pid10.fasta"),
+                summary_path = joinpath(workdir, "thoraxe_msa", "best_seed.csv"))
+            abs_thoraxe = Iduna.ThorAxeMSAResult(;
+                input_dir = joinpath(workdir, "thoraxe_input"),
+                thoraxe_dir = joinpath(workdir, "thoraxe"),
+                msa_dir = joinpath(workdir, "thoraxe_msa"),
+                baseline_fasta = joinpath(workdir, "thoraxe_msa", "baseline.fasta"),
+                baseline_stockholm = joinpath(workdir, "thoraxe_msa", "baseline.sto"),
+                sequence_fasta = joinpath(workdir, "thoraxe_msa", "sequences.fasta"),
+                species_file = joinpath(workdir, "thoraxe_msa", "species.txt"),
+                pid_summary = joinpath(workdir, "thoraxe_msa", "best_seed.csv"),
+                best_seed = abs_seed,
+                logs_dir = joinpath(workdir, "logs", "thoraxe"))
+            expansion_dir = joinpath(workdir, "expansion", gene, transcript)
+            abs_expansion = Iduna.ExpansionResult(;
+                run_dir = expansion_dir,
+                seed_stockholm = joinpath(expansion_dir, "seeds", "seed.sto"),
+                seed_fasta = joinpath(expansion_dir, "seeds", "seed.fasta"),
+                hits_fasta = joinpath(
+                    expansion_dir, "expanded_msa", "$(transcript)_hits_raw.fasta"),
+                full_stockholm = joinpath(
+                    expansion_dir, "expanded_msa", "$(transcript)_full.sto"),
+                match_stockholm = joinpath(
+                    expansion_dir, "expanded_msa", "$(transcript)_matchonly.sto"),
+                a3m_path = joinpath(
+                    expansion_dir, "expanded_msa", "$(transcript)_expanded.a3m"),
+                db_dir = joinpath(expansion_dir, "dbs"),
+                hmm_dir = joinpath(expansion_dir, "hmm"),
+                logs_dir = joinpath(expansion_dir, "logs"))
+            abs_validation = Iduna.ValidationResult(;
+                stats_path = joinpath(workdir, "validation", "stats.csv"),
+                query_vs_uniprot_path = joinpath(
+                    workdir, "validation", "query_vs_uniprot_alignment.txt"))
+
+            result = Iduna.iduna(;
+                id = "Q13148",
+                mmseqs_db = "db",
+                workdir,
+                _resolve_target = (args...; kwargs...) -> abs_target,
+                _build_thoraxe_msa = (args...; kwargs...) -> abs_thoraxe,
+                _expand_msa = (args...; kwargs...) -> abs_expansion,
+                _validate_results = (args...; kwargs...) -> abs_validation)
+
+            @test result.workdir == abspath(workdir)
+            @test result.target.uniprot_sequence_path ==
+                  joinpath("sequences", "uniprot", "Q13148.fasta")
+            @test result.thoraxe_msa.pid_summary ==
+                  joinpath("thoraxe_msa", "best_seed.csv")
+            @test result.thoraxe_msa.best_seed.stockholm_path ==
+                  joinpath("thoraxe_msa", "seeds", "pid10.sto")
+            @test result.thoraxe_msa.best_seed.workdir == result.workdir
+            @test result.expansion.match_stockholm == joinpath(
+                "expansion", gene, transcript, "expanded_msa",
+                "$(transcript)_matchonly.sto")
+            @test result.expansion.workdir == result.workdir
+            @test result.validation.stats_path == joinpath("validation", "stats.csv")
+
+            target_json = Iduna.JSON3.read(read(joinpath(workdir, "target.json"), String))
+            @test target_json.uniprot_sequence_path ==
+                  joinpath("sequences", "uniprot", "Q13148.fasta")
+            written = Iduna.JSON3.read(read(joinpath(workdir, "result.json"), String))
+            @test written.thoraxe_msa.pid_summary ==
+                  joinpath("thoraxe_msa", "best_seed.csv")
+            @test written.expansion.match_stockholm == result.expansion.match_stockholm
+            @test written.validation.stats_path == joinpath("validation", "stats.csv")
+        end
+    end
+
     @testset "centroids option forwarding" begin
         mktempdir() do tmp
             captured = Ref{Dict{Symbol, Any}}()
@@ -167,7 +256,7 @@
                 end,
                 _validate_results = (args...; kwargs...) -> validation)
 
-            @test result.expansion === expansion
+            @test result.expansion.match_stockholm == expansion.match_stockholm
             @test captured[][:centroids] === true
             @test captured[][:mmseqs_db] == "db"
         end
@@ -290,8 +379,8 @@
             @test failed.failed_stage == "thoraxe_msa"
             @test failed.exception.type == "Iduna.ThorAxeMSA._CommandTimeoutError"
             @test failed.exception.command == "thoraxe --example"
-            @test failed.exception.stdout_log == stdout_log
-            @test failed.exception.stderr_log == stderr_log
+            @test failed.exception.stdout_log == joinpath("logs", "thoraxe", "stdout.log")
+            @test failed.exception.stderr_log == joinpath("logs", "thoraxe", "stderr.log")
             @test occursin("timed out after 12.0 seconds", failed.exception.message)
         end
     end

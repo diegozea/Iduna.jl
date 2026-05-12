@@ -78,7 +78,7 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
             ensembl_protein_id,
             transcript_id = disambiguating_transcript,
             species)
-        Utils.write_json(joinpath(root, "target.json"), _target_summary(target))
+        Utils.write_json(joinpath(root, "target.json"), _target_summary(target, root))
 
         failed_stage = "thoraxe_msa"
         thoraxe = _build_thoraxe_msa(target, root;
@@ -122,6 +122,7 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
             warnings,
             status
         )
+        result = Utils._relative_result_paths(result)
         Utils.write_json(joinpath(root, "result.json"), Utils.result_summary(result))
         return result
     catch err
@@ -172,8 +173,8 @@ function _failure_result_summary(input_id::AbstractString, workdir::AbstractStri
         status = "error",
         failed_stage = String(failed_stage),
         warnings = _partial_warnings(target, thoraxe, validation),
-        target = target === nothing ? nothing : _target_summary(target),
-        exception = _exception_summary(err)
+        target = target === nothing ? nothing : _target_summary(target, workdir),
+        exception = _exception_summary(err, workdir)
     )
 end
 
@@ -185,17 +186,21 @@ function _partial_warnings(target, thoraxe, validation)
     return warnings
 end
 
-function _exception_summary(err)
+function _exception_summary(err, workdir::Union{Nothing, AbstractString} = nothing)
     summary = (;
         type = string(typeof(err)),
         message = sprint(showerror, err)
     )
     if err isa ThorAxeMSA._CommandTimeoutError
+        stdout_log = workdir === nothing ? err.stdout_log :
+                     Utils._relative_artifact_path(err.stdout_log, workdir)
+        stderr_log = workdir === nothing ? err.stderr_log :
+                     Utils._relative_artifact_path(err.stderr_log, workdir)
         return merge(
             summary, (;
                 command = err.command,
-                stdout_log = err.stdout_log,
-                stderr_log = err.stderr_log
+                stdout_log,
+                stderr_log
             ))
     end
     return summary
@@ -232,7 +237,11 @@ function _normalize_primary_input(; id, uniprot_id, ensembl_transcript_id, trans
     return first_value, disambiguating_transcript, supplied_uniprot
 end
 
-function _target_summary(target::Utils.ResolvedTarget)
+_summary_path(path, workdir::Nothing) = path
+_summary_path(path, workdir::AbstractString) = Utils._relative_artifact_path(path, workdir)
+
+function _target_summary(target::Utils.ResolvedTarget,
+        workdir::Union{Nothing, AbstractString} = nothing)
     return (;
         input_id = target.input_id,
         input_kind = String(target.input_kind),
@@ -241,8 +250,9 @@ function _target_summary(target::Utils.ResolvedTarget)
         transcript_id = target.transcript_id,
         ensembl_protein_id = target.ensembl_protein_id,
         species = target.species,
-        uniprot_sequence_path = target.uniprot_sequence_path,
-        ensembl_protein_sequence_path = target.ensembl_protein_sequence_path,
+        uniprot_sequence_path = _summary_path(target.uniprot_sequence_path, workdir),
+        ensembl_protein_sequence_path = _summary_path(
+            target.ensembl_protein_sequence_path, workdir),
         sequence_validated = target.sequence_validated,
         mapping_confirmed = target.mapping_confirmed,
         warnings = target.warnings
@@ -255,7 +265,9 @@ end
 Load the selected ThorAxe seed MSA from an [`IdunaResult`](@ref) as a MIToS MSA.
 """
 function load_seed_msa(result::Utils.IdunaResult; keepinserts::Bool = true)
-    ResultsValidation.load_seed_msa(result.thoraxe_msa.best_seed; keepinserts)
+    seed_path = Utils._resolve_artifact_path(
+        result.thoraxe_msa.best_seed.stockholm_path, result.workdir)
+    ResultsValidation.load_msa(seed_path; keepinserts)
 end
 
 """
@@ -266,5 +278,7 @@ Load the expanded match-column MSA from an [`IdunaResult`](@ref) as a MIToS MSA.
 function load_expanded_msa(result::Utils.IdunaResult; keepinserts::Bool = true)
     result.expansion === nothing &&
         error("This IdunaResult has no expanded MSA because it was run with no_expansion=true; use load_seed_msa(result) instead.")
-    ResultsValidation.load_expanded_msa(result.expansion; keepinserts)
+    expansion_path = Utils._resolve_artifact_path(
+        result.expansion.match_stockholm, result.workdir)
+    ResultsValidation.load_msa(expansion_path; keepinserts)
 end

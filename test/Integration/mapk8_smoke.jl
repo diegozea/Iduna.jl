@@ -39,23 +39,25 @@
         Iduna.Utils.run_logged(`$(mmseqs) createdb $fasta $seq_db`;
             stdout_path = joinpath(logs_dir, "createdb_seq_stdout.log"),
             stderr_path = joinpath(logs_dir, "createdb_seq_stderr.log"))
-        Iduna.Utils.run_logged(`$(mmseqs) search $db $seq_db $aln_db $mmseqs_tmp -a --threads 1`;
+        Iduna.Utils.run_logged(
+            `$(mmseqs) search $db $seq_db $aln_db $mmseqs_tmp -a --threads 1`;
             stdout_path = joinpath(logs_dir, "search_stdout.log"),
             stderr_path = joinpath(logs_dir, "search_stderr.log"))
         return db
     end
 
     function checked_mapk8_smoke_result(result)
+        artifact(path) = Iduna.Utils._resolve_artifact_path(path, result.workdir)
         required_files = (
             joinpath(result.workdir, "target.json"),
             joinpath(result.workdir, "result.json"),
-            result.thoraxe_msa.pid_summary,
-            result.thoraxe_msa.best_seed.stockholm_path,
-            result.expansion.match_stockholm,
-            result.expansion.full_stockholm,
-            result.expansion.a3m_path,
-            result.expansion.hits_fasta,
-            result.validation.stats_path
+            artifact(result.thoraxe_msa.pid_summary),
+            artifact(result.thoraxe_msa.best_seed.stockholm_path),
+            artifact(result.expansion.match_stockholm),
+            artifact(result.expansion.full_stockholm),
+            artifact(result.expansion.a3m_path),
+            artifact(result.expansion.hits_fasta),
+            artifact(result.validation.stats_path)
         )
         missing = filter(!isfile, required_files)
         isempty(missing) || error("MAPK8 smoke test missing files: $(join(missing, ", "))")

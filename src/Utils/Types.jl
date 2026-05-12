@@ -17,6 +17,7 @@ Base.@kwdef struct ResolvedTarget
     ensembl_protein_sequence_path::Union{Nothing, String} = nothing
     sequence_validated::Union{Nothing, Bool} = nothing
     mapping_confirmed::Union{Nothing, Bool} = nothing
+    workdir::Union{Nothing, String} = nothing
     warnings::Vector{String} = String[]
 end
 
@@ -33,6 +34,7 @@ Base.@kwdef struct SeedSelection
     fasta_path::Union{Nothing, String} = nothing
     summary_path::String
     used_fallback_dir::Bool = false
+    workdir::Union{Nothing, String} = nothing
 end
 
 """
@@ -74,6 +76,7 @@ Base.@kwdef struct ExpansionResult
     n_hits::Int = 0
     n_new_hits::Int = 0
     status::Symbol = :ok
+    workdir::Union{Nothing, String} = nothing
 end
 
 """

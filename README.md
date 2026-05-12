@@ -21,7 +21,8 @@ expanded = load_expanded_msa(result)
 ```
 
 The package writes a stable work directory containing ThorAxe outputs, PID seed
-MSAs, expansion outputs, logs, and validation stats.
+MSAs, expansion outputs, logs, and validation stats. `result.workdir` is
+absolute, while artifact paths under it are reported relative to `workdir`.
 
 To stop after the ThorAxe MSA stage, use `no_expansion=true` in Julia or
 `--no-expansion` in the app. In that mode `mmseqs_db` is not required,

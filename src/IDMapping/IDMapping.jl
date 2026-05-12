@@ -282,6 +282,7 @@ function resolve_target(input_id::AbstractString;
             ensembl_protein_sequence_path = protein_path,
             sequence_validated = chosen.sequence_validated,
             mapping_confirmed = chosen.mapping_confirmed,
+            workdir = String(workdir),
             warnings
         )
     end
@@ -306,7 +307,8 @@ function resolve_target(input_id::AbstractString;
                              String(ensembl_protein_id),
         species = resolved_species,
         sequence_validated = nothing,
-        mapping_confirmed = nothing
+        mapping_confirmed = nothing,
+        workdir = String(workdir)
     )
 end
 
