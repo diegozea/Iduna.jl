@@ -6,17 +6,21 @@ import HHsuite_jll
 import HTTP
 import JSON3
 import Scratch
+import SHA
 import ThorAxe
 
-using DataFrames: DataFrame
+using DataFrames: DataFrame, nrow
 using MIToS.MSA: AbstractMultipleSequenceAlignment, FASTA, Stockholm, join_msas,
                  nsequences, read_file, sequencenames, setreference!,
                  stringsequence, write_file
+using Random: MersenneTwister
+using Statistics: mean, median
+using StatsBase: sample
 
 using ..Utils: DEFAULT_PID_THRESHOLDS, ResolvedTarget, SeedSelection, ThorAxeMSAResult,
                _http_get_with_retries, _resolve_artifact_path, decode_body,
-               fasta_sequence, format_pid, protein_alignment_stats, resolve_sequence_name,
-               safe_rm,
+               fasta_sequence, format_pid, format_pid_dir, protein_alignment_stats,
+               resolve_sequence_name, safe_rm,
                strip_ensembl_version, write_fasta
 
 export assemble_transcript_msa,
@@ -53,6 +57,7 @@ const _BIOMART_DATASETS_URL = "https://www.ensembl.org/biomart/martservice?type=
 const _BIOMART_TEXT_HEADERS = ["Accept" => "text/plain"]
 const _BIOMART_DATASETS_FILE = "ENSEMBL_MART_ENSEMBL_datasets.tsv"
 const _BIOMART_DATASETS_METADATA_FILE = "ENSEMBL_MART_ENSEMBL_datasets.json"
+const _TRANSCRIPT_QUERY_METADATA_FILE = "iduna_transcript_query.json"
 
 _normalize_species_name(species::Nothing) = nothing
 function _normalize_species_name(species::AbstractString)
@@ -60,10 +65,12 @@ function _normalize_species_name(species::AbstractString)
 end
 
 _thoraxe_input_dir(workdir::AbstractString) = joinpath(workdir, "thoraxe_input")
-_thoraxe_output_dir(workdir::AbstractString) = joinpath(workdir, "thoraxe")
 _thoraxe_msa_dir(workdir::AbstractString) = joinpath(workdir, "thoraxe_msa")
-_thoraxe_seed_dir(workdir::AbstractString) = joinpath(_thoraxe_msa_dir(workdir), "seeds")
+function _thoraxe_candidates_dir(workdir::AbstractString)
+    joinpath(_thoraxe_msa_dir(workdir), "candidates")
+end
 _thoraxe_logs_dir(workdir::AbstractString) = joinpath(workdir, "logs", "thoraxe")
+_thoraxe_pid_runs_dir(workdir::AbstractString) = joinpath(_thoraxe_msa_dir(workdir), "runs")
 
 function _has_valid_ensembl_bundle(bundle_root::AbstractString)::Bool
     ensembl_dir = joinpath(bundle_root, "Ensembl")
@@ -74,6 +81,87 @@ function _has_valid_ensembl_bundle(bundle_root::AbstractString)::Bool
         isfile(path) && filesize(path) > 0 || return false
     end
     return true
+end
+
+function _bundle_fingerprint(bundle_root::AbstractString)
+    _has_valid_ensembl_bundle(bundle_root) || return nothing
+    parts = String[]
+    ensembl_dir = joinpath(bundle_root, "Ensembl")
+    for file in sort(collect(_REQUIRED_ENSEMBL_FILES))
+        path = joinpath(ensembl_dir, file)
+        push!(parts, file)
+        push!(parts, string(filesize(path)))
+        push!(parts, bytes2hex(SHA.sha256(read(path))))
+    end
+    return bytes2hex(SHA.sha256(join(parts, '\n')))
+end
+
+function _transcript_query_metadata_path(input_dir::AbstractString)
+    joinpath(input_dir, _TRANSCRIPT_QUERY_METADATA_FILE)
+end
+
+function _expected_transcript_query_metadata(target::ResolvedTarget;
+        specieslist::Union{Nothing, AbstractString},
+        orthology::AbstractString,
+        source_kind::AbstractString,
+        source_path::Union{Nothing, AbstractString} = nothing,
+        source_fingerprint::Union{Nothing, AbstractString} = nothing)
+    return (;
+        gene_id = target.ensembl_gene_id,
+        transcript_id = target.transcript_id,
+        species = _normalize_species_name(target.species),
+        specieslist = _normalized_specieslist(specieslist),
+        orthology = String(orthology),
+        source_kind = String(source_kind),
+        source_path = source_path === nothing ? nothing : abspath(String(source_path)),
+        source_fingerprint
+    )
+end
+
+function _metadata_value_matches(stored, expected)
+    if expected === nothing
+        return stored === nothing || stored === missing
+    end
+    stored === nothing && return false
+    stored === missing && return false
+    return String(stored) == String(expected)
+end
+
+function _metadata_matches(path::AbstractString, expected)
+    isfile(path) || return false
+    try
+        metadata = JSON3.read(read(path, String))
+        for (key, expected_value) in pairs(expected)
+            hasproperty(metadata, key) || return false
+            _metadata_value_matches(getproperty(metadata, key), expected_value) ||
+                return false
+        end
+        return true
+    catch err
+        err isa InterruptException && rethrow()
+        return false
+    end
+end
+
+function _write_transcript_query_metadata!(input_dir::AbstractString, expected)
+    metadata = merge(expected,
+        (;
+            input_fingerprint = _bundle_fingerprint(input_dir),
+            written_at = string(Dates.now())
+        ))
+    path = _transcript_query_metadata_path(input_dir)
+    open(path, "w") do io
+        JSON3.pretty(io, metadata)
+        println(io)
+    end
+    return path
+end
+
+function _has_matching_transcript_query_metadata(input_dir::AbstractString, expected)
+    expected_with_fingerprint = merge(expected,
+        (; input_fingerprint = _bundle_fingerprint(input_dir)))
+    return _metadata_matches(_transcript_query_metadata_path(input_dir),
+        expected_with_fingerprint)
 end
 
 function _open_logs(f::Function, stdout_path::AbstractString, stderr_path::AbstractString)
@@ -494,15 +582,23 @@ end
 
 function _ensure_cached_thoraxe_input(source_dir::AbstractString,
         workdir::AbstractString;
-        overwrite::Bool = false)
+        overwrite::Bool = false,
+        metadata)
     dest = _thoraxe_input_dir(workdir)
-    if !overwrite && _has_valid_ensembl_bundle(dest)
-        return dest
-    end
-
     source = abspath(String(source_dir))
     _has_valid_ensembl_bundle(source) ||
         error("Cached ThorAxe input at $(source) is not a valid transcript_query bundle.")
+    source_fingerprint = _bundle_fingerprint(source)
+    expected = merge(metadata,
+        (;
+            source_path = source,
+            source_fingerprint
+        ))
+    if !overwrite && _has_valid_ensembl_bundle(dest) &&
+       _has_matching_transcript_query_metadata(dest, expected)
+        return dest
+    end
+
     if abspath(dest) != source
         isdir(dest) && safe_rm(dest, workdir)
         mkpath(dirname(dest))
@@ -510,6 +606,7 @@ function _ensure_cached_thoraxe_input(source_dir::AbstractString,
     end
     _has_valid_ensembl_bundle(dest) ||
         error("Copied ThorAxe input bundle at $(dest) is incomplete.")
+    _write_transcript_query_metadata!(dest, expected)
     return dest
 end
 
@@ -523,12 +620,17 @@ function _ensure_transcript_query(target::ResolvedTarget, workdir::AbstractStrin
         orthology::AbstractString = "1:1",
         allow_specieslist_timeout_fallback::Bool = true)
     _orthology_relationships(orthology)
+    metadata = _expected_transcript_query_metadata(target;
+        specieslist,
+        orthology,
+        source_kind = cached_input_dir === nothing ? "transcript_query" : "cached_input")
     if cached_input_dir !== nothing
-        return _ensure_cached_thoraxe_input(cached_input_dir, workdir; overwrite)
+        return _ensure_cached_thoraxe_input(cached_input_dir, workdir; overwrite, metadata)
     end
 
     input_dir = _thoraxe_input_dir(workdir)
-    if !overwrite && _has_valid_ensembl_bundle(input_dir)
+    if !overwrite && _has_valid_ensembl_bundle(input_dir) &&
+       _has_matching_transcript_query_metadata(input_dir, metadata)
         return input_dir
     end
 
@@ -585,6 +687,7 @@ function _ensure_transcript_query(target::ResolvedTarget, workdir::AbstractStrin
         _has_valid_ensembl_bundle(tmp_gene_dir) ||
             error("transcript_query did not create a valid Ensembl bundle at $(tmp_gene_dir). See $(stderr_log).")
         mv(tmp_gene_dir, input_dir; force = true)
+        _write_transcript_query_metadata!(input_dir, metadata)
         return input_dir
     end
 end
@@ -633,29 +736,6 @@ function _biomart_transcript_query_warnings(input_dir::AbstractString,
     return [
         "BioMart transcript_query failures recorded for species: $(join(species, ", ")). See $(errors_path) and $(stderr_log)."
     ]
-end
-
-function _ensure_baseline_thoraxe(target::ResolvedTarget,
-        input_dir::AbstractString,
-        workdir::AbstractString;
-        specieslist::Union{Nothing, AbstractString} = nothing,
-        overwrite::Bool = false,
-        timeout_seconds::Union{Nothing, Real} = nothing)
-    thoraxe_dir = _thoraxe_output_dir(workdir)
-    if !overwrite && isfile(joinpath(thoraxe_dir, "path_table.csv")) &&
-       isfile(joinpath(thoraxe_dir, "s_exon_table.csv"))
-        return thoraxe_dir
-    end
-
-    isdir(thoraxe_dir) && safe_rm(thoraxe_dir, workdir)
-    stdout_log = joinpath(_thoraxe_logs_dir(workdir), "baseline_stdout.log")
-    stderr_log = joinpath(_thoraxe_logs_dir(workdir), "baseline_stderr.log")
-    runner = _thoraxe_runner(stdout_log, stderr_log; timeout_seconds = timeout_seconds)
-    ThorAxe.thoraxe(input_dir, workdir; specieslist = specieslist, runner = runner)
-
-    isfile(joinpath(thoraxe_dir, "path_table.csv")) ||
-        error("ThorAxe baseline did not write path_table.csv in $(thoraxe_dir). See $(stderr_log).")
-    return thoraxe_dir
 end
 
 function _join_msas_consistently(
@@ -712,33 +792,6 @@ function assemble_transcript_msa(thoraxe_dir::AbstractString,
                    for name in sequencenames(transcript_msa)]
     end
     return transcript_msa, species
-end
-
-function _save_baseline_msa(workdir::AbstractString,
-        msa::AbstractMultipleSequenceAlignment,
-        species::AbstractVector{<:AbstractString};
-        overwrite::Bool = false)
-    seed_dir = _thoraxe_seed_dir(workdir)
-    mkpath(seed_dir)
-    fasta_path = joinpath(seed_dir, "msa_0.fasta")
-    sto_path = joinpath(seed_dir, "msa_0.sto")
-    sequences_path = joinpath(seed_dir, "sequences_0.fasta")
-    species_path = joinpath(seed_dir, "species_0.txt")
-    if !overwrite && all(isfile, (fasta_path, sto_path, sequences_path, species_path))
-        return fasta_path, sto_path, sequences_path, species_path
-    end
-
-    write_file(fasta_path, msa, FASTA)
-    write_file(sto_path, msa, Stockholm)
-    write_fasta(sequences_path,
-        [(String(name), replace(stringsequence(msa, name), '-' => ""))
-         for name in sequencenames(msa)])
-    open(species_path, "w") do io
-        for item in species
-            println(io, String(item))
-        end
-    end
-    return fasta_path, sto_path, sequences_path, species_path
 end
 
 function _read_single_fasta_sequence(path::AbstractString)
@@ -872,59 +925,644 @@ function compute_identity_against_reference(reference_fasta::AbstractString,
     end
 end
 
-function _generate_pid_seed(target::ResolvedTarget,
+function _candidate_pid_dir(workdir::AbstractString, pid::Real)
+    joinpath(_thoraxe_candidates_dir(workdir), format_pid_dir(pid))
+end
+
+function _candidate_sample_label(sample_idx::Integer)
+    sample_idx == 0 && return "full"
+    return "species_subset_$(lpad(string(sample_idx), 3, '0'))"
+end
+
+function _pid_sample_paths(workdir::AbstractString, pid::Real, sample_idx::Integer)
+    candidate_dir = _candidate_pid_dir(workdir, pid)
+    label = _candidate_sample_label(sample_idx)
+    msa_name = sample_idx == 0 ? "candidate_msa_full" : "candidate_msa_$(label)"
+    sequence_name = sample_idx == 0 ? "candidate_sequences_full" :
+                    "candidate_sequences_$(label)"
+    species_name = sample_idx == 0 ? "candidate_species_full" :
+                   "candidate_$(label)"
+    return (;
+        fasta_path = joinpath(candidate_dir, "$(msa_name).fasta"),
+        stockholm_path = joinpath(candidate_dir, "$(msa_name).sto"),
+        sequence_fasta = joinpath(candidate_dir, "sequences", "$(sequence_name).fasta"),
+        species_file = joinpath(candidate_dir, "species", "$(species_name).txt")
+    )
+end
+
+function _pid_scores_path(workdir::AbstractString, pid::Real)
+    joinpath(_candidate_pid_dir(workdir, pid), "scores.csv")
+end
+
+function _pid_sample_run_root(workdir::AbstractString, pid::Real, sample_idx::Integer)
+    joinpath(_thoraxe_pid_runs_dir(workdir), format_pid_dir(pid),
+        _candidate_sample_label(sample_idx))
+end
+
+function _pid_sample_thoraxe_dir(workdir::AbstractString, pid::Real, sample_idx::Integer)
+    joinpath(_pid_sample_run_root(workdir, pid, sample_idx), "thoraxe")
+end
+
+function _write_species_file(path::AbstractString,
+        species::AbstractVector{<:AbstractString};
+        overwrite::Bool = false)
+    if !overwrite && isfile(path)
+        return path
+    end
+    mkpath(dirname(path))
+    open(path, "w") do io
+        for item in species
+            println(io, String(item))
+        end
+    end
+    return path
+end
+
+function _write_candidate_sample_inputs(paths,
+        msa::AbstractMultipleSequenceAlignment,
+        species::AbstractVector{<:AbstractString},
+        indices::AbstractVector{<:Integer};
+        overwrite::Bool = false)
+    if !overwrite && isfile(paths.sequence_fasta) && isfile(paths.species_file)
+        return paths.sequence_fasta, paths.species_file
+    end
+    length(species) == nsequences(msa) ||
+        error("Species list length does not match the MSA sequence count.")
+    seq_names = collect(sequencenames(msa))
+    names = String.(seq_names)
+    mkpath(dirname(paths.sequence_fasta))
+    write_fasta(paths.sequence_fasta,
+        [(names[i], replace(stringsequence(msa, seq_names[i]), '-' => "", '.' => ""))
+         for i in indices])
+    _write_species_file(paths.species_file, String[species[i] for i in indices];
+        overwrite = true)
+    return paths.sequence_fasta, paths.species_file
+end
+
+function _reference_index(msa::AbstractMultipleSequenceAlignment,
+        gene_id::AbstractString,
+        transcript_id::AbstractString)
+    names = String.(sequencenames(msa))
+    for id in (gene_id, transcript_id)
+        name = resolve_sequence_name(msa, id)
+        name === nothing && continue
+        idx = findfirst(==(String(name)), names)
+        idx === nothing || return idx
+    end
+    error("Could not find a reference sequence for $(gene_id) / $(transcript_id).")
+end
+
+function _sample_rng(seed::UInt64, sample_idx::Integer)
+    mixed = xor(seed, UInt64(sample_idx) * 0xbf58476d1ce4e5b9)
+    return MersenneTwister(Int(mod(mixed, UInt64(typemax(Int)))))
+end
+
+function _sample_indices(n_total::Integer, reference_idx::Integer,
+        fraction::Real, rng::MersenneTwister)
+    selectable = [i for i in 1:n_total if i != reference_idx]
+    isempty(selectable) && return [reference_idx]
+    n_keep = clamp(round(Int, Float64(fraction) * length(selectable)), 1, length(selectable))
+    return vcat(reference_idx, sample(rng, selectable, n_keep; replace = false))
+end
+
+function _ensure_pid_candidate_samples(workdir::AbstractString,
+        pid::Real,
+        msa::AbstractMultipleSequenceAlignment,
+        species::AbstractVector{<:AbstractString};
+        sample_count::Integer,
+        sample_fraction::Real,
+        sample_seed::UInt64,
+        overwrite::Bool = false,
+        gene_id::AbstractString,
+        transcript_id::AbstractString)
+    reference_idx = _reference_index(msa, gene_id, transcript_id)
+    for sample_idx in 1:sample_count
+        paths = _pid_sample_paths(workdir, pid, sample_idx)
+        rng = _sample_rng(sample_seed, sample_idx)
+        indices = _sample_indices(nsequences(msa), reference_idx, sample_fraction, rng)
+        _write_candidate_sample_inputs(paths, msa, species, indices; overwrite)
+    end
+    return nothing
+end
+
+function _run_thoraxe_pid_msa(target::ResolvedTarget,
         input_dir::AbstractString,
         workdir::AbstractString,
         pid::Real,
-        species_file::AbstractString;
+        specieslist::Union{Nothing, AbstractString},
+        sample_idx::Integer;
         overwrite::Bool = false,
-        timeout_seconds::Union{Nothing, Real} = nothing)
-    seed_dir = _thoraxe_seed_dir(workdir)
+        timeout_seconds::Union{Nothing, Real} = nothing,
+        keep_thoraxe_dir::Bool = false)
+    paths = _pid_sample_paths(workdir, pid, sample_idx)
+    thoraxe_dir = _pid_sample_thoraxe_dir(workdir, pid, sample_idx)
+    if !overwrite && isfile(paths.fasta_path) && isfile(paths.stockholm_path) &&
+       (!keep_thoraxe_dir || isfile(joinpath(thoraxe_dir, "path_table.csv")))
+        return paths.fasta_path, paths.stockholm_path, thoraxe_dir
+    end
+
+    mkpath(_candidate_pid_dir(workdir, pid))
     pid_label = format_pid(pid)
-    fasta_path = joinpath(seed_dir, "thoraxe_pid$(pid_label)_msa_0.fasta")
-    sto_path = joinpath(seed_dir, "thoraxe_pid$(pid_label)_msa_0.sto")
-    if !overwrite && isfile(fasta_path) && isfile(sto_path)
-        return fasta_path, sto_path
+    sample_label = "pid$(pid_label)_sample$(sample_idx)"
+    stdout_log = joinpath(_thoraxe_logs_dir(workdir), "$(sample_label)_stdout.log")
+    stderr_log = joinpath(_thoraxe_logs_dir(workdir), "$(sample_label)_stderr.log")
+    runner = _thoraxe_runner(stdout_log, stderr_log; timeout_seconds = timeout_seconds)
+
+    if keep_thoraxe_dir
+        run_root = _pid_sample_run_root(workdir, pid, sample_idx)
+        isdir(run_root) && safe_rm(run_root, workdir)
+        mkpath(dirname(run_root))
+        ThorAxe.thoraxe(
+            input_dir, run_root; identity = Float64(pid), specieslist = specieslist,
+            runner = runner)
+        pid_msa,
+        _ = assemble_transcript_msa(thoraxe_dir,
+            target.ensembl_gene_id, target.transcript_id)
+        write_file(paths.fasta_path, pid_msa, FASTA)
+        write_file(paths.stockholm_path, pid_msa, Stockholm)
+        return paths.fasta_path, paths.stockholm_path, thoraxe_dir
     end
 
     tmp_root = joinpath(_thoraxe_msa_dir(workdir), "tmp")
     mkpath(tmp_root)
-    mktempdir(tmp_root; prefix = "thoraxe_pid$(pid_label)_") do tmp
-        stdout_log = joinpath(_thoraxe_logs_dir(workdir), "pid$(pid_label)_stdout.log")
-        stderr_log = joinpath(_thoraxe_logs_dir(workdir), "pid$(pid_label)_stderr.log")
-        runner = _thoraxe_runner(stdout_log, stderr_log; timeout_seconds = timeout_seconds)
+    mktempdir(tmp_root; prefix = "$(sample_label)_") do tmp
         ThorAxe.thoraxe(
-            input_dir, tmp; identity = Float64(pid), specieslist = species_file,
+            input_dir, tmp; identity = Float64(pid), specieslist = specieslist,
             runner = runner)
         pid_msa,
         _ = assemble_transcript_msa(joinpath(tmp, "thoraxe"),
             target.ensembl_gene_id, target.transcript_id)
-        write_file(fasta_path, pid_msa, FASTA)
-        write_file(sto_path, pid_msa, Stockholm)
+        write_file(paths.fasta_path, pid_msa, FASTA)
+        write_file(paths.stockholm_path, pid_msa, Stockholm)
     end
-    return fasta_path, sto_path
+    return paths.fasta_path, paths.stockholm_path, thoraxe_dir
 end
 
-function _summarize_pid_scores(rows::Vector{NamedTuple}, path::AbstractString)
+function _generate_pid_candidate(target::ResolvedTarget,
+        input_dir::AbstractString,
+        workdir::AbstractString,
+        pid::Real,
+        specieslist::Union{Nothing, AbstractString};
+        overwrite::Bool = false,
+        timeout_seconds::Union{Nothing, Real} = nothing)
+    paths = _pid_sample_paths(workdir, pid, 0)
+    fasta_path, sto_path,
+    thoraxe_dir = _run_thoraxe_pid_msa(
+        target, input_dir, workdir, pid, specieslist, 0;
+        overwrite, timeout_seconds, keep_thoraxe_dir = true)
+    msa,
+    species = assemble_transcript_msa(thoraxe_dir,
+        target.ensembl_gene_id, target.transcript_id)
+    write_file(fasta_path, msa, FASTA)
+    write_file(sto_path, msa, Stockholm)
+    _write_candidate_sample_inputs(
+        paths, msa, species, collect(1:nsequences(msa)); overwrite)
+    return (; fasta_path, stockholm_path = sto_path, thoraxe_dir,
+        sequence_fasta = paths.sequence_fasta, species_file = paths.species_file,
+        msa, species)
+end
+
+function _candidate_msa0_validation(target::ResolvedTarget,
+        msa::AbstractMultipleSequenceAlignment,
+        pid::Real,
+        workdir::AbstractString)
+    try
+        validation_warnings = _validate_transcript_translation(
+            target, msa; workdir = target.workdir === nothing ? workdir : target.workdir)
+        issue = isempty(validation_warnings) ? missing : join(validation_warnings, " | ")
+        warnings = ["PID $(format_pid(pid)) candidate retained with warning: $(warning)"
+                    for warning in validation_warnings]
+        status = isempty(validation_warnings) ? "ok" : "warning"
+        return (; eligible = true, status, issue, warnings)
+    catch err
+        err isa InterruptException && rethrow()
+        issue = sprint(showerror, err)
+        warning = "PID $(format_pid(pid)) excluded from seed selection: $(issue)"
+        return (; eligible = false, status = "invalid_msa0", issue, warnings = [warning])
+    end
+end
+
+_candidate_summary_optional(value) = value === nothing ? missing : value
+
+function _candidate_summary_row(target::ResolvedTarget,
+        candidate,
+        pid::Real,
+        pid_order::Integer,
+        validation;
+        sample_count::Integer,
+        sample_fraction::Real,
+        sample_seed::UInt64,
+        metadata,
+        mean_identity = missing,
+        median_identity = missing,
+        n_samples::Integer = 0)
+    return (;
+        gene_id = target.ensembl_gene_id,
+        transcript_id = target.transcript_id,
+        pid = Float64(pid),
+        pid_order,
+        eligible = Bool(validation.eligible),
+        selected = false,
+        msa0_status = String(validation.status),
+        msa0_issue = validation.issue,
+        mean_identity,
+        median_identity,
+        n_samples = Int(n_samples),
+        n_sequences_msa0 = nsequences(candidate.msa),
+        pid_sample_count = Int(sample_count),
+        pid_sample_fraction = Float64(sample_fraction),
+        pid_sample_seed = sample_seed,
+        pid_thresholds_key = metadata.pid_thresholds_key,
+        effective_specieslist = _candidate_summary_optional(metadata.effective_specieslist),
+        orthology = metadata.orthology,
+        specieslist_filter = metadata.specieslist_filter,
+        biomart_datasets_filter = metadata.biomart_datasets_filter,
+        transcript_query_fingerprint = _candidate_summary_optional(
+            metadata.transcript_query_fingerprint),
+        selection_mode = metadata.selection_mode,
+        fasta_path = candidate.fasta_path,
+        stockholm_path = candidate.stockholm_path,
+        sequence_fasta = candidate.sequence_fasta,
+        species_file = candidate.species_file,
+        scores_path = _pid_scores_path(candidate.workdir, pid)
+    )
+end
+
+function _score_pid_candidate(target::ResolvedTarget,
+        input_dir::AbstractString,
+        workdir::AbstractString,
+        pid::Real,
+        pid_order::Integer,
+        specieslist::Union{Nothing, AbstractString};
+        sample_count::Integer,
+        sample_fraction::Real,
+        sample_seed::UInt64,
+        metadata,
+        overwrite::Bool = false,
+        timeout_seconds::Union{Nothing, Real} = nothing)
+    candidate = merge(
+        _generate_pid_candidate(target, input_dir, workdir, pid, specieslist;
+            overwrite, timeout_seconds),
+        (; workdir))
+    validation = _candidate_msa0_validation(target, candidate.msa, pid, workdir)
+    if !validation.eligible
+        return _candidate_summary_row(
+            target, candidate, pid, pid_order, validation;
+            sample_count, sample_fraction, sample_seed, metadata)
+    end
+
+    if sample_count == 0
+        return _candidate_summary_row(
+            target, candidate, pid, pid_order, validation;
+            sample_count, sample_fraction, sample_seed, metadata)
+    end
+
+    _ensure_pid_candidate_samples(workdir, pid, candidate.msa, candidate.species;
+        sample_count,
+        sample_fraction,
+        sample_seed,
+        overwrite,
+        gene_id = target.ensembl_gene_id,
+        transcript_id = target.transcript_id)
+
+    score_rows = NamedTuple[]
+    for sample_idx in 1:sample_count
+        sample_paths = _pid_sample_paths(workdir, pid, sample_idx)
+        species_file = sample_paths.species_file
+        isfile(species_file) || continue
+        _run_thoraxe_pid_msa(
+            target, input_dir, workdir, pid, species_file, sample_idx;
+            overwrite, timeout_seconds)
+        isfile(sample_paths.fasta_path) || continue
+        identity = compute_identity_against_reference(
+            candidate.fasta_path, sample_paths.fasta_path;
+            logs_dir = joinpath(_thoraxe_logs_dir(workdir), "hhalign",
+                format_pid_dir(pid)),
+            label = "sample$(sample_idx)")
+        push!(score_rows,
+            (;
+                gene_id = target.ensembl_gene_id,
+                transcript_id = target.transcript_id,
+                pid = Float64(pid),
+                pid_order,
+                sample = sample_idx,
+                sample_label = _candidate_sample_label(sample_idx),
+                identity,
+                n_sequences_reference = nsequences(candidate.msa),
+                n_sequences_sample = read_file(sample_paths.fasta_path, FASTA) |>
+                                     nsequences
+            ))
+    end
+    isempty(score_rows) && error("No PID sample scores were computed for PID $(pid).")
+    CSV.write(_pid_scores_path(workdir, pid), DataFrame(score_rows))
+    identities = [row.identity for row in score_rows]
+    return _candidate_summary_row(
+        target, candidate, pid, pid_order, validation;
+        mean_identity = mean(identities),
+        median_identity = median(identities),
+        n_samples = length(identities),
+        sample_count,
+        sample_fraction,
+        sample_seed,
+        metadata)
+end
+
+function _summarize_candidate_scores(rows::AbstractVector{<:NamedTuple},
+        path::AbstractString)
     df = DataFrame(rows)
-    sort!(df, [:pid])
+    if :pid_order in propertynames(df)
+        sort!(df, [:pid_order])
+    end
     CSV.write(path, df)
     return path
 end
 
-function select_best_seed(summary_path::AbstractString)
-    df = DataFrame(CSV.File(summary_path))
-    isempty(df) && error("Cannot select a best seed from an empty PID summary.")
-    sort!(df, [:median_identity, :mean_identity, :pid]; rev = [true, true, false])
-    row = first(eachrow(df))
+_truthy(value) = value === true || value == 1 || lowercase(string(value)) == "true"
+
+const _CANDIDATE_SUMMARY_STRING_TYPES = Dict(
+    :pid_thresholds_key => String,
+    :effective_specieslist => String,
+    :orthology => String,
+    :transcript_query_fingerprint => String,
+    :selection_mode => String,
+    :msa0_status => String,
+    :msa0_issue => String,
+    :stockholm_path => String,
+    :fasta_path => String,
+    :sequence_fasta => String,
+    :species_file => String,
+    :scores_path => String
+)
+
+function _candidate_summary_file(path::AbstractString)
+    CSV.File(path; types = _CANDIDATE_SUMMARY_STRING_TYPES, validate = false)
+end
+
+function _candidate_summary_dataframe(path::AbstractString)
+    DataFrame(_candidate_summary_file(path))
+end
+
+function _pid_thresholds_key(pid_thresholds::AbstractVector{<:Real})
+    return join(repr.(Float64.(pid_thresholds)), ",")
+end
+
+function _candidate_run_metadata(input_dir::AbstractString,
+        target::ResolvedTarget,
+        pid_thresholds::AbstractVector{<:Real};
+        sample_count::Integer,
+        sample_fraction::Real,
+        sample_seed::UInt64,
+        requested_sample_seed::Union{Nothing, Integer},
+        effective_specieslist::Union{Nothing, AbstractString},
+        orthology::AbstractString,
+        specieslist_filter::Bool,
+        biomart_datasets_filter::Bool)
+    return (;
+        gene_id = target.ensembl_gene_id,
+        transcript_id = target.transcript_id,
+        pid_thresholds_key = _pid_thresholds_key(pid_thresholds),
+        pid_sample_count = Int(sample_count),
+        pid_sample_fraction = Float64(sample_fraction),
+        pid_sample_seed = sample_seed,
+        requested_pid_sample_seed = requested_sample_seed,
+        effective_specieslist = _normalized_specieslist(effective_specieslist),
+        orthology = String(orthology),
+        specieslist_filter = Bool(specieslist_filter),
+        biomart_datasets_filter = Bool(biomart_datasets_filter),
+        transcript_query_fingerprint = _bundle_fingerprint(input_dir),
+        selection_mode = sample_count == 0 ? "all_candidates" : "sampled_selection"
+    )
+end
+
+function _candidate_summary_matches(df::DataFrame, metadata)
+    isempty(df) && return false
+    required = (
+        :gene_id,
+        :transcript_id,
+        :pid,
+        :pid_thresholds_key,
+        :pid_sample_count,
+        :pid_sample_fraction,
+        :pid_sample_seed,
+        :effective_specieslist,
+        :orthology,
+        :specieslist_filter,
+        :biomart_datasets_filter,
+        :transcript_query_fingerprint,
+        :selection_mode
+    )
+    all(name -> name in propertynames(df), required) || return false
+    actual_pids = Float64.(df.pid)
+    expected_pids = parse.(Float64, split(metadata.pid_thresholds_key, ','))
+    if length(actual_pids) != length(expected_pids) ||
+       Set(actual_pids) != Set(expected_pids)
+        return false
+    end
+    return all(eachrow(df)) do row
+        checks = (
+            string(row.gene_id) == metadata.gene_id,
+            string(row.transcript_id) == metadata.transcript_id,
+            string(row.pid_thresholds_key) == metadata.pid_thresholds_key,
+            Int(row.pid_sample_count) == metadata.pid_sample_count,
+            Float64(row.pid_sample_fraction) == metadata.pid_sample_fraction,
+            metadata.requested_pid_sample_seed === nothing ||
+            UInt64(row.pid_sample_seed) == metadata.pid_sample_seed,
+            _metadata_value_matches(row.effective_specieslist,
+                metadata.effective_specieslist),
+            string(row.orthology) == metadata.orthology,
+            _truthy(row.specieslist_filter) == metadata.specieslist_filter,
+            _truthy(row.biomart_datasets_filter) == metadata.biomart_datasets_filter,
+            string(row.transcript_query_fingerprint) ==
+            string(metadata.transcript_query_fingerprint),
+            string(row.selection_mode) == metadata.selection_mode
+        )
+        all(checks)
+    end
+end
+
+function _row_seed(row, summary_path::AbstractString)
+    median_identity = ismissing(row.median_identity) ? missing :
+                      Float64(row.median_identity)
+    mean_identity = ismissing(row.mean_identity) ? missing : Float64(row.mean_identity)
     return SeedSelection(;
         pid = Float64(row.pid),
-        median_identity = Float64(row.median_identity),
-        mean_identity = Float64(row.mean_identity),
+        median_identity,
+        mean_identity,
         stockholm_path = String(row.stockholm_path),
         fasta_path = row.fasta_path === missing ? nothing : String(row.fasta_path),
         summary_path
     )
+end
+
+function select_best_seed(summary_path::AbstractString)
+    df = _candidate_summary_dataframe(summary_path)
+    isempty(df) && error("Cannot select a seed from an empty candidate summary.")
+    if :eligible in propertynames(df)
+        df = df[[!ismissing(value) && _truthy(value) for value in df.eligible], :]
+    end
+    if :median_identity in propertynames(df)
+        df = df[[!ismissing(value) for value in df.median_identity], :]
+    end
+    if :mean_identity in propertynames(df)
+        df = df[[!ismissing(value) for value in df.mean_identity], :]
+    end
+    isempty(df) && error("No eligible PID candidates are available for seed selection.")
+    df.__row_order = 1:nrow(df)
+    order_col = :pid_order in propertynames(df) ? :pid_order : :__row_order
+    nseq_col = if :n_sequences_msa0 in propertynames(df)
+        :n_sequences_msa0
+    else
+        df.__n_sequences_msa0 = zeros(Int, nrow(df))
+        :__n_sequences_msa0
+    end
+    sort!(df, [:median_identity, :mean_identity, nseq_col, order_col];
+        rev = [true, true, true, false])
+    row = first(eachrow(df))
+    return _row_seed(row, summary_path)
+end
+
+function _mark_selected_candidates!(summary_path::AbstractString,
+        seeds::AbstractVector{SeedSelection})
+    df = _candidate_summary_dataframe(summary_path)
+    df.selected = falses(nrow(df))
+    for seed in seeds
+        selected_idx = findfirst(eachrow(df)) do row
+            Float64(row.pid) == seed.pid &&
+                String(row.stockholm_path) == seed.stockholm_path
+        end
+        selected_idx === nothing ||
+            (df.selected[selected_idx] = true)
+    end
+    CSV.write(summary_path, df)
+    return summary_path
+end
+
+function _mark_selected_candidate!(summary_path::AbstractString, seed::SeedSelection)
+    _mark_selected_candidates!(summary_path, [seed])
+end
+
+function _selected_candidate_seeds(summary_path::AbstractString)
+    df = _candidate_summary_dataframe(summary_path)
+    :selected in propertynames(df) || return [select_best_seed(summary_path)]
+    selected = df[[!ismissing(value) && _truthy(value) for value in df.selected], :]
+    isempty(selected) && return SeedSelection[]
+    return [_row_seed(row, summary_path) for row in eachrow(selected)]
+end
+
+function _eligible_candidate_seeds(summary_path::AbstractString)
+    df = _candidate_summary_dataframe(summary_path)
+    :eligible in propertynames(df) || error("Candidate summary has no eligible column.")
+    eligible = df[[!ismissing(value) && _truthy(value) for value in df.eligible], :]
+    isempty(eligible) && error("No eligible PID candidates are available.")
+    sort!(eligible, [:pid_order])
+    return [_row_seed(row, summary_path) for row in eachrow(eligible)]
+end
+
+function _normalize_pid_sample_seed(seed::Integer)::UInt64
+    seed < 0 && error("pid_sample_seed must be non-negative.")
+    return UInt64(seed)
+end
+
+function _validate_pid_sampling_options(sample_count::Integer, sample_fraction::Real)
+    sample_count >= 0 || error("pid_sample_count must be non-negative.")
+    0.0 < Float64(sample_fraction) <= 1.0 ||
+        error("pid_sample_fraction must be greater than 0 and at most 1.")
+    return nothing
+end
+
+function _summary_seed_value(df::DataFrame, fallback::UInt64)
+    :pid_sample_seed in propertynames(df) || return fallback
+    isempty(df) && return fallback
+    value = df.pid_sample_seed[1]
+    value === missing && return fallback
+    return UInt64(value)
+end
+
+function _has_current_candidate_summary(df::DataFrame)
+    required = Set([
+        :gene_id,
+        :transcript_id,
+        :pid,
+        :eligible,
+        :selected,
+        :msa0_status,
+        :msa0_issue,
+        :n_sequences_msa0,
+        :pid_thresholds_key,
+        :effective_specieslist,
+        :orthology,
+        :specieslist_filter,
+        :biomart_datasets_filter,
+        :transcript_query_fingerprint,
+        :selection_mode,
+        :sequence_fasta,
+        :species_file,
+        :scores_path
+    ])
+    names = Set(propertynames(df))
+    return issubset(required, names)
+end
+
+function _candidate_summary_warnings(summary_path::AbstractString)
+    isfile(summary_path) || return String[]
+    df = _candidate_summary_dataframe(summary_path)
+    _has_current_candidate_summary(df) || return String[]
+    warnings = String[]
+    for row in eachrow(df)
+        issue = row.msa0_issue
+        (ismissing(issue) || isempty(String(issue))) && continue
+        pid_label = format_pid(Float64(row.pid))
+        if !(!ismissing(row.eligible) && _truthy(row.eligible))
+            push!(warnings, "PID $(pid_label) excluded from seed selection: $(issue)")
+        elseif String(row.msa0_status) != "ok"
+            push!(warnings, "PID $(pid_label) candidate retained with warning: $(issue)")
+        end
+    end
+    return warnings
+end
+
+function _seed_artifacts(seed::SeedSelection, workdir::AbstractString)
+    paths = _pid_sample_paths(workdir, seed.pid, 0)
+    return (;
+        seed_path = _resolve_artifact_path(seed.stockholm_path, workdir),
+        seed_fasta = seed.fasta_path === nothing ? nothing :
+                     _resolve_artifact_path(seed.fasta_path, workdir),
+        sequence_fasta = paths.sequence_fasta,
+        species_file = paths.species_file,
+        thoraxe_dir = _pid_sample_thoraxe_dir(workdir, seed.pid, 0)
+    )
+end
+
+function _selected_artifacts_exist(seed::SeedSelection, workdir::AbstractString)
+    artifacts = _seed_artifacts(seed, workdir)
+    path_table = joinpath(artifacts.thoraxe_dir, "path_table.csv")
+    return isfile(artifacts.seed_path) &&
+           artifacts.seed_fasta !== nothing &&
+           isfile(artifacts.seed_fasta) &&
+           isfile(artifacts.sequence_fasta) &&
+           isfile(artifacts.species_file) &&
+           isfile(path_table)
+end
+
+function _cached_selected_seeds(summary_path::AbstractString, workdir::AbstractString,
+        metadata)
+    isfile(summary_path) || return nothing
+    df = _candidate_summary_dataframe(summary_path)
+    isempty(df) && return nothing
+    _has_current_candidate_summary(df) || return nothing
+    _candidate_summary_matches(df, metadata) || return nothing
+    seeds = _selected_candidate_seeds(summary_path)
+    isempty(seeds) && return nothing
+    all(seed -> _selected_artifacts_exist(seed, workdir), seeds) || return nothing
+    return (; seeds, sample_seed = _summary_seed_value(df, metadata.pid_sample_seed))
+end
+
+function _has_matching_candidate_summary(summary_path::AbstractString, metadata)
+    isfile(summary_path) || return false
+    df = _candidate_summary_dataframe(summary_path)
+    isempty(df) && return false
+    _has_current_candidate_summary(df) || return false
+    return _candidate_summary_matches(df, metadata)
 end
 
 function build_thoraxe_msa(target::ResolvedTarget, workdir::AbstractString;
@@ -939,8 +1577,15 @@ function build_thoraxe_msa(target::ResolvedTarget, workdir::AbstractString;
         transcript_query_timeout_max_seconds::Union{Nothing, Real} = 240,
         transcript_query_retries::Integer = 2,
         allow_specieslist_timeout_fallback::Bool = true,
-        thoraxe_timeout_seconds::Union{Nothing, Real} = nothing)
+        thoraxe_timeout_seconds::Union{Nothing, Real} = nothing,
+        pid_sample_count::Integer = 45,
+        pid_sample_fraction::Real = 0.8,
+        pid_sample_seed::Union{Nothing, Integer} = nothing)
     _orthology_relationships(orthology)
+    _validate_pid_sampling_options(pid_sample_count, pid_sample_fraction)
+    isempty(pid_thresholds) && error("pid_thresholds cannot be empty.")
+    sample_seed = pid_sample_seed === nothing ? UInt64(rand(UInt32)) :
+                  _normalize_pid_sample_seed(pid_sample_seed)
     # Species filters run only when transcript_query will create new input.
     if cached_thoraxe_input_dir === nothing && specieslist_filter
         species_filter = _resolve_effective_specieslist(target, specieslist, orthology)
@@ -963,57 +1608,102 @@ function build_thoraxe_msa(target::ResolvedTarget, workdir::AbstractString;
         max_retries = transcript_query_retries,
         orthology,
         allow_specieslist_timeout_fallback)
-    thoraxe_dir = _ensure_baseline_thoraxe(
-        target, input_dir, workdir; specieslist = effective_specieslist, overwrite,
-        timeout_seconds = thoraxe_timeout_seconds)
-    msa,
-    species = assemble_transcript_msa(thoraxe_dir, target.ensembl_gene_id, target.transcript_id)
-    warnings = vcat(species_filter.warnings,
+    summary_path = joinpath(_thoraxe_msa_dir(workdir), "candidate_summary.csv")
+    metadata = _candidate_run_metadata(input_dir, target, pid_thresholds;
+        sample_count = Int(pid_sample_count),
+        sample_fraction = Float64(pid_sample_fraction),
+        sample_seed,
+        requested_sample_seed = pid_sample_seed,
+        effective_specieslist,
+        orthology,
+        specieslist_filter,
+        biomart_datasets_filter)
+    summary_matches_metadata = !overwrite &&
+                               _has_matching_candidate_summary(summary_path, metadata)
+    cached = overwrite ? nothing : _cached_selected_seeds(summary_path, workdir, metadata)
+    if cached !== nothing
+        seeds = cached.seeds
+        selected_msas = [read_file(_resolve_artifact_path(seed.stockholm_path, workdir),
+                             Stockholm; keepinserts = true)
+                         for seed in seeds]
+        warnings = unique(vcat(species_filter.warnings,
+            biomart_filter.warnings,
+            _biomart_transcript_query_warnings(input_dir, _thoraxe_logs_dir(workdir)),
+            _candidate_summary_warnings(summary_path),
+            Iterators.flatten(
+                _validate_transcript_translation(
+                    target, selected_msa;
+                    workdir = target.workdir === nothing ? workdir : target.workdir)
+            for selected_msa in selected_msas)...))
+        status = isempty(warnings) ? :ok : :warn
+        artifacts = [_seed_artifacts(seed, workdir) for seed in seeds]
+        return ThorAxeMSAResult(;
+            input_dir,
+            thoraxe_dirs = [artifact.thoraxe_dir for artifact in artifacts],
+            msa_dir = _thoraxe_msa_dir(workdir),
+            baseline_fastas = [String(artifact.seed_fasta) for artifact in artifacts],
+            baseline_stockholms = [artifact.seed_path for artifact in artifacts],
+            sequence_fastas = [artifact.sequence_fasta for artifact in artifacts],
+            species_files = [artifact.species_file for artifact in artifacts],
+            pid_summary = summary_path,
+            seeds,
+            logs_dir = _thoraxe_logs_dir(workdir),
+            pid_sample_count = Int(pid_sample_count),
+            pid_sample_fraction = Float64(pid_sample_fraction),
+            pid_sample_seed = cached.sample_seed,
+            warnings,
+            status
+        )
+    end
+
+    score_rows = NamedTuple[]
+    for (pid_order, pid) in enumerate(Float64.(pid_thresholds))
+        push!(score_rows,
+            _score_pid_candidate(
+                target, input_dir, workdir, pid, pid_order, effective_specieslist;
+                sample_count = Int(pid_sample_count),
+                sample_fraction = Float64(pid_sample_fraction),
+                sample_seed = sample_seed,
+                metadata,
+                overwrite = overwrite || !summary_matches_metadata,
+                timeout_seconds = thoraxe_timeout_seconds))
+    end
+    _summarize_candidate_scores(score_rows, summary_path)
+    seeds = if Int(pid_sample_count) == 0
+        _eligible_candidate_seeds(summary_path)
+    else
+        [select_best_seed(summary_path)]
+    end
+    _mark_selected_candidates!(summary_path, seeds)
+    selected_msas = [read_file(seed.stockholm_path, Stockholm; keepinserts = true)
+                     for seed in seeds]
+    warnings = unique(vcat(species_filter.warnings,
         biomart_filter.warnings,
         _biomart_transcript_query_warnings(input_dir, _thoraxe_logs_dir(workdir)),
-        _validate_transcript_translation(
-            target, msa; workdir = target.workdir === nothing ? workdir : target.workdir))
+        _candidate_summary_warnings(summary_path),
+        Iterators.flatten(
+            _validate_transcript_translation(
+                target, selected_msa;
+                workdir = target.workdir === nothing ? workdir :
+                          target.workdir)
+        for selected_msa in selected_msas)...))
     status = isempty(warnings) ? :ok : :warn
-    baseline_fasta, baseline_sto,
-    sequence_fasta, species_file = _save_baseline_msa(workdir, msa, species; overwrite)
-
-    summary_path = joinpath(_thoraxe_msa_dir(workdir), "best_seed.csv")
-    score_rows = NamedTuple[]
-    for pid in Float64.(pid_thresholds)
-        fasta_path,
-        sto_path = _generate_pid_seed(
-            target, input_dir, workdir, pid, species_file;
-            overwrite, timeout_seconds = thoraxe_timeout_seconds)
-        identity = compute_identity_against_reference(baseline_fasta, fasta_path;
-            logs_dir = joinpath(_thoraxe_logs_dir(workdir), "hhalign"),
-            label = "pid$(format_pid(pid))")
-        push!(score_rows,
-            (;
-                gene_id = target.ensembl_gene_id,
-                transcript_id = target.transcript_id,
-                pid,
-                mean_identity = identity,
-                median_identity = identity,
-                n_samples = 1,
-                n_sequences_msa0 = nsequences(msa),
-                fasta_path,
-                stockholm_path = sto_path
-            ))
-    end
-    _summarize_pid_scores(score_rows, summary_path)
-    best = select_best_seed(summary_path)
+    artifacts = [_seed_artifacts(seed, workdir) for seed in seeds]
 
     return ThorAxeMSAResult(;
         input_dir,
-        thoraxe_dir,
+        thoraxe_dirs = [artifact.thoraxe_dir for artifact in artifacts],
         msa_dir = _thoraxe_msa_dir(workdir),
-        baseline_fasta,
-        baseline_stockholm = baseline_sto,
-        sequence_fasta,
-        species_file,
+        baseline_fastas = [String(artifact.seed_fasta) for artifact in artifacts],
+        baseline_stockholms = [artifact.seed_path for artifact in artifacts],
+        sequence_fastas = [artifact.sequence_fasta for artifact in artifacts],
+        species_files = [artifact.species_file for artifact in artifacts],
         pid_summary = summary_path,
-        best_seed = best,
+        seeds,
         logs_dir = _thoraxe_logs_dir(workdir),
+        pid_sample_count = Int(pid_sample_count),
+        pid_sample_fraction = Float64(pid_sample_fraction),
+        pid_sample_seed = sample_seed,
         warnings,
         status
     )

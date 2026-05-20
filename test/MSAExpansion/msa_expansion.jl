@@ -115,7 +115,8 @@
             hmmbuild_symfrac = 1.1)
         @test !isdir(joinpath(tmp, "invalid_symfrac", "expansion"))
 
-        cached_dir = joinpath(tmp, "expansion", gene_id, transcript_id, "expanded_msa")
+        cached_dir = joinpath(tmp, "expansion", gene_id, transcript_id, "pid_10.00",
+            "expanded_msa")
         mkpath(cached_dir)
         write(joinpath(cached_dir, "$(transcript_id)_full.sto"), "cached full\n")
         write(joinpath(cached_dir, "$(transcript_id)_matchonly.sto"), "cached match\n")
@@ -130,6 +131,7 @@
         @test cached.n_hits == Iduna.MSAExpansion.nsequences(hits_msa)
         @test cached.n_hits == 3
         @test cached.n_new_hits == 2
-        @test !isdir(joinpath(tmp, "expansion", gene_id, transcript_id, "centroid_msa"))
+        @test !isdir(
+            joinpath(tmp, "expansion", gene_id, transcript_id, "pid_10.00", "centroid_msa"))
     end
 end

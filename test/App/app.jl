@@ -54,12 +54,18 @@
             "--pid-thresholds", "10,20,30",
             "--transcript-query-timeout-seconds", "none",
             "--transcript-query-timeout-max-seconds", "240",
-            "--thoraxe-timeout-seconds", "3600"
+            "--thoraxe-timeout-seconds", "3600",
+            "--pid-sample-count", "12",
+            "--pid-sample-fraction", "0.65",
+            "--pid-sample-seed", "42"
         ])
         @test kwargs[:pid_thresholds] == [10.0, 20.0, 30.0]
         @test kwargs[:transcript_query_timeout_seconds] === nothing
         @test kwargs[:transcript_query_timeout_max_seconds] == 240.0
         @test kwargs[:thoraxe_timeout_seconds] == 3600.0
+        @test kwargs[:pid_sample_count] == 12
+        @test kwargs[:pid_sample_fraction] == 0.65
+        @test kwargs[:pid_sample_seed] == 42
     end
 
     @testset "required arguments" begin

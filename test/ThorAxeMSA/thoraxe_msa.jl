@@ -45,10 +45,18 @@
         warnings = Iduna.ThorAxeMSA._validate_transcript_translation(target, msa)
         @test length(warnings) == 1
         @test occursin("substitutions", only(warnings))
+        candidate_warning = Iduna.ThorAxeMSA._candidate_msa0_validation(target, msa, 80.0, tmp)
+        @test candidate_warning.eligible === true
+        @test candidate_warning.status == "warning"
+        @test occursin("substitutions", candidate_warning.issue)
 
         write(uniprot, ">P20963\nAAC\n")
         @test_throws ErrorException Iduna.ThorAxeMSA._validate_transcript_translation(
             target, msa)
+        candidate_invalid = Iduna.ThorAxeMSA._candidate_msa0_validation(target, msa, 80.0, tmp)
+        @test candidate_invalid.eligible === false
+        @test candidate_invalid.status == "invalid_msa0"
+        @test occursin("indels", candidate_invalid.issue)
 
         missing_uniprot = Iduna.ResolvedTarget(;
             input_id = "P20963",
@@ -81,16 +89,269 @@
     end
 
     mktempdir() do tmp
-        summary = joinpath(tmp, "best_seed.csv")
-        write(summary, """
-        pid,median_identity,mean_identity,stockholm_path,fasta_path
-        30.0,70.0,70.0,pid30.sto,pid30.fa
-        10.0,70.0,80.0,pid10.sto,pid10.fa
-        80.0,60.0,90.0,pid80.sto,pid80.fa
-        """)
+        summary = joinpath(tmp, "candidate_summary.csv")
+        write(summary,
+            "pid,pid_order,eligible,median_identity,mean_identity,n_sequences_msa0,stockholm_path,fasta_path\n" *
+            "30.0,1,false,90.0,90.0,20,pid30.sto,pid30.fa\n" *
+            "10.0,2,true,70.0,80.0,10,pid10.sto,pid10.fa\n" *
+            "80.0,3,true,60.0,90.0,30,pid80.sto,pid80.fa\n")
         seed = Iduna.ThorAxeMSA.select_best_seed(summary)
         @test seed.pid == 10.0
         @test seed.median_identity == 70.0
+
+        write(summary,
+            "pid,pid_order,eligible,median_identity,mean_identity,n_sequences_msa0,stockholm_path,fasta_path\n" *
+            "10.0,1,true,70.0,80.0,10,pid10.sto,pid10.fa\n" *
+            "80.0,2,true,70.0,80.0,20,pid80.sto,pid80.fa\n")
+        larger_msa_seed = Iduna.ThorAxeMSA.select_best_seed(summary)
+        @test larger_msa_seed.pid == 80.0
+
+        write(summary,
+            "pid,pid_order,eligible,median_identity,mean_identity,n_sequences_msa0,stockholm_path,fasta_path\n" *
+            "10.0,2,true,70.0,80.0,20,pid10.sto,pid10.fa\n" *
+            "80.0,1,true,70.0,80.0,20,pid80.sto,pid80.fa\n")
+        ordered_seed = Iduna.ThorAxeMSA.select_best_seed(summary)
+        @test ordered_seed.pid == 80.0
+        Iduna.ThorAxeMSA._mark_selected_candidate!(summary, ordered_seed)
+        selected_lines = read(summary, String)
+        @test occursin("80.0,1,true,70.0,80.0,20,pid80.sto,pid80.fa,true",
+            selected_lines)
+
+        write(summary,
+            "pid,median_identity,mean_identity,stockholm_path,fasta_path\n" *
+            "80.0,70.0,80.0,pid80.sto,pid80.fa\n" *
+            "10.0,70.0,80.0,pid10.sto,pid10.fa\n")
+        tied_seed = Iduna.ThorAxeMSA.select_best_seed(summary)
+        @test tied_seed.pid == 80.0
+
+        write(summary,
+            "pid,eligible,median_identity,mean_identity,stockholm_path,fasta_path\n" *
+            "30.0,false,90.0,90.0,pid30.sto,pid30.fa\n")
+        @test_throws ErrorException Iduna.ThorAxeMSA.select_best_seed(summary)
+    end
+
+    mktempdir() do tmp
+        fasta = joinpath(tmp, "candidate.fasta")
+        write(fasta,
+            ">ORTHO1\nAAAA\n" *
+            ">ENSG00000000001\nBBBB\n" *
+            ">ORTHO2\nCCCC\n" *
+            ">ORTHO3\nDDDD\n")
+        msa = Iduna.ThorAxeMSA.read_file(fasta, Iduna.ThorAxeMSA.FASTA)
+        species = ["mus_musculus", "homo_sapiens", "rattus_norvegicus", "danio_rerio"]
+
+        rng = Iduna.ThorAxeMSA._sample_rng(UInt64(7), 1)
+        indices = Iduna.ThorAxeMSA._sample_indices(4, 2, 0.5, rng)
+        @test first(indices) == 2
+        @test length(indices) == 3
+        @test length(unique(indices)) == length(indices)
+        @test !(2 in indices[2:end])
+
+        full_paths = Iduna.ThorAxeMSA._pid_sample_paths(tmp, 80.0, 0)
+        Iduna.ThorAxeMSA._write_candidate_sample_inputs(
+            full_paths, msa, species, collect(1:4); overwrite = true)
+        Iduna.ThorAxeMSA._ensure_pid_candidate_samples(tmp, 80.0, msa, species;
+            sample_count = 1,
+            sample_fraction = 0.5,
+            sample_seed = UInt64(7),
+            overwrite = true,
+            gene_id = "ENSG00000000001.1",
+            transcript_id = "ENST1")
+
+        sample_paths = Iduna.ThorAxeMSA._pid_sample_paths(tmp, 80.0, 1)
+        @test full_paths.species_file ==
+              joinpath(tmp, "thoraxe_msa", "candidates", "pid_80.00", "species",
+            "candidate_species_full.txt")
+        @test sample_paths.species_file ==
+              joinpath(tmp, "thoraxe_msa", "candidates", "pid_80.00", "species",
+            "candidate_species_subset_001.txt")
+        sample0 = split(chomp(read(full_paths.species_file, String)), '\n')
+        sample1 = split(chomp(read(sample_paths.species_file, String)), '\n')
+        @test sample0 == species
+        @test first(sample1) == "homo_sapiens"
+        @test length(sample1) == 3
+        @test length(unique(sample1)) == length(sample1)
+        @test all(item -> item in species[[1, 3, 4]], sample1[2:end])
+    end
+
+    mktempdir() do tmp
+        input_dir = joinpath(tmp, "thoraxe_input")
+        ensembl = joinpath(input_dir, "Ensembl")
+        mkpath(ensembl)
+        for file in Iduna.ThorAxeMSA._REQUIRED_ENSEMBL_FILES
+            write(joinpath(ensembl, file), "$(file)\n")
+        end
+        metadata_target = Iduna.ResolvedTarget(;
+            input_id = "P20963",
+            input_kind = :uniprot,
+            ensembl_gene_id = "ENSG",
+            transcript_id = "ENST")
+        metadata = Iduna.ThorAxeMSA._candidate_run_metadata(
+            input_dir, metadata_target, [10.0, 80.0];
+            sample_count = 2,
+            sample_fraction = 0.5,
+            sample_seed = UInt64(7),
+            requested_sample_seed = 7,
+            effective_specieslist = "homo_sapiens",
+            orthology = "1:1",
+            specieslist_filter = true,
+            biomart_datasets_filter = false)
+        summary = joinpath(tmp, "candidate_summary.csv")
+        rows = [
+            (;
+                gene_id = "ENSG",
+                transcript_id = "ENST",
+                pid = 10.0,
+                pid_order = 1,
+                eligible = true,
+                selected = true,
+                msa0_status = "ok",
+                msa0_issue = missing,
+                mean_identity = 70.0,
+                median_identity = 70.0,
+                n_samples = 2,
+                n_sequences_msa0 = 4,
+                pid_sample_count = metadata.pid_sample_count,
+                pid_sample_fraction = metadata.pid_sample_fraction,
+                pid_sample_seed = metadata.pid_sample_seed,
+                pid_thresholds_key = metadata.pid_thresholds_key,
+                effective_specieslist = metadata.effective_specieslist,
+                orthology = metadata.orthology,
+                specieslist_filter = metadata.specieslist_filter,
+                biomart_datasets_filter = metadata.biomart_datasets_filter,
+                transcript_query_fingerprint = metadata.transcript_query_fingerprint,
+                selection_mode = metadata.selection_mode,
+                fasta_path = "pid10.fasta",
+                stockholm_path = "pid10.sto",
+                sequence_fasta = "pid10_sequences.fasta",
+                species_file = "pid10_species.txt",
+                scores_path = "pid10_scores.csv"
+            ),
+            (;
+                gene_id = "ENSG",
+                transcript_id = "ENST",
+                pid = 80.0,
+                pid_order = 2,
+                eligible = false,
+                selected = false,
+                msa0_status = "invalid_msa0",
+                msa0_issue = "indels",
+                mean_identity = missing,
+                median_identity = missing,
+                n_samples = 0,
+                n_sequences_msa0 = 3,
+                pid_sample_count = metadata.pid_sample_count,
+                pid_sample_fraction = metadata.pid_sample_fraction,
+                pid_sample_seed = metadata.pid_sample_seed,
+                pid_thresholds_key = metadata.pid_thresholds_key,
+                effective_specieslist = metadata.effective_specieslist,
+                orthology = metadata.orthology,
+                specieslist_filter = metadata.specieslist_filter,
+                biomart_datasets_filter = metadata.biomart_datasets_filter,
+                transcript_query_fingerprint = metadata.transcript_query_fingerprint,
+                selection_mode = metadata.selection_mode,
+                fasta_path = "pid80.fasta",
+                stockholm_path = "pid80.sto",
+                sequence_fasta = "pid80_sequences.fasta",
+                species_file = "pid80_species.txt",
+                scores_path = "pid80_scores.csv"
+            )
+        ]
+        Iduna.ThorAxeMSA.CSV.write(summary, Iduna.ThorAxeMSA.DataFrame(rows))
+        df = Iduna.ThorAxeMSA._candidate_summary_dataframe(summary)
+        @test Iduna.ThorAxeMSA._candidate_summary_matches(df, metadata)
+        @test Iduna.ThorAxeMSA._has_matching_candidate_summary(summary, metadata)
+        changed_pids = merge(metadata, (; pid_thresholds_key = "80.0"))
+        @test !Iduna.ThorAxeMSA._candidate_summary_matches(df, changed_pids)
+        @test !Iduna.ThorAxeMSA._has_matching_candidate_summary(summary, changed_pids)
+        changed_fraction = merge(metadata, (; pid_sample_fraction = 0.75))
+        @test !Iduna.ThorAxeMSA._candidate_summary_matches(df, changed_fraction)
+        @test !Iduna.ThorAxeMSA._has_matching_candidate_summary(summary, changed_fraction)
+        changed_gene = merge(metadata, (; gene_id = "ENSG_DIFFERENT"))
+        @test !Iduna.ThorAxeMSA._candidate_summary_matches(df, changed_gene)
+        @test !Iduna.ThorAxeMSA._has_matching_candidate_summary(summary, changed_gene)
+        changed_transcript = merge(metadata, (; transcript_id = "ENST_DIFFERENT"))
+        @test !Iduna.ThorAxeMSA._candidate_summary_matches(df, changed_transcript)
+        @test !Iduna.ThorAxeMSA._has_matching_candidate_summary(summary, changed_transcript)
+        @test !Iduna.ThorAxeMSA._has_matching_candidate_summary(
+            joinpath(tmp, "missing_summary.csv"), metadata)
+        random_requested_seed = merge(metadata,
+            (; pid_sample_seed = UInt64(99), requested_pid_sample_seed = nothing))
+        @test Iduna.ThorAxeMSA._candidate_summary_matches(df, random_requested_seed)
+        @test Iduna.ThorAxeMSA._has_matching_candidate_summary(summary, random_requested_seed)
+
+        no_species_metadata = merge(metadata, (; effective_specieslist = nothing))
+        fasta = joinpath(tmp, "candidate_summary_candidate.fasta")
+        write(fasta,
+            ">ENSG\nAAAA\n" *
+            ">ORTHO1\nBBBB\n")
+        candidate_msa = Iduna.ThorAxeMSA.read_file(fasta, Iduna.ThorAxeMSA.FASTA)
+        candidate = (;
+            msa = candidate_msa,
+            fasta_path = "pid10.fasta",
+            stockholm_path = "pid10.sto",
+            sequence_fasta = "pid10_sequences.fasta",
+            species_file = "pid10_species.txt",
+            workdir = tmp)
+        validation = (; eligible = true, status = "ok", issue = missing)
+        no_species_rows = [
+            Iduna.ThorAxeMSA._candidate_summary_row(
+                metadata_target, candidate, 10.0, 1, validation;
+                sample_count = no_species_metadata.pid_sample_count,
+                sample_fraction = no_species_metadata.pid_sample_fraction,
+                sample_seed = no_species_metadata.pid_sample_seed,
+                metadata = no_species_metadata),
+            Iduna.ThorAxeMSA._candidate_summary_row(
+                metadata_target, candidate, 80.0, 2, validation;
+                sample_count = no_species_metadata.pid_sample_count,
+                sample_fraction = no_species_metadata.pid_sample_fraction,
+                sample_seed = no_species_metadata.pid_sample_seed,
+                metadata = no_species_metadata)
+        ]
+        no_species_summary = joinpath(tmp, "candidate_summary_no_species.csv")
+        Iduna.ThorAxeMSA._summarize_candidate_scores(
+            no_species_rows, no_species_summary)
+        no_species_df = Iduna.ThorAxeMSA._candidate_summary_dataframe(no_species_summary)
+        @test all(ismissing, no_species_df.effective_specieslist)
+        @test Iduna.ThorAxeMSA._candidate_summary_matches(
+            no_species_df, no_species_metadata)
+
+        decimal_pid_metadata = Iduna.ThorAxeMSA._candidate_run_metadata(
+            input_dir, metadata_target, [12.34];
+            sample_count = 2,
+            sample_fraction = 0.5,
+            sample_seed = UInt64(7),
+            requested_sample_seed = 7,
+            effective_specieslist = "homo_sapiens",
+            orthology = "1:1",
+            specieslist_filter = true,
+            biomart_datasets_filter = false)
+        @test decimal_pid_metadata.pid_thresholds_key == "12.34"
+        decimal_pid_rows = [
+            Iduna.ThorAxeMSA._candidate_summary_row(
+                metadata_target, candidate, 12.34, 1, validation;
+                mean_identity = 70.0,
+                median_identity = 70.0,
+                n_samples = 2,
+                sample_count = decimal_pid_metadata.pid_sample_count,
+                sample_fraction = decimal_pid_metadata.pid_sample_fraction,
+                sample_seed = decimal_pid_metadata.pid_sample_seed,
+                metadata = decimal_pid_metadata)
+        ]
+        decimal_pid_summary = joinpath(tmp, "candidate_summary_decimal_pid.csv")
+        Iduna.ThorAxeMSA._summarize_candidate_scores(
+            decimal_pid_rows, decimal_pid_summary)
+        decimal_pid_df = Iduna.ThorAxeMSA._candidate_summary_dataframe(
+            decimal_pid_summary)
+        @test Iduna.ThorAxeMSA._candidate_summary_matches(
+            decimal_pid_df, decimal_pid_metadata)
+
+        selected = Iduna.ThorAxeMSA._selected_candidate_seeds(summary)
+        @test length(selected) == 1
+        @test only(selected).pid == 10.0
+        eligible = Iduna.ThorAxeMSA._eligible_candidate_seeds(summary)
+        @test length(eligible) == 1
+        @test only(eligible).pid == 10.0
     end
 
     mktempdir() do tmp
@@ -144,6 +405,12 @@
             cached_input_dir = source,
             overwrite = false)
         @test reused == copied
+        write(joinpath(source, "Ensembl", "sequences.fasta"), "changed\n")
+        recopied = Iduna.ThorAxeMSA._ensure_transcript_query(target, workdir;
+            cached_input_dir = source,
+            overwrite = false)
+        @test recopied == copied
+        @test read(joinpath(recopied, "Ensembl", "sequences.fasta"), String) == "changed\n"
 
         @test_throws ErrorException Iduna.ThorAxeMSA._ensure_transcript_query(
             target, joinpath(tmp, "bad_work");
@@ -286,14 +553,15 @@ TableSet\tptroglodytes_gene_ensembl\tChimpanzee genes (Pan_tro_3.0)\t1
     end
 
     @testset "BioMart datasets dated cache" begin
-        response(status::Integer, body::AbstractString = "") =
-            Iduna.ThorAxeMSA.HTTP.Response(status, Vector{UInt8}(body))
+        response(status::Integer,
+            body::AbstractString = "") = Iduna.ThorAxeMSA.HTTP.Response(status, Vector{UInt8}(body))
 
         attempts = Ref(0)
         biomart_text = "TableSet\thsapiens_gene_ensembl\tHuman genes\t1\n"
         text = Iduna.ThorAxeMSA._fetch_biomart_datasets_text(;
             retries = 3,
-            http_get = (url; kwargs...) -> begin
+            http_get = (url;
+                kwargs...) -> begin
                 attempts[] += 1
                 attempts[] == 1 ? response(503) : response(200, biomart_text)
             end)
@@ -383,15 +651,18 @@ TableSet\tptroglodytes_gene_ensembl\tChimpanzee genes (Pan_tro_3.0)\t1
     end
 
     @testset "Ensembl homology download retries" begin
-        response(status::Integer, body::AbstractString = "") =
-            Iduna.ThorAxeMSA.HTTP.Response(status, Vector{UInt8}(body))
+        response(status::Integer,
+            body::AbstractString = "") = Iduna.ThorAxeMSA.HTTP.Response(status, Vector{UInt8}(body))
 
         attempts = Ref(0)
         data = Iduna.ThorAxeMSA._fetch_ensembl_homology_data(
             "homo_sapiens", "ENSG00000000001.1";
             retries = 3,
             sleep_seconds = 0,
-            http_get = (url; headers, retry, status_exception) -> begin
+            http_get = (url;
+                headers,
+                retry,
+                status_exception) -> begin
                 attempts[] += 1
                 @test occursin("/homology/id/homo_sapiens/ENSG00000000001", url)
                 @test headers == Iduna.ThorAxeMSA._ENSEMBL_JSON_HEADERS

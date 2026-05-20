@@ -8,8 +8,8 @@ using MIToS.MSA: A3M, AbstractMultipleSequenceAlignment, FASTA, Stockholm,
                  read_file, sequencenames, stringsequence
 
 using ..Utils: ExpansionResult, ResolvedTarget, SeedSelection, ValidationResult,
-               _relative_artifact_path, _resolve_artifact_path, protein_alignment_stats,
-               resolve_sequence_name
+               _relative_artifact_path, _resolve_artifact_path, format_pid_dir,
+               protein_alignment_stats, resolve_sequence_name
 
 export alignment_stats,
        load_expanded_msa,
@@ -139,7 +139,8 @@ function validate_results(target::ResolvedTarget,
             target.ensembl_gene_id, target.transcript_id)
         uniprot_seq = _read_fasta_sequence(uniprot_path)
         aln_stats = _align_sequences(query_seq, uniprot_seq)
-        aln_path = joinpath(workdir, "validation", "query_vs_uniprot_alignment.txt")
+        validation_dir = joinpath(workdir, "validation", format_pid_dir(seed.pid))
+        aln_path = joinpath(validation_dir, "query_vs_uniprot_alignment.txt")
         _write_alignment_log(
             aln_path, target, query_name, query_seq, uniprot_seq, aln_stats)
         aln_identical = aln_stats.identical
@@ -155,7 +156,7 @@ function validate_results(target::ResolvedTarget,
         end
     end
 
-    stats_path = joinpath(workdir, "validation", "stats.csv")
+    stats_path = joinpath(workdir, "validation", format_pid_dir(seed.pid), "stats.csv")
     mkpath(dirname(stats_path))
     seed_summary_path = _relative_artifact_path(seed_path, workdir)
     expanded_summary_path = _relative_artifact_path(expanded_path, workdir)

@@ -14,24 +14,36 @@ around it. By default, `workdir` is a directory named after the input ID.
     ensembl_proteins/
   thoraxe_input/
     Ensembl/
-  thoraxe/
-    path_table.csv
-    s_exon_table.csv
-    msa/
   thoraxe_msa/
-    seeds/
-    best_seed.csv
+    runs/
+      pid_10.00/
+        full/
+          thoraxe/
+    candidates/
+      pid_10.00/
+        candidate_msa_full.fasta
+        candidate_msa_full.sto
+        scores.csv
+        sequences/
+          candidate_sequences_full.fasta
+          candidate_sequences_species_subset_001.fasta
+        species/
+          candidate_species_full.txt
+          candidate_species_subset_001.txt
+    candidate_summary.csv
   expansion/  # absent when no_expansion=true / --no-expansion
     <gene>/<transcript>/
-      seeds/
-      dbs/
-      hmm/
-      logs/
-      expanded_msa/
-      centroid_msa/  # optional, written only with centroids=true / --centroids
+      pid_10.00/
+        seeds/
+        dbs/
+        hmm/
+        logs/
+        expanded_msa/
+        centroid_msa/  # optional, written only with centroids=true / --centroids
   validation/
-    stats.csv
-    query_vs_uniprot_alignment.txt
+    pid_10.00/
+      stats.csv
+      query_vs_uniprot_alignment.txt
 ```
 
 The output layout is part of the API. `overwrite=true` rebuilds package-owned
@@ -50,17 +62,27 @@ When `thoraxe_input_dir` is supplied, that source bundle is treated as read-only
 and copied into `thoraxe_input/`; the copied layout is then preserved like a
 fresh `transcript_query` result.
 
+`thoraxe_msa/runs/` keeps the raw ThorAxe output for each PID candidate and its
+PID-specific species samples. `thoraxe_msa/candidates/` stores each PID's
+full-species candidate `msa_0`, sampled species lists, gap-free sequence files,
+and per-PID score CSV. `thoraxe_msa/candidate_summary.csv` records validation
+status, eligibility, sample identity statistics, candidate size, and the selected
+seed rows.
+
 MSA paths are also available from the returned [`IdunaResult`](@ref):
 
 ```julia
-result.thoraxe_msa.baseline_stockholm
-result.thoraxe_msa.baseline_fasta
-result.thoraxe_msa.best_seed.stockholm_path
-result.thoraxe_msa.best_seed.fasta_path
+result.thoraxe_msa.baseline_stockholms[1]
+result.thoraxe_msa.baseline_fastas[1]
+result.thoraxe_msa.seeds[1].stockholm_path
+result.thoraxe_msa.seeds[1].fasta_path
+result.thoraxe_msa.pid_sample_count
+result.thoraxe_msa.pid_sample_fraction
+result.thoraxe_msa.pid_sample_seed
 
 # Full expansion runs only:
-result.expansion.match_stockholm
-result.expansion.a3m_path
+result.expansions[1].match_stockholm
+result.expansions[1].a3m_path
 ```
 
 `result.workdir` is stored as an absolute path. Artifact paths inside
@@ -68,10 +90,15 @@ result.expansion.a3m_path
 open them directly. Paths outside `workdir` remain unchanged.
 
 When `no_expansion=true` or `--no-expansion` is used, Iduna stops after the
-ThorAxe MSA stage. `result.expansion === nothing`, `result.json` contains
-`"expansion": null`, and no `expansion/` directory is written. Validation still
-writes seed statistics to `validation/stats.csv`, with expanded-MSA fields left
-missing.
+ThorAxe MSA stage. `isempty(result.expansions)`, `result.json` contains an empty
+`"expansions"` list, and no `expansion/` directory is written. Validation still
+writes seed statistics to `validation/pid_<value>/stats.csv`, with expanded-MSA
+fields left missing.
+
+By default, Iduna selects one PID seed. Set `pid_sample_count=0` to skip seed
+selection and carry every eligible PID candidate forward, producing one
+validation directory and, unless `no_expansion=true`, one expansion directory
+per selected PID.
 
 `expanded_msa/` is the full MMseqs2 cluster-expanded MSA and remains the main
 Iduna result. When `centroids=true` or `--centroids` is used, Iduna also writes

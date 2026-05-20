@@ -24,19 +24,34 @@ The package writes a stable work directory containing ThorAxe outputs, PID seed
 MSAs, expansion outputs, logs, and validation stats. `result.workdir` is
 absolute, while artifact paths under it are reported relative to `workdir`.
 
+For seed selection, Iduna runs `transcript_query` once and builds one
+full-species candidate `msa_0` at each PID threshold. Each candidate is validated:
+indels versus UniProt exclude that PID from selection, while substitutions are
+reported as warnings. Species samples are drawn from each PID's own candidate
+`msa_0`, run at that PID, and scored by HHsuite against the same candidate. The
+selected seed is the highest median identity, then highest mean identity, then
+the largest candidate `msa_0` species count, then the first PID in
+`pid_thresholds` order. The default is 45 samples, 80% of non-reference species
+per sample, and a random `pid_sample_seed` recorded in `result.json`.
+
 To stop after the ThorAxe MSA stage, use `no_expansion=true` in Julia or
 `--no-expansion` in the app. In that mode `mmseqs_db` is not required,
-`result.expansion === nothing`, and the ThorAxe MSA paths are available from
-`result.thoraxe_msa.baseline_stockholm`,
-`result.thoraxe_msa.baseline_fasta`,
-`result.thoraxe_msa.best_seed.stockholm_path`, and
-`result.thoraxe_msa.best_seed.fasta_path`.
+`isempty(result.expansions)`, and the ThorAxe MSA paths are available from
+`result.thoraxe_msa.baseline_stockholms`,
+`result.thoraxe_msa.baseline_fastas`,
+`result.thoraxe_msa.seeds[1].stockholm_path`, and
+`result.thoraxe_msa.seeds[1].fasta_path`.
 
 ```julia
 thoraxe_only = iduna("ENST00000362089.10"; no_expansion=true,
     workdir="ENST00000362089_thoraxe")
 seed = load_seed_msa(thoraxe_only)
 ```
+
+Set `pid_sample_count=0` to skip PID seed selection and carry every eligible
+PID candidate forward as a seed. In that mode `result.thoraxe_msa.seeds`,
+`result.expansions`, and `result.validations` may contain more than one entry;
+pass `pid=` or `index=` to `load_seed_msa` or `load_expanded_msa` when needed.
 
 Pass `centroids=true` in Julia, or `--centroids` in the app, to also save a
 centroid-level MSA before MMseqs2 expands centroid hits to cluster members. This

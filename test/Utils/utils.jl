@@ -6,6 +6,8 @@
     @test_throws ErrorException Iduna.Utils.id_kind("not-an-id")
     @test Iduna.Utils.format_pid(10) == "10.0"
     @test Iduna.Utils.format_pid(12.34) == "12.3"
+    @test Iduna.Utils.format_pid_dir(10) == "pid_10.00"
+    @test Iduna.Utils.format_pid_dir(12.34) == "pid_12.34"
 
     plain = Iduna.Utils.HTTP.Response(200, Vector{UInt8}("plain body"))
     @test Iduna.Utils.decode_body(plain) == "plain body"

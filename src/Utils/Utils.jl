@@ -36,7 +36,8 @@ export DEFAULT_PID_THRESHOLDS,
        write_fasta,
        write_json,
        write_text,
-       format_pid
+       format_pid,
+       format_pid_dir
 
 const DEFAULT_PID_THRESHOLDS = Float64[10, 20, 30, 60, 80]
 const _PROTEIN_ALIGNMENT_SCORE_MODEL = AffineGapScoreModel(BLOSUM62, gap_open = -10, gap_extend = -1)
@@ -149,6 +150,7 @@ function id_kind(id::AbstractString)::Symbol
 end
 
 format_pid(pid::Real) = @sprintf("%.1f", Float64(pid))
+format_pid_dir(pid::Real) = "pid_$(@sprintf("%.2f", Float64(pid)))"
 
 function decode_body(resp::HTTP.Response)::String
     body = resp.body
@@ -335,21 +337,27 @@ end
 function _relative_thoraxe_msa_paths(thoraxe::ThorAxeMSAResult, workdir::AbstractString)
     return ThorAxeMSAResult(;
         input_dir = _relative_artifact_path(thoraxe.input_dir, workdir),
-        thoraxe_dir = _relative_artifact_path(thoraxe.thoraxe_dir, workdir),
+        thoraxe_dirs = [_relative_artifact_path(path, workdir)
+                        for path in thoraxe.thoraxe_dirs],
         msa_dir = _relative_artifact_path(thoraxe.msa_dir, workdir),
-        baseline_fasta = _relative_artifact_path(thoraxe.baseline_fasta, workdir),
-        baseline_stockholm = _relative_artifact_path(thoraxe.baseline_stockholm, workdir),
-        sequence_fasta = _relative_artifact_path(thoraxe.sequence_fasta, workdir),
-        species_file = _relative_artifact_path(thoraxe.species_file, workdir),
+        baseline_fastas = [_relative_artifact_path(path, workdir)
+                           for path in thoraxe.baseline_fastas],
+        baseline_stockholms = [_relative_artifact_path(path, workdir)
+                               for path in thoraxe.baseline_stockholms],
+        sequence_fastas = [_relative_artifact_path(path, workdir)
+                           for path in thoraxe.sequence_fastas],
+        species_files = [_relative_artifact_path(path, workdir)
+                         for path in thoraxe.species_files],
         pid_summary = _relative_artifact_path(thoraxe.pid_summary, workdir),
-        best_seed = _relative_seed_paths(thoraxe.best_seed, workdir),
+        seeds = [_relative_seed_paths(seed, workdir) for seed in thoraxe.seeds],
         logs_dir = _relative_artifact_path(thoraxe.logs_dir, workdir),
+        pid_sample_count = thoraxe.pid_sample_count,
+        pid_sample_fraction = thoraxe.pid_sample_fraction,
+        pid_sample_seed = thoraxe.pid_sample_seed,
         warnings = thoraxe.warnings,
         status = thoraxe.status
     )
 end
-
-_relative_expansion_paths(expansion::Nothing, _workdir::AbstractString) = nothing
 
 function _relative_expansion_paths(expansion::ExpansionResult, workdir::AbstractString)
     return ExpansionResult(;
@@ -399,10 +407,34 @@ function _relative_result_paths(result::IdunaResult)
         workdir = result.workdir,
         target = _relative_target_paths(result.target, result.workdir),
         thoraxe_msa = _relative_thoraxe_msa_paths(result.thoraxe_msa, result.workdir),
-        expansion = _relative_expansion_paths(result.expansion, result.workdir),
-        validation = _relative_validation_paths(result.validation, result.workdir),
+        expansions = [_relative_expansion_paths(expansion, result.workdir)
+                      for expansion in result.expansions],
+        validations = [_relative_validation_paths(validation, result.workdir)
+                       for validation in result.validations],
         warnings = result.warnings,
         status = result.status
+    )
+end
+
+function _expansion_summary(expansion::ExpansionResult)
+    return (;
+        match_stockholm = expansion.match_stockholm,
+        full_stockholm = expansion.full_stockholm,
+        a3m_path = expansion.a3m_path,
+        hits_fasta = expansion.hits_fasta,
+        n_hits = expansion.n_hits,
+        n_new_hits = expansion.n_new_hits,
+        status = String(expansion.status)
+    )
+end
+
+function _validation_summary(validation::ValidationResult)
+    return (;
+        stats_path = validation.stats_path,
+        seed_nseq = validation.seed_nseq,
+        expanded_nseq = validation.expanded_nseq,
+        aln_identical = validation.aln_identical,
+        status = String(validation.status)
     )
 end
 
@@ -424,31 +456,19 @@ function result_summary(result::IdunaResult)
             mapping_confirmed = result.target.mapping_confirmed
         ),
         thoraxe_msa = (;
-            baseline_fasta = result.thoraxe_msa.baseline_fasta,
-            baseline_stockholm = result.thoraxe_msa.baseline_stockholm,
+            baseline_fastas = result.thoraxe_msa.baseline_fastas,
+            baseline_stockholms = result.thoraxe_msa.baseline_stockholms,
             pid_summary = result.thoraxe_msa.pid_summary,
-            best_pid = result.thoraxe_msa.best_seed.pid,
-            best_seed_stockholm = result.thoraxe_msa.best_seed.stockholm_path,
+            selected_pids = [seed.pid for seed in result.thoraxe_msa.seeds],
+            seed_stockholms = [seed.stockholm_path for seed in result.thoraxe_msa.seeds],
+            pid_sample_count = result.thoraxe_msa.pid_sample_count,
+            pid_sample_fraction = result.thoraxe_msa.pid_sample_fraction,
+            pid_sample_seed = result.thoraxe_msa.pid_sample_seed,
             warnings = result.thoraxe_msa.warnings,
             status = String(result.thoraxe_msa.status)
         ),
-        expansion = result.expansion === nothing ? nothing :
-                    (;
-            match_stockholm = result.expansion.match_stockholm,
-            full_stockholm = result.expansion.full_stockholm,
-            a3m_path = result.expansion.a3m_path,
-            hits_fasta = result.expansion.hits_fasta,
-            n_hits = result.expansion.n_hits,
-            n_new_hits = result.expansion.n_new_hits,
-            status = String(result.expansion.status)
-        ),
-        validation = (;
-            stats_path = result.validation.stats_path,
-            seed_nseq = result.validation.seed_nseq,
-            expanded_nseq = result.validation.expanded_nseq,
-            aln_identical = result.validation.aln_identical,
-            status = String(result.validation.status)
-        )
+        expansions = _expansion_summary.(result.expansions),
+        validations = _validation_summary.(result.validations)
     )
 end
 

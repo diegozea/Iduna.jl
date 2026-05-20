@@ -7,7 +7,8 @@ using MIToS.MSA: A3M, AbstractMultipleSequenceAlignment, FASTA, Stockholm,
                  nsequences, read_file, sequencenames, write_file
 
 using ..Utils: ExpansionResult, ResolvedTarget, SeedSelection, _resolve_artifact_path,
-               ensure_mmseqs_db, format_pid, run_logged, safe_rm, write_fasta
+               ensure_mmseqs_db, format_pid, format_pid_dir, run_logged, safe_rm,
+               write_fasta
 
 export expand_msa,
        normalize_stockholm_annotations!,
@@ -334,7 +335,8 @@ function expand_msa(target::ResolvedTarget,
     seed_fasta = seed.fasta_path === nothing ? nothing :
                  _resolve_artifact_path(seed.fasta_path, seed_workdir)
 
-    run_dir = joinpath(_expansion_root(workdir), target.ensembl_gene_id, target.transcript_id)
+    run_dir = joinpath(_expansion_root(workdir), target.ensembl_gene_id,
+        target.transcript_id, format_pid_dir(seed.pid))
     unpack_dir = joinpath(run_dir, "expanded_msa")
     logs_dir = joinpath(run_dir, "logs")
     if overwrite && isdir(run_dir)

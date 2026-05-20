@@ -43,7 +43,7 @@ main result used by validation.
 
 Use `no_expansion=true` in Julia, or `--no-expansion` in the app, to stop after
 the ThorAxe MSA stage. In that mode `mmseqs_db` is not required,
-`result.expansion === nothing`, and `load_seed_msa(result)` loads the selected
+`isempty(result.expansions)`, and `load_seed_msa(result)` loads the selected
 ThorAxe PID seed.
 
 ```julia
@@ -54,8 +54,8 @@ thoraxe_only = iduna(
 )
 
 seed = load_seed_msa(thoraxe_only)
-thoraxe_only.thoraxe_msa.baseline_stockholm
-thoraxe_only.thoraxe_msa.best_seed.stockholm_path
+thoraxe_only.thoraxe_msa.baseline_stockholms[1]
+thoraxe_only.thoraxe_msa.seeds[1].stockholm_path
 ```
 
 ```bash
@@ -80,6 +80,21 @@ BioMart failures.
 that can drop the species list after a timeout.
 `thoraxe_timeout_seconds` is unset by default because ThorAxe runtime depends on
 gene complexity and the selected PID thresholds.
+
+Seed selection is per PID threshold. Iduna runs `transcript_query` once and
+builds one full-species candidate `msa_0` at each PID threshold. Each candidate
+is validated: indels versus UniProt exclude that PID from selection, while
+substitutions are reported as warnings. Species samples are drawn from each
+PID's own candidate `msa_0`, run at that PID, and scored by HHsuite against the
+same candidate. Iduna chooses the highest median identity, highest mean
+identity, largest candidate `msa_0` species count, and finally the first PID in
+`pid_thresholds` order. By default Iduna uses 45 samples, retains 80% of
+non-reference species per sample, and records a random `pid_sample_seed` unless
+one is supplied.
+Set `pid_sample_count=0` to skip seed selection and carry every eligible PID
+candidate forward. In that mode `result.thoraxe_msa.seeds`,
+`result.expansions`, and `result.validations` can contain multiple entries; use
+`pid=` or `index=` with `load_seed_msa` and `load_expanded_msa` to select one.
 
 If the ThorAxe `transcript_query` bundle has already been created, pass it with
 `thoraxe_input_dir`. Iduna copies that bundle into `workdir/thoraxe_input` and

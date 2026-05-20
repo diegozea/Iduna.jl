@@ -149,6 +149,21 @@ function _app_arg_settings(;
         metavar = "n"
         arg_type = String
 
+        "--pid-sample-count"
+        help = "PID-specific species samples per candidate MSA for seed selection, default 45."
+        metavar = "n"
+        arg_type = Int
+
+        "--pid-sample-fraction"
+        help = "Fraction of non-reference species retained in each PID-specific sample, default 0.8."
+        metavar = "x"
+        arg_type = Float64
+
+        "--pid-sample-seed"
+        help = "Random seed for PID species sampling. A random seed is recorded if omitted."
+        metavar = "n"
+        arg_type = Int
+
         "--threads"
         help = "Threads for MMseqs2."
         metavar = "n"

@@ -52,12 +52,12 @@
             joinpath(result.workdir, "target.json"),
             joinpath(result.workdir, "result.json"),
             artifact(result.thoraxe_msa.pid_summary),
-            artifact(result.thoraxe_msa.best_seed.stockholm_path),
-            artifact(result.expansion.match_stockholm),
-            artifact(result.expansion.full_stockholm),
-            artifact(result.expansion.a3m_path),
-            artifact(result.expansion.hits_fasta),
-            artifact(result.validation.stats_path)
+            artifact(result.thoraxe_msa.seeds[1].stockholm_path),
+            artifact(result.expansions[1].match_stockholm),
+            artifact(result.expansions[1].full_stockholm),
+            artifact(result.expansions[1].a3m_path),
+            artifact(result.expansions[1].hits_fasta),
+            artifact(result.validations[1].stats_path)
         )
         missing = filter(!isfile, required_files)
         isempty(missing) || error("MAPK8 smoke test missing files: $(join(missing, ", "))")

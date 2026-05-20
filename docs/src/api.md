@@ -8,7 +8,7 @@ CurrentModule = Iduna
 
 `iduna` runs the full ThorAxe plus MMseqs2/HMMER pipeline by default. Use
 `no_expansion=true` to stop after the ThorAxe MSA stage; in that case
-`result.expansion === nothing`, `load_seed_msa(result)` remains available, and
+`isempty(result.expansions)`, `load_seed_msa(result)` remains available, and
 `load_expanded_msa(result)` throws a guidance error.
 
 ```@docs

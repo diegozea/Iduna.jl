@@ -28,8 +28,8 @@ The ThorAxe PID seed chosen for expansion, plus the summary values used to pick 
 """
 Base.@kwdef struct SeedSelection
     pid::Float64
-    median_identity::Float64
-    mean_identity::Float64
+    median_identity::Union{Missing, Float64}
+    mean_identity::Union{Missing, Float64}
     stockholm_path::String
     fasta_path::Union{Nothing, String} = nothing
     summary_path::String
@@ -44,15 +44,18 @@ Paths and metadata produced by the ThorAxe MSA-building stage.
 """
 Base.@kwdef struct ThorAxeMSAResult
     input_dir::String
-    thoraxe_dir::String
+    thoraxe_dirs::Vector{String}
     msa_dir::String
-    baseline_fasta::String
-    baseline_stockholm::String
-    sequence_fasta::String
-    species_file::String
+    baseline_fastas::Vector{String}
+    baseline_stockholms::Vector{String}
+    sequence_fastas::Vector{String}
+    species_files::Vector{String}
     pid_summary::String
-    best_seed::SeedSelection
+    seeds::Vector{SeedSelection}
     logs_dir::String
+    pid_sample_count::Int = 0
+    pid_sample_fraction::Float64 = 1.0
+    pid_sample_seed::UInt64 = UInt64(0)
     warnings::Vector{String} = String[]
     status::Symbol = :ok
 end
@@ -108,16 +111,16 @@ end
     IdunaResult
 
 Top-level result returned by `Iduna.iduna`. It keeps the full pipeline status
-and links to the per-stage result objects. `expansion` is `nothing` when the
-run was requested with `no_expansion=true`.
+and links to the per-stage result objects. `expansions` is empty when the run
+was requested with `no_expansion=true`.
 """
 Base.@kwdef struct IdunaResult
     input_id::String
     workdir::String
     target::ResolvedTarget
     thoraxe_msa::ThorAxeMSAResult
-    expansion::Union{Nothing, ExpansionResult}
-    validation::ValidationResult
+    expansions::Vector{ExpansionResult}
+    validations::Vector{ValidationResult}
     warnings::Vector{String} = String[]
     status::Symbol = :ok
 end

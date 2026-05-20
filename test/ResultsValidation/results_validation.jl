@@ -68,7 +68,7 @@
         @test stats_row.seed_path == "tiny.sto"
         @test stats_row.expanded_path == "tiny.sto"
         @test stats_row.query_vs_uniprot_path ==
-              joinpath("validation", "query_vs_uniprot_alignment.txt")
+              joinpath("validation", "pid_10.00", "query_vs_uniprot_alignment.txt")
 
         relative_seed = Iduna.SeedSelection(;
             pid = 10.0,

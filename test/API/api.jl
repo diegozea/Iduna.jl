@@ -85,17 +85,17 @@
         median_identity = 1.0,
         mean_identity = 1.0,
         stockholm_path = "seed.sto",
-        summary_path = "best_seed.csv")
+        summary_path = "candidate_summary.csv")
     thoraxe = Iduna.ThorAxeMSAResult(;
         input_dir = "thoraxe_input",
-        thoraxe_dir = "thoraxe",
+        thoraxe_dirs = ["thoraxe"],
         msa_dir = "thoraxe_msa",
-        baseline_fasta = "msa_0.fasta",
-        baseline_stockholm = "msa_0.sto",
-        sequence_fasta = "msa_0_sequences.fasta",
-        species_file = "species.txt",
-        pid_summary = "best_seed.csv",
-        best_seed,
+        baseline_fastas = ["msa_0.fasta"],
+        baseline_stockholms = ["msa_0.sto"],
+        sequence_fastas = ["msa_0_sequences.fasta"],
+        species_files = ["species.txt"],
+        pid_summary = "candidate_summary.csv",
+        seeds = [best_seed],
         logs_dir = "logs/thoraxe",
         warnings = ["BioMart transcript_query failures recorded for species: mus_spretus."],
         status = :warn)
@@ -121,15 +121,15 @@
         workdir = "workdir",
         target,
         thoraxe_msa = thoraxe,
-        expansion,
-        validation,
+        expansions = [expansion],
+        validations = [validation],
         warnings = thoraxe.warnings,
         status = :warn)
     summary = Iduna.Utils.result_summary(result)
     @test summary.status == "warn"
     @test summary.thoraxe_msa.status == "warn"
     @test summary.thoraxe_msa.warnings == thoraxe.warnings
-    @test summary.expansion.match_stockholm == "match.sto"
+    @test summary.expansions[1].match_stockholm == "match.sto"
 
     @testset "result pretty printing" begin
         expansion_text = repr("text/plain", expansion)
@@ -146,8 +146,8 @@
         result_text = repr("text/plain", result)
         @test startswith(result_text, "IdunaResult(\n")
         @test occursin(r"\n\s+target\s+=\s+ResolvedTarget\(", result_text)
-        @test occursin(r"\n\s+expansion\s+=\s+ExpansionResult\(", result_text)
-        @test occursin(r"\n\s+validation\s+=\s+ValidationResult\(", result_text)
+        @test occursin(r"\n\s+expansions\s+=\s+\[ExpansionResult\(", result_text)
+        @test occursin(r"\n\s+validations\s+=\s+\[ValidationResult\(", result_text)
     end
 
     @testset "returned result artifact paths are relative to workdir" begin
@@ -170,19 +170,21 @@
                 pid = 10.0,
                 median_identity = 1.0,
                 mean_identity = 1.0,
-                stockholm_path = joinpath(workdir, "thoraxe_msa", "seeds", "pid10.sto"),
-                fasta_path = joinpath(workdir, "thoraxe_msa", "seeds", "pid10.fasta"),
-                summary_path = joinpath(workdir, "thoraxe_msa", "best_seed.csv"))
+                stockholm_path = joinpath(workdir, "thoraxe_msa", "candidates",
+                    "pid_10.00", "candidate_msa_full.sto"),
+                fasta_path = joinpath(workdir, "thoraxe_msa", "candidates", "pid_10.00",
+                    "candidate_msa_full.fasta"),
+                summary_path = joinpath(workdir, "thoraxe_msa", "candidate_summary.csv"))
             abs_thoraxe = Iduna.ThorAxeMSAResult(;
                 input_dir = joinpath(workdir, "thoraxe_input"),
-                thoraxe_dir = joinpath(workdir, "thoraxe"),
+                thoraxe_dirs = [joinpath(workdir, "thoraxe")],
                 msa_dir = joinpath(workdir, "thoraxe_msa"),
-                baseline_fasta = joinpath(workdir, "thoraxe_msa", "baseline.fasta"),
-                baseline_stockholm = joinpath(workdir, "thoraxe_msa", "baseline.sto"),
-                sequence_fasta = joinpath(workdir, "thoraxe_msa", "sequences.fasta"),
-                species_file = joinpath(workdir, "thoraxe_msa", "species.txt"),
-                pid_summary = joinpath(workdir, "thoraxe_msa", "best_seed.csv"),
-                best_seed = abs_seed,
+                baseline_fastas = [joinpath(workdir, "thoraxe_msa", "baseline.fasta")],
+                baseline_stockholms = [joinpath(workdir, "thoraxe_msa", "baseline.sto")],
+                sequence_fastas = [joinpath(workdir, "thoraxe_msa", "sequences.fasta")],
+                species_files = [joinpath(workdir, "thoraxe_msa", "species.txt")],
+                pid_summary = joinpath(workdir, "thoraxe_msa", "candidate_summary.csv"),
+                seeds = [abs_seed],
                 logs_dir = joinpath(workdir, "logs", "thoraxe"))
             expansion_dir = joinpath(workdir, "expansion", gene, transcript)
             abs_expansion = Iduna.ExpansionResult(;
@@ -201,9 +203,9 @@
                 hmm_dir = joinpath(expansion_dir, "hmm"),
                 logs_dir = joinpath(expansion_dir, "logs"))
             abs_validation = Iduna.ValidationResult(;
-                stats_path = joinpath(workdir, "validation", "stats.csv"),
+                stats_path = joinpath(workdir, "validation", "pid_10.00", "stats.csv"),
                 query_vs_uniprot_path = joinpath(
-                    workdir, "validation", "query_vs_uniprot_alignment.txt"))
+                    workdir, "validation", "pid_10.00", "query_vs_uniprot_alignment.txt"))
 
             result = Iduna.iduna(;
                 id = "Q13148",
@@ -218,24 +220,28 @@
             @test result.target.uniprot_sequence_path ==
                   joinpath("sequences", "uniprot", "Q13148.fasta")
             @test result.thoraxe_msa.pid_summary ==
-                  joinpath("thoraxe_msa", "best_seed.csv")
-            @test result.thoraxe_msa.best_seed.stockholm_path ==
-                  joinpath("thoraxe_msa", "seeds", "pid10.sto")
-            @test result.thoraxe_msa.best_seed.workdir == result.workdir
-            @test result.expansion.match_stockholm == joinpath(
+                  joinpath("thoraxe_msa", "candidate_summary.csv")
+            @test result.thoraxe_msa.seeds[1].stockholm_path ==
+                  joinpath("thoraxe_msa", "candidates", "pid_10.00",
+                "candidate_msa_full.sto")
+            @test result.thoraxe_msa.seeds[1].workdir == result.workdir
+            @test result.expansions[1].match_stockholm == joinpath(
                 "expansion", gene, transcript, "expanded_msa",
                 "$(transcript)_matchonly.sto")
-            @test result.expansion.workdir == result.workdir
-            @test result.validation.stats_path == joinpath("validation", "stats.csv")
+            @test result.expansions[1].workdir == result.workdir
+            @test result.validations[1].stats_path ==
+                  joinpath("validation", "pid_10.00", "stats.csv")
 
             target_json = Iduna.JSON3.read(read(joinpath(workdir, "target.json"), String))
             @test target_json.uniprot_sequence_path ==
                   joinpath("sequences", "uniprot", "Q13148.fasta")
             written = Iduna.JSON3.read(read(joinpath(workdir, "result.json"), String))
             @test written.thoraxe_msa.pid_summary ==
-                  joinpath("thoraxe_msa", "best_seed.csv")
-            @test written.expansion.match_stockholm == result.expansion.match_stockholm
-            @test written.validation.stats_path == joinpath("validation", "stats.csv")
+                  joinpath("thoraxe_msa", "candidate_summary.csv")
+            @test written.expansions[1].match_stockholm ==
+                  result.expansions[1].match_stockholm
+            @test written.validations[1].stats_path ==
+                  joinpath("validation", "pid_10.00", "stats.csv")
         end
     end
 
@@ -256,9 +262,102 @@
                 end,
                 _validate_results = (args...; kwargs...) -> validation)
 
-            @test result.expansion.match_stockholm == expansion.match_stockholm
+            @test result.expansions[1].match_stockholm == expansion.match_stockholm
             @test captured[][:centroids] === true
             @test captured[][:mmseqs_db] == "db"
+        end
+    end
+
+    @testset "PID sampling option forwarding" begin
+        mktempdir() do tmp
+            captured = Ref{Dict{Symbol, Any}}()
+            result = Iduna.iduna(;
+                id = "Q13148",
+                workdir = joinpath(tmp, "pid_sampling_forwarding"),
+                no_expansion = true,
+                pid_sample_count = 12,
+                pid_sample_fraction = 0.65,
+                pid_sample_seed = 42,
+                _resolve_target = (args...; kwargs...) -> target,
+                _build_thoraxe_msa = (
+                    args...; kwargs...) -> begin
+                    captured[] = Dict{Symbol, Any}(kwargs)
+                    thoraxe
+                end,
+                _validate_results = (args...; kwargs...) -> validation)
+
+            @test isempty(result.expansions)
+            @test captured[][:pid_sample_count] == 12
+            @test captured[][:pid_sample_fraction] == 0.65
+            @test captured[][:pid_sample_seed] == 42
+        end
+    end
+
+    @testset "multiple seed expansion mode" begin
+        mktempdir() do tmp
+            seed1 = Iduna.SeedSelection(;
+                pid = 10.0,
+                median_identity = missing,
+                mean_identity = missing,
+                stockholm_path = "seed10.sto",
+                summary_path = "candidate_summary.csv")
+            seed2 = Iduna.SeedSelection(;
+                pid = 80.0,
+                median_identity = missing,
+                mean_identity = missing,
+                stockholm_path = "seed80.sto",
+                summary_path = "candidate_summary.csv")
+            multi_thoraxe = Iduna.ThorAxeMSAResult(;
+                input_dir = "thoraxe_input",
+                thoraxe_dirs = ["thoraxe10", "thoraxe80"],
+                msa_dir = "thoraxe_msa",
+                baseline_fastas = ["seed10.fasta", "seed80.fasta"],
+                baseline_stockholms = ["seed10.sto", "seed80.sto"],
+                sequence_fastas = ["seed10_sequences.fasta", "seed80_sequences.fasta"],
+                species_files = ["seed10_species.txt", "seed80_species.txt"],
+                pid_summary = "candidate_summary.csv",
+                seeds = [seed1, seed2],
+                logs_dir = "logs/thoraxe",
+                pid_sample_count = 0)
+            expanded_pids = Float64[]
+            validated_pids = Float64[]
+            result = Iduna.iduna(;
+                id = "Q13148",
+                mmseqs_db = "db",
+                workdir = joinpath(tmp, "multi"),
+                pid_sample_count = 0,
+                _resolve_target = (args...; kwargs...) -> target,
+                _build_thoraxe_msa = (args...; kwargs...) -> multi_thoraxe,
+                _expand_msa = (target,
+                    seed,
+                    workdir;
+                    kwargs...) -> begin
+                    push!(expanded_pids, seed.pid)
+                    Iduna.ExpansionResult(;
+                        run_dir = "expansion/$(Iduna.Utils.format_pid_dir(seed.pid))",
+                        seed_stockholm = seed.stockholm_path,
+                        hits_fasta = "hits$(Int(seed.pid)).fasta",
+                        full_stockholm = "full$(Int(seed.pid)).sto",
+                        match_stockholm = "match$(Int(seed.pid)).sto",
+                        a3m_path = "expanded$(Int(seed.pid)).a3m",
+                        db_dir = "db",
+                        hmm_dir = "hmm",
+                        logs_dir = "logs")
+                end,
+                _validate_results = (target,
+                    seed,
+                    expansion_arg,
+                    workdir) -> begin
+                    push!(validated_pids, seed.pid)
+                    @test expansion_arg !== nothing
+                    Iduna.ValidationResult(;
+                        stats_path = "validation/$(Iduna.Utils.format_pid_dir(seed.pid))/stats.csv")
+                end)
+            @test [seed.pid for seed in result.thoraxe_msa.seeds] == [10.0, 80.0]
+            @test expanded_pids == [10.0, 80.0]
+            @test validated_pids == [10.0, 80.0]
+            @test length(result.expansions) == 2
+            @test length(result.validations) == 2
         end
     end
 
@@ -290,11 +389,11 @@
 
             @test expand_called[] === false
             @test validation_expansion[] === nothing
-            @test result.expansion === nothing
-            @test Iduna.Utils.result_summary(result).expansion === nothing
+            @test isempty(result.expansions)
+            @test isempty(Iduna.Utils.result_summary(result).expansions)
             written = Iduna.JSON3.read(
                 read(joinpath(result.workdir, "result.json"), String))
-            @test written.expansion === nothing
+            @test isempty(written.expansions)
             @test_throws ErrorException Iduna.load_expanded_msa(result)
         end
 
@@ -314,7 +413,7 @@
                 _validate_results = (args...; kwargs...) -> validation)
 
             @test expand_called[] === false
-            @test result.expansion === nothing
+            @test isempty(result.expansions)
         end
     end
 
