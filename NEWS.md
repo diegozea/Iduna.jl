@@ -1,5 +1,43 @@
 ## Iduna.jl Release Notes
 
+### Changes from v0.3.0 to v0.4.0
+
+Breaking changes:
+
+- Replaced singular top-level result fields `IdunaResult.expansion` and
+  `IdunaResult.validation` with `IdunaResult.expansions` and
+  `IdunaResult.validations`, allowing one result entry per selected PID seed.
+- Replaced singular ThorAxe MSA fields such as
+  `ThorAxeMSAResult.best_seed`, `baseline_stockholm`, `baseline_fasta`,
+  `sequence_fasta`, `species_file`, and `thoraxe_dir` with vector-based fields
+  such as `seeds`, `baseline_stockholms`, `baseline_fastas`,
+  `sequence_fastas`, `species_files`, and `thoraxe_dirs`.
+- Changed `no_expansion=true` results to use empty `expansions` instead of
+  `expansion === nothing`; JSON summaries now store `"expansions": []`.
+- Moved expansion and validation artifacts into PID-specific directories.
+
+Added:
+
+- Added PID candidate sampling and seed selection controlled by
+  `pid_sample_count`, `pid_sample_fraction`, and `pid_sample_seed`.
+- Added reproducible PID sampling when `pid_sample_seed` is supplied; otherwise
+  a random seed is recorded in the result metadata.
+- Added candidate validation that excludes PID candidates with indels relative
+  to UniProt and reports substitution-only differences as warnings.
+- Added `pid_sample_count=0` mode to skip seed selection and carry every
+  eligible PID candidate forward through expansion and validation.
+- Added `pid` and `index` selectors to `load_seed_msa` and
+  `load_expanded_msa` for results with multiple selected seeds.
+- Added `thoraxe_msa/candidate_summary.csv` with candidate eligibility,
+  identity scores, sampling metadata, and selected rows.
+- Added transcript-query metadata and bundle fingerprint checks for safer
+  reuse of cached ThorAxe input.
+
+Internal changes:
+
+- Added `Random`, `SHA`, and `StatsBase` dependencies for PID sampling,
+  fingerprinting, and species subset sampling.
+
 ### Changes from v0.2.0 to v0.3.0
 
 Breaking changes:
