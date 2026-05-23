@@ -170,13 +170,13 @@ function _classify_step_state(run_dir::AbstractString, identity, outputs::NamedT
     end
 
     state = _read_step_state(run_dir)
-    if state === nothing
-        return (; reusable = false, status = :missing, warning = nothing)
-    elseif haskey(state, :unreadable)
+    if state === nothing || haskey(state, :unreadable)
+        unreadable = state === nothing ? "state file disappeared while reading" :
+                     state.unreadable
         return (;
             reusable = false,
             status = :outdated,
-            warning = "Could not read MSA expansion $(_STEP_STATE_FILE): $(state.unreadable); rebuilding.")
+            warning = "Could not read MSA expansion $(_STEP_STATE_FILE): $(unreadable); rebuilding.")
     end
 
     status = Symbol(String(get(state, :status, "outdated")))

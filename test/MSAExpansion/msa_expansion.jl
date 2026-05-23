@@ -131,6 +131,27 @@
             return outputs
         end
 
+        function build_self_hit_mmseqs_db(root::AbstractString)
+            mmseqs = Iduna.MSAExpansion.MMseqs2_jll.mmseqs()
+            mkpath(root)
+            fasta = joinpath(root, "self_hit.fasta")
+            write(fasta, ">seed\nACDEFGHIKLMNPQRSTVWY\n")
+            db = joinpath(root, "self_hit_db")
+            seq_db = string(db, "_seq")
+            aln_db = string(db, "_aln")
+            tmp_dir = joinpath(root, "tmp")
+            logs_dir = joinpath(root, "logs")
+            mkpath.((tmp_dir, logs_dir))
+            Iduna.MSAExpansion._run_labeled(
+                `$(mmseqs) createdb $fasta $db`, "createdb", logs_dir)
+            Iduna.MSAExpansion._run_labeled(
+                `$(mmseqs) createdb $fasta $seq_db`, "createdb_seq", logs_dir)
+            Iduna.MSAExpansion._run_labeled(
+                `$(mmseqs) search $db $seq_db $aln_db $tmp_dir -a --threads 1`,
+                "search", logs_dir)
+            return db
+        end
+
         run_dir = joinpath(tmp, "expansion", gene_id, transcript_id, "pid_10.00")
         outputs = write_outputs(
             Iduna.MSAExpansion._expansion_output_paths(run_dir, transcript_id))
@@ -255,6 +276,36 @@
         @test missing_centroids.reusable === false
         @test missing_centroids.status === :unfinished
 
+        incomplete_dir = joinpath(tmp, "expansion", gene_id, transcript_id, "pid_35.00")
+        incomplete_outputs = Iduna.MSAExpansion._expansion_output_paths(
+            incomplete_dir, transcript_id)
+        mkpath(incomplete_dir)
+        incomplete = Iduna.MSAExpansion._classify_step_state(
+            incomplete_dir, identity, incomplete_outputs)
+        @test incomplete.reusable === false
+        @test incomplete.status === :unfinished
+        @test occursin("incomplete outputs", incomplete.warning)
+
+        missing_dir = joinpath(tmp, "expansion", gene_id, transcript_id, "pid_36.00")
+        missing_outputs = Iduna.MSAExpansion._expansion_output_paths(
+            missing_dir, transcript_id)
+        missing = Iduna.MSAExpansion._classify_step_state(
+            missing_dir, identity, missing_outputs)
+        @test missing.reusable === false
+        @test missing.status === :missing
+        @test missing.warning === nothing
+
+        unreadable_dir = joinpath(tmp, "expansion", gene_id, transcript_id, "pid_37.00")
+        unreadable_outputs = Iduna.MSAExpansion._expansion_output_paths(
+            unreadable_dir, transcript_id)
+        mkpath(unreadable_dir)
+        write(Iduna.MSAExpansion._step_state_path(unreadable_dir), "{not json")
+        unreadable = Iduna.MSAExpansion._classify_step_state(
+            unreadable_dir, identity, unreadable_outputs)
+        @test unreadable.reusable === false
+        @test unreadable.status === :outdated
+        @test occursin("Could not read MSA expansion step_state.json", unreadable.warning)
+
         legacy_dir = joinpath(tmp, "expansion", gene_id, transcript_id, "pid_40.00")
         legacy_outputs = write_outputs(
             Iduna.MSAExpansion._expansion_output_paths(legacy_dir, transcript_id))
@@ -276,6 +327,47 @@
         @test legacy.reusable === false
         @test legacy.status === :outdated
         @test occursin("no step_state.json", legacy.warning)
+
+        stale_failure_dir = joinpath(tmp, "expansion", gene_id, transcript_id, "pid_50.00")
+        stale_failure_outputs = write_outputs(
+            Iduna.MSAExpansion._expansion_output_paths(stale_failure_dir, transcript_id))
+        stale_failure_seed = Iduna.SeedSelection(;
+            pid = 50.0,
+            median_identity = 100.0,
+            mean_identity = 100.0,
+            stockholm_path = seed_sto,
+            summary_path = joinpath(tmp, "seed_summary.csv")
+        )
+        @test_throws Base.ProcessFailedException Iduna.MSAExpansion.expand_msa(
+            target, stale_failure_seed, tmp; mmseqs_db = db, threads = 1)
+        stale_failure_state = Iduna.MSAExpansion._read_step_state(stale_failure_dir)
+        @test stale_failure_state.status == "failed"
+        @test occursin("no step_state.json", stale_failure_state.warnings[1])
+        @test occursin("ProcessFailedException", stale_failure_state.exception.type)
+        cache_warning = read(joinpath(stale_failure_dir, "logs", "cache_warning.log"),
+            String)
+        @test occursin("no step_state.json", cache_warning)
+        @test !isfile(stale_failure_outputs.full_stockholm)
+
+        success_seed_sto = joinpath(tmp, "success_seed.sto")
+        write(success_seed_sto, "# STOCKHOLM 1.0\nseed ACDEFGHIKLMNPQRSTVWY\n//\n")
+        success_seed = Iduna.SeedSelection(;
+            pid = 60.0,
+            median_identity = 100.0,
+            mean_identity = 100.0,
+            stockholm_path = success_seed_sto,
+            summary_path = joinpath(tmp, "seed_summary.csv")
+        )
+        success_db = build_self_hit_mmseqs_db(joinpath(tmp, "self_hit_mmseqs"))
+        success = Iduna.MSAExpansion.expand_msa(
+            target, success_seed, tmp; mmseqs_db = success_db, centroids = true,
+            threads = 1)
+        @test success.status === :ok
+        @test success.n_new_hits == 0
+        @test isfile(joinpath(success.run_dir, "centroid_msa",
+            "$(transcript_id)_centroids.a3m"))
+        success_state = Iduna.MSAExpansion._read_step_state(success.run_dir)
+        @test success_state.status == "done"
 
         Iduna.MSAExpansion._write_step_state(legacy_dir, :failed, legacy_identity,
             legacy_outputs; exception = (; type = "ErrorException", message = "failed"))
