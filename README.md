@@ -23,6 +23,8 @@ expanded = load_expanded_msa(result)
 The package writes a stable work directory containing ThorAxe outputs, PID seed
 MSAs, expansion outputs, logs, and validation stats. `result.workdir` is
 absolute, while artifact paths under it are reported relative to `workdir`.
+Expansion runs record a `step_state.json` input identity, so cached outputs are
+reused only when the seed MSA and expansion options match the current run.
 
 For seed selection, Iduna runs `transcript_query` once and builds one
 full-species candidate `msa_0` at each PID threshold. Each candidate is validated:
@@ -56,6 +58,8 @@ pass `pid=` or `index=` to `load_seed_msa` or `load_expanded_msa` when needed.
 Pass `centroids=true` in Julia, or `--centroids` in the app, to also save a
 centroid-level MSA before MMseqs2 expands centroid hits to cluster members. This
 is a side output; the regular `expanded_msa/` files remain the main result.
+If an earlier cached expansion lacks the requested centroid files, Iduna warns
+and rebuilds that PID expansion.
 
 By default, Iduna filters the ThorAxe species list with Ensembl homology using
 `orthology="1:1"`, then checks BioMart Ensembl Gene dataset availability with
