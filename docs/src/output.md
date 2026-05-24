@@ -34,6 +34,7 @@ around it. By default, `workdir` is a directory named after the input ID.
   expansion/  # absent when no_expansion=true / --no-expansion
     <gene>/<transcript>/
       pid_10.00/
+        step_state.json
         seeds/
         dbs/
         hmm/
@@ -107,3 +108,8 @@ expansion. This side output reuses the same MMseqs2 search result, does not run
 a second search, and does not change validation or `result.json`. Its files are
 `<transcript>_centroids_full.sto`, `<transcript>_centroids_matchonly.sto`,
 `<transcript>_centroids.a3m`, and `<transcript>_centroid_hits_raw.fasta`.
+
+Each expansion PID directory also has `step_state.json`, which records the
+input identity used for safe cache reuse. If the seed MSA, expansion parameters,
+or centroid request change, Iduna treats the cached expansion as outdated,
+warns, and rebuilds that PID directory.
