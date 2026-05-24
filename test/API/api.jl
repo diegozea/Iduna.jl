@@ -130,6 +130,17 @@
     @test summary.thoraxe_msa.status == "warn"
     @test summary.thoraxe_msa.warnings == thoraxe.warnings
     @test summary.expansions[1].match_stockholm == "match.sto"
+    validation_warning = Iduna.ValidationResult(;
+        stats_path = "warning_stats.csv",
+        warnings = ["validation warning"])
+    @test Iduna._partial_warnings(target, thoraxe, [validation_warning]) ==
+          vcat(thoraxe.warnings, validation_warning.warnings)
+    @test Iduna._select_seed_index(result; pid = nothing, index = 1, label = "seed") == 1
+    @test Iduna._select_seed_index(result; pid = 10.0, index = nothing, label = "seed") == 1
+    @test_throws ErrorException Iduna._select_seed_index(
+        result; pid = nothing, index = 2, label = "seed")
+    @test_throws ErrorException Iduna._select_seed_index(
+        result; pid = 80.0, index = nothing, label = "seed")
 
     @testset "result pretty printing" begin
         expansion_text = repr("text/plain", expansion)

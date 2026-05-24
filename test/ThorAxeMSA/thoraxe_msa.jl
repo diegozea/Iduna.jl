@@ -329,14 +329,14 @@
         @test decimal_pid_metadata.pid_thresholds_key == "12.34"
         decimal_pid_rows = [
             Iduna.ThorAxeMSA._candidate_summary_row(
-                metadata_target, candidate, 12.34, 1, validation;
-                mean_identity = 70.0,
-                median_identity = 70.0,
-                n_samples = 2,
-                sample_count = decimal_pid_metadata.pid_sample_count,
-                sample_fraction = decimal_pid_metadata.pid_sample_fraction,
-                sample_seed = decimal_pid_metadata.pid_sample_seed,
-                metadata = decimal_pid_metadata)
+            metadata_target, candidate, 12.34, 1, validation;
+            mean_identity = 70.0,
+            median_identity = 70.0,
+            n_samples = 2,
+            sample_count = decimal_pid_metadata.pid_sample_count,
+            sample_fraction = decimal_pid_metadata.pid_sample_fraction,
+            sample_seed = decimal_pid_metadata.pid_sample_seed,
+            metadata = decimal_pid_metadata)
         ]
         decimal_pid_summary = joinpath(tmp, "candidate_summary_decimal_pid.csv")
         Iduna.ThorAxeMSA._summarize_candidate_scores(
@@ -418,6 +418,72 @@
             overwrite = true)
     end
 
+    @testset "metadata and cached branch helpers" begin
+        mktempdir() do tmp
+            metadata_path = joinpath(tmp, "metadata.json")
+            expected = (gene_id = "ENSG", specieslist = nothing)
+            @test !Iduna.ThorAxeMSA._metadata_matches(metadata_path, expected)
+
+            write(metadata_path, """{"gene_id":"ENSG","specieslist":null}""")
+            @test Iduna.ThorAxeMSA._metadata_matches(metadata_path, expected)
+            @test !Iduna.ThorAxeMSA._metadata_matches(
+                metadata_path, (; gene_id = "OTHER", specieslist = nothing))
+            @test !Iduna.ThorAxeMSA._metadata_matches(
+                metadata_path, (; gene_id = "ENSG", transcript_id = "ENST"))
+
+            write(metadata_path, "{not json")
+            @test !Iduna.ThorAxeMSA._metadata_matches(metadata_path, expected)
+            @test Iduna.ThorAxeMSA._next_timeout(nothing, 10) === nothing
+            @test Iduna.ThorAxeMSA._next_timeout(2, nothing) == 2.0
+            @test Iduna.ThorAxeMSA._next_timeout(20, 30) == 30.0
+            @test Iduna.ThorAxeMSA._retry_wait_seconds(6) == 30.0
+        end
+
+        mktempdir() do tmp
+            fasta = joinpath(tmp, "candidate.fasta")
+            write(fasta, ">ENSG\nA-C\n>ORTHO1\nABC\n")
+            msa = Iduna.ThorAxeMSA.read_file(fasta, Iduna.ThorAxeMSA.FASTA)
+            paths = Iduna.ThorAxeMSA._pid_sample_paths(tmp, 60.0, 0)
+            Iduna.ThorAxeMSA._write_candidate_sample_inputs(
+                paths, msa, ["homo_sapiens", "mus_musculus"], [1, 2])
+            Iduna.ThorAxeMSA.write_file(paths.fasta_path, msa, Iduna.ThorAxeMSA.FASTA)
+            Iduna.ThorAxeMSA.write_file(
+                paths.stockholm_path, msa, Iduna.ThorAxeMSA.Stockholm)
+            written_species = read(paths.species_file, String)
+            @test Iduna.ThorAxeMSA._write_species_file(
+                paths.species_file, ["danio_rerio"]) == paths.species_file
+            @test read(paths.species_file, String) == written_species
+            @test Iduna.ThorAxeMSA._write_candidate_sample_inputs(
+                paths, msa, ["wrong_length"], [1]) ==
+                  (paths.sequence_fasta, paths.species_file)
+            @test_throws ErrorException Iduna.ThorAxeMSA._write_candidate_sample_inputs(
+                Iduna.ThorAxeMSA._pid_sample_paths(tmp, 70.0, 0),
+                msa, ["wrong_length"], [1])
+
+            thoraxe_dir = Iduna.ThorAxeMSA._pid_sample_thoraxe_dir(tmp, 60.0, 0)
+            mkpath(thoraxe_dir)
+            write(joinpath(thoraxe_dir, "path_table.csv"), "TranscriptIDCluster,Path\n")
+            @test Iduna.ThorAxeMSA._run_thoraxe_pid_msa(
+                Iduna.ResolvedTarget(;
+                    input_id = "ENST",
+                    input_kind = :ensembl_transcript,
+                    ensembl_gene_id = "ENSG",
+                    transcript_id = "ENST"),
+                joinpath(tmp, "input"), tmp, 60.0, nothing, 0;
+                keep_thoraxe_dir = true) ==
+                  (paths.fasta_path, paths.stockholm_path, thoraxe_dir)
+
+            positions,
+            codes = Iduna.ThorAxeMSA._get_codes(
+                "Probab=99\nquery 1 A-C 2\n        | |\nConfidence\n")
+            @test positions == [1, 0, 2]
+            @test codes == ['|', ' ', '|']
+            @test Iduna.ThorAxeMSA._identity_from_codes(positions, codes) == 100.0
+            @test_throws ErrorException Iduna.ThorAxeMSA._reference_index(
+                msa, "MISSING_GENE", "MISSING_TRANSCRIPT")
+        end
+    end
+
     @testset "orthology specieslist filter helpers" begin
         @test Iduna.ThorAxeMSA._normalize_species_name(nothing) === nothing
         @test Iduna.ThorAxeMSA._prepend_query_species(["mus_musculus"], nothing) ==
@@ -448,6 +514,14 @@
               ["mus_musculus", "danio_rerio"]
         @test Iduna.ThorAxeMSA._homology_species(homology_data, "m:n") ==
               ["mus_musculus", "danio_rerio", "xenopus_tropicalis"]
+
+        unknown_species_target = Iduna.ResolvedTarget(;
+            input_id = "ENST00000000001.1",
+            input_kind = :ensembl_transcript,
+            ensembl_gene_id = "ENSG00000000001.1",
+            transcript_id = "ENST00000000001.1")
+        @test_throws ErrorException Iduna.ThorAxeMSA._fetch_ortholog_species(
+            unknown_species_target, "1:1")
     end
 
     @testset "species list parsing and filtering" begin
@@ -617,6 +691,17 @@ TableSet\tptroglodytes_gene_ensembl\tChimpanzee genes (Pan_tro_3.0)\t1
             @test length(failed.warnings) == 1
             @test occursin("using the unfiltered specieslist", only(failed.warnings))
         end
+
+        mktempdir() do tmp
+            metadata_path = joinpath(tmp, Iduna.ThorAxeMSA._BIOMART_DATASETS_METADATA_FILE)
+            @test Iduna.ThorAxeMSA._read_biomart_cache_date(metadata_path) === nothing
+            write(metadata_path, """{"download_date":"2026-05-06"}""")
+            @test Iduna.ThorAxeMSA._read_biomart_cache_date(metadata_path) == "2026-05-06"
+            write(metadata_path, """{"download_time":"2026-05-06T12:00:00"}""")
+            @test Iduna.ThorAxeMSA._read_biomart_cache_date(metadata_path) === nothing
+            write(metadata_path, "{not json")
+            @test Iduna.ThorAxeMSA._read_biomart_cache_date(metadata_path) === nothing
+        end
     end
 
     @testset "BioMart transcript_query warnings" begin
@@ -647,6 +732,11 @@ TableSet\tptroglodytes_gene_ensembl\tChimpanzee genes (Pan_tro_3.0)\t1
             @test occursin("pan_troglodytes", only(warnings))
             @test occursin("errors.csv", only(warnings))
             @test occursin("transcript_query_stderr.log", only(warnings))
+
+            malformed_errors = joinpath(input_dir, "Ensembl", "malformed_errors.csv")
+            write(malformed_errors, "Other\nmus_spretus\n")
+            @test isempty(Iduna.ThorAxeMSA._species_from_biomart_errors_file(
+                malformed_errors))
         end
     end
 
@@ -702,6 +792,98 @@ TableSet\tptroglodytes_gene_ensembl\tChimpanzee genes (Pan_tro_3.0)\t1
             @test "--specieslist" in parts
             @test parts[findfirst(==("--specieslist"), parts) + 1] ==
                   "homo_sapiens,mus_musculus"
+        end
+    end
+
+    @testset "cached ThorAxe MSA result reuse" begin
+        mktempdir() do tmp
+            source = joinpath(tmp, "cached_input")
+            ensembl = joinpath(source, "Ensembl")
+            mkpath(ensembl)
+            for file in Iduna.ThorAxeMSA._REQUIRED_ENSEMBL_FILES
+                write(joinpath(ensembl, file), "$(file)\n")
+            end
+
+            workdir = joinpath(tmp, "work")
+            target = Iduna.ResolvedTarget(;
+                input_id = "ENST00000000001.1",
+                input_kind = :ensembl_transcript,
+                ensembl_gene_id = "ENSG00000000001.1",
+                transcript_id = "ENST00000000001.1")
+            input_dir = Iduna.ThorAxeMSA._ensure_transcript_query(target, workdir;
+                specieslist = "homo_sapiens",
+                cached_input_dir = source,
+                orthology = "1:1",
+                overwrite = false)
+            metadata = Iduna.ThorAxeMSA._candidate_run_metadata(
+                input_dir, target, [10.0];
+                sample_count = 0,
+                sample_fraction = 0.8,
+                sample_seed = UInt64(7),
+                requested_sample_seed = 7,
+                effective_specieslist = "homo_sapiens",
+                orthology = "1:1",
+                specieslist_filter = true,
+                biomart_datasets_filter = true)
+
+            paths = Iduna.ThorAxeMSA._pid_sample_paths(workdir, 10.0, 0)
+            write(joinpath(tmp, "seed.fasta"), ">ENSG00000000001\nAA\n>ORTHO1\nAB\n")
+            seed_msa = Iduna.ThorAxeMSA.read_file(
+                joinpath(tmp, "seed.fasta"), Iduna.ThorAxeMSA.FASTA)
+            mkpath(dirname(paths.fasta_path))
+            Iduna.ThorAxeMSA.write_file(paths.fasta_path, seed_msa, Iduna.ThorAxeMSA.FASTA)
+            Iduna.ThorAxeMSA.write_file(
+                paths.stockholm_path, seed_msa, Iduna.ThorAxeMSA.Stockholm)
+            Iduna.ThorAxeMSA._write_candidate_sample_inputs(
+                paths, seed_msa, ["homo_sapiens", "mus_musculus"], [1, 2])
+            thoraxe_dir = Iduna.ThorAxeMSA._pid_sample_thoraxe_dir(workdir, 10.0, 0)
+            mkpath(thoraxe_dir)
+            write(joinpath(thoraxe_dir, "path_table.csv"),
+                "TranscriptIDCluster,Path\nENST00000000001,start/1_0/stop\n")
+
+            candidate = (;
+                msa = seed_msa,
+                fasta_path = paths.fasta_path,
+                stockholm_path = paths.stockholm_path,
+                sequence_fasta = paths.sequence_fasta,
+                species_file = paths.species_file,
+                workdir)
+            row = Iduna.ThorAxeMSA._candidate_summary_row(
+                target, candidate, 10.0, 1,
+                (; eligible = true, status = "ok", issue = missing);
+                sample_count = metadata.pid_sample_count,
+                sample_fraction = metadata.pid_sample_fraction,
+                sample_seed = metadata.pid_sample_seed,
+                metadata)
+            summary_path = joinpath(Iduna.ThorAxeMSA._thoraxe_msa_dir(workdir),
+                "candidate_summary.csv")
+            Iduna.ThorAxeMSA._summarize_candidate_scores([row], summary_path)
+            seed = Iduna.SeedSelection(;
+                pid = 10.0,
+                median_identity = missing,
+                mean_identity = missing,
+                stockholm_path = paths.stockholm_path,
+                fasta_path = paths.fasta_path,
+                summary_path)
+            Iduna.ThorAxeMSA._mark_selected_candidates!(summary_path, [seed])
+
+            result = Iduna.ThorAxeMSA.build_thoraxe_msa(target, workdir;
+                pid_thresholds = [10.0],
+                specieslist = "homo_sapiens",
+                cached_thoraxe_input_dir = source,
+                pid_sample_count = 0,
+                pid_sample_seed = 7)
+            @test result.input_dir == input_dir
+            @test result.pid_sample_seed == UInt64(7)
+            @test result.pid_sample_count == 0
+            @test result.status === :ok
+            @test isempty(result.warnings)
+            @test only(result.seeds).pid == 10.0
+            @test result.baseline_fastas == [paths.fasta_path]
+            @test result.baseline_stockholms == [paths.stockholm_path]
+            @test result.sequence_fastas == [paths.sequence_fasta]
+            @test result.species_files == [paths.species_file]
+            @test result.thoraxe_dirs == [thoraxe_dir]
         end
     end
 end
