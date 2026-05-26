@@ -70,6 +70,22 @@
         @test stats_row.query_vs_uniprot_path ==
               joinpath("validation", "pid_10.00", "query_vs_uniprot_alignment.txt")
 
+        indel_uniprot = joinpath(tmp, "uniprot_indel.fasta")
+        write(indel_uniprot, ">P20963\nACD\n")
+        indel_target = Iduna.ResolvedTarget(;
+            input_id = "P20963",
+            input_kind = :uniprot,
+            uniprot_id = "P20963",
+            ensembl_gene_id = "seq1",
+            transcript_id = "ENST000001",
+            uniprot_sequence_path = indel_uniprot
+        )
+        indel_validation = Iduna.ResultsValidation.validate_results(
+            indel_target, seed, expansion, joinpath(tmp, "indel"))
+        @test indel_validation.status === :warn
+        @test occursin("indels relative to the UniProt sequence",
+            only(indel_validation.warnings))
+
         relative_seed = Iduna.SeedSelection(;
             pid = 10.0,
             median_identity = 100.0,

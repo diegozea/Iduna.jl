@@ -631,11 +631,13 @@ function _transcript_query_attempt_action!(gene_core::AbstractString,
         attempt::Integer,
         attempts::Integer,
         timeout_seconds::Union{Nothing, Real},
-        orthology::AbstractString)
+        orthology::AbstractString,
+        runner::Function = _thoraxe_runner(stdout_log, stderr_log;
+            timeout_seconds = timeout_seconds))
     try
         _run_transcript_query_once(
             gene_core, query_workdir, species, active_specieslist,
-            stdout_log, stderr_log; timeout_seconds, orthology)
+            stdout_log, stderr_log; timeout_seconds, orthology, runner)
         _has_valid_ensembl_bundle(tmp_gene_dir) && return :done
         attempt < attempts || return :failed
         @warn "transcript_query produced an invalid bundle; retrying." gene=gene_core attempt
