@@ -413,6 +413,29 @@ function _biomart_gene_dataset_for_species(species::AbstractString)
     return string(first(parts[1]), parts[2], "_gene_ensembl")
 end
 
+function _classify_biomart_species!(
+        kept::Vector{String},
+        removed::Vector{String},
+        unchecked::Vector{String},
+        species::AbstractString,
+        datasets,
+        query_species::Union{Nothing, String})
+    dataset = _biomart_gene_dataset_for_species(species)
+    if dataset === nothing
+        push!(kept, species)
+        push!(unchecked, species)
+        return false
+    elseif dataset in datasets
+        push!(kept, species)
+        return false
+    elseif species == query_species
+        push!(kept, species)
+        return true
+    end
+    push!(removed, species)
+    return false
+end
+
 function _resolve_biomart_datasets_specieslist(target::ResolvedTarget,
         specieslist::Union{Nothing, AbstractString};
         dataset_loader::Function = _load_biomart_gene_datasets)
@@ -433,20 +456,8 @@ function _resolve_biomart_datasets_specieslist(target::ResolvedTarget,
     missing_query_dataset = false
     # Drop species that BioMart cannot serve, but keep aliases we cannot prove.
     for species in requested_species
-        dataset = _biomart_gene_dataset_for_species(species)
-        if dataset === nothing
-            push!(kept, species)
-            push!(unchecked, species)
-            continue
-        end
-        if dataset in datasets
-            push!(kept, species)
-        elseif species == query_species
-            push!(kept, species)
-            missing_query_dataset = true
-        else
-            push!(removed, species)
-        end
+        missing_query_dataset |= _classify_biomart_species!(
+            kept, removed, unchecked, species, datasets, query_species)
     end
 
     if !isempty(removed)
@@ -610,6 +621,90 @@ function _ensure_cached_thoraxe_input(source_dir::AbstractString,
     return dest
 end
 
+function _transcript_query_attempt_action!(gene_core::AbstractString,
+        query_workdir::AbstractString,
+        species::Union{Nothing, AbstractString},
+        active_specieslist::Union{Nothing, AbstractString},
+        stdout_log::AbstractString,
+        stderr_log::AbstractString,
+        tmp_gene_dir::AbstractString;
+        attempt::Integer,
+        attempts::Integer,
+        timeout_seconds::Union{Nothing, Real},
+        orthology::AbstractString,
+        runner::Function = _thoraxe_runner(stdout_log, stderr_log;
+            timeout_seconds = timeout_seconds))
+    try
+        _run_transcript_query_once(
+            gene_core, query_workdir, species, active_specieslist,
+            stdout_log, stderr_log; timeout_seconds, orthology, runner)
+        _has_valid_ensembl_bundle(tmp_gene_dir) && return :done
+        attempt < attempts || return :failed
+        @warn "transcript_query produced an invalid bundle; retrying." gene=gene_core attempt
+        return :retry_without_specieslist
+    catch err
+        err isa _CommandTimeoutError || rethrow(err)
+        if _has_valid_ensembl_bundle(tmp_gene_dir)
+            @warn "transcript_query timed out but produced a usable Ensembl bundle." gene=gene_core attempt
+            return :done
+        end
+        attempt < attempts || rethrow(err)
+        return :timeout_retry
+    end
+end
+
+function _transcript_query_retry_state(action::Symbol,
+        active_specieslist::Union{Nothing, AbstractString},
+        current_timeout::Union{Nothing, Real},
+        timeout_seconds::Union{Nothing, Real},
+        timeout_max_seconds::Union{Nothing, Real},
+        allow_specieslist_timeout_fallback::Bool,
+        gene_core::AbstractString,
+        attempt::Integer)
+    action === :retry_without_specieslist && return nothing, current_timeout
+    if action === :timeout_retry && active_specieslist !== nothing &&
+       allow_specieslist_timeout_fallback
+        # A large species list can be the slow part, so retry once without it.
+        @warn "transcript_query timed out with a species list; retrying without it." gene=gene_core attempt
+        next_timeout = timeout_max_seconds === nothing ? timeout_seconds :
+                       timeout_max_seconds
+        return nothing, next_timeout
+    end
+    return active_specieslist, _next_timeout(current_timeout, timeout_max_seconds)
+end
+
+function _run_transcript_query_with_retries!(tmp_gene_dir::AbstractString,
+        gene_core::AbstractString,
+        query_workdir::AbstractString,
+        species::Union{Nothing, AbstractString},
+        initial_specieslist::Union{Nothing, AbstractString},
+        initial_timeout::Union{Nothing, Real},
+        attempts::Integer,
+        stdout_log::AbstractString,
+        stderr_log::AbstractString;
+        timeout_seconds::Union{Nothing, Real},
+        timeout_max_seconds::Union{Nothing, Real},
+        orthology::AbstractString,
+        allow_specieslist_timeout_fallback::Bool)
+    active_specieslist = initial_specieslist
+    current_timeout = initial_timeout
+    for attempt in 1:attempts
+        isdir(tmp_gene_dir) && rm(tmp_gene_dir; recursive = true, force = true)
+        action = _transcript_query_attempt_action!(
+            gene_core, query_workdir, species, active_specieslist,
+            stdout_log, stderr_log, tmp_gene_dir;
+            attempt, attempts, timeout_seconds = current_timeout, orthology)
+        action === :done && return nothing
+        action === :failed && break
+        active_specieslist,
+        current_timeout = _transcript_query_retry_state(
+            action, active_specieslist, current_timeout, timeout_seconds,
+            timeout_max_seconds, allow_specieslist_timeout_fallback, gene_core, attempt)
+        sleep(_retry_wait_seconds(attempt))
+    end
+    return nothing
+end
+
 function _ensure_transcript_query(target::ResolvedTarget, workdir::AbstractString;
         specieslist::Union{Nothing, AbstractString} = nothing,
         overwrite::Bool = false,
@@ -644,45 +739,16 @@ function _ensure_transcript_query(target::ResolvedTarget, workdir::AbstractStrin
 
     attempts = max(Int(max_retries), 1)
     active_specieslist = _normalized_specieslist(specieslist)
-    current_timeout = timeout_seconds
     # Retry transcript_query because BioMart downloads often fail transiently.
     return mktempdir(workdir; prefix = "transcript_query_") do query_workdir
         tmp_gene_dir = joinpath(query_workdir, gene_core)
-        for attempt in 1:attempts
-            isdir(tmp_gene_dir) && rm(tmp_gene_dir; recursive = true, force = true)
-            try
-                _run_transcript_query_once(
-                    gene_core, query_workdir, species, active_specieslist,
-                    stdout_log, stderr_log; timeout_seconds = current_timeout, orthology)
-                if _has_valid_ensembl_bundle(tmp_gene_dir)
-                    break
-                elseif attempt < attempts
-                    @warn "transcript_query produced an invalid bundle; retrying." gene=gene_core attempt
-                    active_specieslist = nothing
-                    sleep(_retry_wait_seconds(attempt))
-                    continue
-                end
-            catch err
-                if err isa _CommandTimeoutError && _has_valid_ensembl_bundle(tmp_gene_dir)
-                    @warn "transcript_query timed out but produced a usable Ensembl bundle." gene=gene_core attempt
-                    break
-                end
-                if err isa _CommandTimeoutError && attempt < attempts
-                    if active_specieslist !== nothing && allow_specieslist_timeout_fallback
-                        # A large species list can be the slow part, so retry once without it.
-                        @warn "transcript_query timed out with a species list; retrying without it." gene=gene_core attempt
-                        active_specieslist = nothing
-                        current_timeout = timeout_max_seconds === nothing ?
-                                          timeout_seconds : timeout_max_seconds
-                    else
-                        current_timeout = _next_timeout(current_timeout, timeout_max_seconds)
-                    end
-                    sleep(_retry_wait_seconds(attempt))
-                    continue
-                end
-                rethrow(err)
-            end
-        end
+        _run_transcript_query_with_retries!(
+            tmp_gene_dir, gene_core, query_workdir, species, active_specieslist,
+            timeout_seconds, attempts, stdout_log, stderr_log;
+            timeout_seconds,
+            timeout_max_seconds,
+            orthology,
+            allow_specieslist_timeout_fallback)
 
         _has_valid_ensembl_bundle(tmp_gene_dir) ||
             error("transcript_query did not create a valid Ensembl bundle at $(tmp_gene_dir). See $(stderr_log).")
@@ -746,9 +812,7 @@ function _join_msas_consistently(
     return join_msas(lhs, rhs)
 end
 
-function assemble_transcript_msa(thoraxe_dir::AbstractString,
-        gene_id::AbstractString,
-        transcript_id::AbstractString)
+function _transcript_path_from_table(thoraxe_dir::AbstractString, transcript_id::AbstractString)
     path_table_path = joinpath(thoraxe_dir, "path_table.csv")
     isfile(path_table_path) ||
         error("Missing ThorAxe path_table.csv at $(path_table_path).")
@@ -763,8 +827,12 @@ function assemble_transcript_msa(thoraxe_dir::AbstractString,
         error("Transcript $(transcript_id) was not found in $(path_table_path).")
     length(matches) == 1 ||
         error("Transcript $(transcript_id) matched more than one ThorAxe path.")
+    return String(path_table.Path[only(matches)])
+end
 
-    transcript_path = String(path_table.Path[only(matches)])
+function _transcript_exon_files(
+        thoraxe_dir::AbstractString, transcript_path::AbstractString,
+        transcript_id::AbstractString)
     exon_tokens = split(replace(transcript_path, "start/" => "", "/stop" => ""), "/")
     exon_files = String[]
     # The path table lists s-exons; each one has a matching FASTA alignment.
@@ -774,6 +842,24 @@ function assemble_transcript_msa(thoraxe_dir::AbstractString,
     end
     isempty(exon_files) && error("No s-exon FASTA files were found for $(transcript_id).")
     all(isfile, exon_files) || error("At least one expected s-exon MSA is missing.")
+    return exon_files
+end
+
+function _transcript_msa_species(thoraxe_dir::AbstractString,
+        transcript_msa::AbstractMultipleSequenceAlignment)
+    s_exon_path = joinpath(thoraxe_dir, "s_exon_table.csv")
+    isfile(s_exon_path) || return fill("unknown", nsequences(transcript_msa))
+
+    table = DataFrame(CSV.File(s_exon_path))
+    lookup = Dict(String(row.GeneID) => String(row.Species) for row in eachrow(table))
+    return [get(lookup, String(name), "unknown") for name in sequencenames(transcript_msa)]
+end
+
+function assemble_transcript_msa(thoraxe_dir::AbstractString,
+        gene_id::AbstractString,
+        transcript_id::AbstractString)
+    transcript_path = _transcript_path_from_table(thoraxe_dir, transcript_id)
+    exon_files = _transcript_exon_files(thoraxe_dir, transcript_path, transcript_id)
 
     exon_msas = [read_file(file, FASTA) for file in exon_files]
     transcript_msa = reduce(_join_msas_consistently, exon_msas)
@@ -783,15 +869,7 @@ function assemble_transcript_msa(thoraxe_dir::AbstractString,
         error("Could not find $(gene_id) in the reconstructed transcript MSA.")
     setreference!(transcript_msa, reference)
 
-    species = fill("unknown", nsequences(transcript_msa))
-    s_exon_path = joinpath(thoraxe_dir, "s_exon_table.csv")
-    if isfile(s_exon_path)
-        table = DataFrame(CSV.File(s_exon_path))
-        lookup = Dict(String(row.GeneID) => String(row.Species) for row in eachrow(table))
-        species = [get(lookup, String(name), "unknown")
-                   for name in sequencenames(transcript_msa)]
-    end
-    return transcript_msa, species
+    return transcript_msa, _transcript_msa_species(thoraxe_dir, transcript_msa)
 end
 
 function _read_single_fasta_sequence(path::AbstractString)
@@ -845,6 +923,41 @@ function _validate_transcript_translation(target::ResolvedTarget,
     return warnings
 end
 
+function _hhsuite_query_indices(seq::AbstractString, start::Integer, stop::Integer)
+    indices = Int[]
+    current = Int(start)
+    for residue in seq
+        if residue == '-'
+            push!(indices, 0)
+        else
+            push!(indices, current)
+            current += 1
+        end
+    end
+    current - 1 == stop || error("Could not parse HHsuite alignment positions.")
+    return indices
+end
+
+function _parse_hhsuite_query_segment(line::AbstractString)
+    m = match(r"\S+\s+(\d+)\s+(\S+)\s+(\d+)", line)
+    m === nothing && return nothing
+
+    start = parse(Int, m.captures[1])
+    seq = m.captures[2]
+    stop = parse(Int, m.captures[3])
+    return (;
+        cols = findfirst(seq, line), indices = _hhsuite_query_indices(seq, start, stop))
+end
+
+function _append_hhsuite_code_line!(positions, codes, line::AbstractString, cols, indices)
+    occursin(r"^\s", line) || return nothing
+    isempty(indices) && return nothing
+    (cols === nothing || isempty(cols)) && return nothing
+    append!(positions, indices)
+    append!(codes, collect(line[cols]))
+    return nothing
+end
+
 function _get_codes(output::AbstractString)
     in_alignment = false
     query_line = true
@@ -860,29 +973,16 @@ function _get_codes(output::AbstractString)
         in_alignment || continue
         isempty(line) && continue
         if query_line
-            m = match(r"\S+\s+(\d+)\s+(\S+)\s+(\d+)", line)
-            if m !== nothing
-                start = parse(Int, m.captures[1])
-                seq = m.captures[2]
-                stop = parse(Int, m.captures[3])
-                cols = findfirst(seq, line)
-                indices = Int[]
-                for residue in seq
-                    if residue == '-'
-                        push!(indices, 0)
-                    else
-                        push!(indices, start)
-                        start += 1
-                    end
-                end
-                start - 1 == stop || error("Could not parse HHsuite alignment positions.")
+            parsed = _parse_hhsuite_query_segment(line)
+            if parsed !== nothing
+                cols = parsed.cols
+                indices = parsed.indices
             end
             query_line = false
         elseif startswith(line, "Confidence")
             query_line = true
-        elseif occursin(r"^\s", line) && !isempty(indices) && !isempty(cols)
-            append!(positions, indices)
-            append!(codes, collect(line[cols]))
+        else
+            _append_hhsuite_code_line!(positions, codes, line, cols, indices)
         end
     end
     return positions, codes
@@ -1565,6 +1665,140 @@ function _has_matching_candidate_summary(summary_path::AbstractString, metadata)
     return _candidate_summary_matches(df, metadata)
 end
 
+function _resolve_thoraxe_species_filters(target::ResolvedTarget,
+        specieslist::Union{Nothing, AbstractString},
+        orthology::AbstractString,
+        cached_thoraxe_input_dir::Union{Nothing, AbstractString},
+        specieslist_filter::Bool,
+        biomart_datasets_filter::Bool)
+    species_filter = if cached_thoraxe_input_dir === nothing && specieslist_filter
+        _resolve_effective_specieslist(target, specieslist, orthology)
+    else
+        (specieslist = _normalized_specieslist(specieslist), warnings = String[])
+    end
+    biomart_filter = if cached_thoraxe_input_dir === nothing && biomart_datasets_filter
+        _resolve_biomart_datasets_specieslist(target, species_filter.specieslist)
+    else
+        (specieslist = species_filter.specieslist, warnings = String[])
+    end
+    return (;
+        species_filter,
+        biomart_filter,
+        effective_specieslist = biomart_filter.specieslist
+    )
+end
+
+function _selected_seed_msas(seeds::AbstractVector{SeedSelection}, workdir::AbstractString)
+    return [read_file(_resolve_artifact_path(seed.stockholm_path, workdir),
+                Stockholm; keepinserts = true)
+            for seed in seeds]
+end
+
+function _selected_translation_warnings(target::ResolvedTarget,
+        selected_msas::AbstractVector,
+        workdir::AbstractString)
+    artifact_workdir = target.workdir === nothing ? workdir : target.workdir
+    return collect(Iterators.flatten(
+        _validate_transcript_translation(target, selected_msa; workdir = artifact_workdir)
+    for selected_msa in selected_msas))
+end
+
+function _thoraxe_result_warnings(target::ResolvedTarget,
+        seeds::AbstractVector{SeedSelection},
+        workdir::AbstractString,
+        input_dir::AbstractString,
+        summary_path::AbstractString,
+        species_filter,
+        biomart_filter)
+    selected_msas = _selected_seed_msas(seeds, workdir)
+    return unique(vcat(species_filter.warnings,
+        biomart_filter.warnings,
+        _biomart_transcript_query_warnings(input_dir, _thoraxe_logs_dir(workdir)),
+        _candidate_summary_warnings(summary_path),
+        _selected_translation_warnings(target, selected_msas, workdir)))
+end
+
+function _thoraxe_msa_result(input_dir::AbstractString,
+        summary_path::AbstractString,
+        workdir::AbstractString,
+        seeds::AbstractVector{SeedSelection},
+        artifacts::AbstractVector,
+        warnings::Vector{String};
+        pid_sample_count::Integer,
+        pid_sample_fraction::Real,
+        pid_sample_seed)
+    status = isempty(warnings) ? :ok : :warn
+    return ThorAxeMSAResult(;
+        input_dir,
+        thoraxe_dirs = [artifact.thoraxe_dir for artifact in artifacts],
+        msa_dir = _thoraxe_msa_dir(workdir),
+        baseline_fastas = [String(artifact.seed_fasta) for artifact in artifacts],
+        baseline_stockholms = [artifact.seed_path for artifact in artifacts],
+        sequence_fastas = [artifact.sequence_fasta for artifact in artifacts],
+        species_files = [artifact.species_file for artifact in artifacts],
+        pid_summary = summary_path,
+        seeds,
+        logs_dir = _thoraxe_logs_dir(workdir),
+        pid_sample_count = Int(pid_sample_count),
+        pid_sample_fraction = Float64(pid_sample_fraction),
+        pid_sample_seed,
+        warnings,
+        status
+    )
+end
+
+function _cached_thoraxe_msa_result(input_dir::AbstractString,
+        summary_path::AbstractString,
+        target::ResolvedTarget,
+        workdir::AbstractString,
+        cached,
+        species_filter,
+        biomart_filter;
+        pid_sample_count::Integer,
+        pid_sample_fraction::Real)
+    seeds = cached.seeds
+    warnings = _thoraxe_result_warnings(
+        target, seeds, workdir, input_dir, summary_path, species_filter, biomart_filter)
+    artifacts = [_seed_artifacts(seed, workdir) for seed in seeds]
+    return _thoraxe_msa_result(
+        input_dir, summary_path, workdir, seeds, artifacts, warnings;
+        pid_sample_count,
+        pid_sample_fraction,
+        pid_sample_seed = cached.sample_seed)
+end
+
+function _score_pid_candidates(target::ResolvedTarget,
+        input_dir::AbstractString,
+        workdir::AbstractString,
+        pid_thresholds::AbstractVector{<:Real},
+        effective_specieslist::Union{Nothing, AbstractString},
+        metadata;
+        pid_sample_count::Integer,
+        pid_sample_fraction::Real,
+        sample_seed::UInt64,
+        overwrite::Bool,
+        timeout_seconds::Union{Nothing, Real})
+    score_rows = NamedTuple[]
+    for (pid_order, pid) in enumerate(Float64.(pid_thresholds))
+        push!(score_rows,
+            _score_pid_candidate(
+                target, input_dir, workdir, pid, pid_order, effective_specieslist;
+                sample_count = Int(pid_sample_count),
+                sample_fraction = Float64(pid_sample_fraction),
+                sample_seed,
+                metadata,
+                overwrite,
+                timeout_seconds))
+    end
+    return score_rows
+end
+
+function _select_scored_candidate_seeds(summary_path::AbstractString,
+        pid_sample_count::Integer)
+    Int(pid_sample_count) == 0 && return _eligible_candidate_seeds(summary_path)
+    return [select_best_seed(summary_path)]
+end
+
 function build_thoraxe_msa(target::ResolvedTarget, workdir::AbstractString;
         pid_thresholds::AbstractVector{<:Real} = DEFAULT_PID_THRESHOLDS,
         specieslist::Union{Nothing, AbstractString} = nothing,
@@ -1587,21 +1821,10 @@ function build_thoraxe_msa(target::ResolvedTarget, workdir::AbstractString;
     sample_seed = pid_sample_seed === nothing ? UInt64(rand(UInt32)) :
                   _normalize_pid_sample_seed(pid_sample_seed)
     # Species filters run only when transcript_query will create new input.
-    if cached_thoraxe_input_dir === nothing && specieslist_filter
-        species_filter = _resolve_effective_specieslist(target, specieslist, orthology)
-    else
-        species_filter = (specieslist = _normalized_specieslist(specieslist),
-            warnings = String[])
-    end
-    if cached_thoraxe_input_dir === nothing && biomart_datasets_filter
-        biomart_filter = _resolve_biomart_datasets_specieslist(
-            target, species_filter.specieslist)
-    else
-        biomart_filter = (specieslist = species_filter.specieslist, warnings = String[])
-    end
-    effective_specieslist = biomart_filter.specieslist
+    filters = _resolve_thoraxe_species_filters(target, specieslist, orthology,
+        cached_thoraxe_input_dir, specieslist_filter, biomart_datasets_filter)
     input_dir = _ensure_transcript_query(target, workdir;
-        specieslist = effective_specieslist, overwrite,
+        specieslist = filters.effective_specieslist, overwrite,
         cached_input_dir = cached_thoraxe_input_dir,
         timeout_seconds = transcript_query_timeout_seconds,
         timeout_max_seconds = transcript_query_timeout_max_seconds,
@@ -1614,7 +1837,7 @@ function build_thoraxe_msa(target::ResolvedTarget, workdir::AbstractString;
         sample_fraction = Float64(pid_sample_fraction),
         sample_seed,
         requested_sample_seed = pid_sample_seed,
-        effective_specieslist,
+        effective_specieslist = filters.effective_specieslist,
         orthology,
         specieslist_filter,
         biomart_datasets_filter)
@@ -1622,91 +1845,31 @@ function build_thoraxe_msa(target::ResolvedTarget, workdir::AbstractString;
                                _has_matching_candidate_summary(summary_path, metadata)
     cached = overwrite ? nothing : _cached_selected_seeds(summary_path, workdir, metadata)
     if cached !== nothing
-        seeds = cached.seeds
-        selected_msas = [read_file(_resolve_artifact_path(seed.stockholm_path, workdir),
-                             Stockholm; keepinserts = true)
-                         for seed in seeds]
-        warnings = unique(vcat(species_filter.warnings,
-            biomart_filter.warnings,
-            _biomart_transcript_query_warnings(input_dir, _thoraxe_logs_dir(workdir)),
-            _candidate_summary_warnings(summary_path),
-            Iterators.flatten(
-                _validate_transcript_translation(
-                    target, selected_msa;
-                    workdir = target.workdir === nothing ? workdir : target.workdir)
-            for selected_msa in selected_msas)...))
-        status = isempty(warnings) ? :ok : :warn
-        artifacts = [_seed_artifacts(seed, workdir) for seed in seeds]
-        return ThorAxeMSAResult(;
-            input_dir,
-            thoraxe_dirs = [artifact.thoraxe_dir for artifact in artifacts],
-            msa_dir = _thoraxe_msa_dir(workdir),
-            baseline_fastas = [String(artifact.seed_fasta) for artifact in artifacts],
-            baseline_stockholms = [artifact.seed_path for artifact in artifacts],
-            sequence_fastas = [artifact.sequence_fasta for artifact in artifacts],
-            species_files = [artifact.species_file for artifact in artifacts],
-            pid_summary = summary_path,
-            seeds,
-            logs_dir = _thoraxe_logs_dir(workdir),
-            pid_sample_count = Int(pid_sample_count),
-            pid_sample_fraction = Float64(pid_sample_fraction),
-            pid_sample_seed = cached.sample_seed,
-            warnings,
-            status
-        )
+        return _cached_thoraxe_msa_result(
+            input_dir, summary_path, target, workdir, cached,
+            filters.species_filter, filters.biomart_filter;
+            pid_sample_count,
+            pid_sample_fraction)
     end
 
-    score_rows = NamedTuple[]
-    for (pid_order, pid) in enumerate(Float64.(pid_thresholds))
-        push!(score_rows,
-            _score_pid_candidate(
-                target, input_dir, workdir, pid, pid_order, effective_specieslist;
-                sample_count = Int(pid_sample_count),
-                sample_fraction = Float64(pid_sample_fraction),
-                sample_seed = sample_seed,
-                metadata,
-                overwrite = overwrite || !summary_matches_metadata,
-                timeout_seconds = thoraxe_timeout_seconds))
-    end
+    score_rows = _score_pid_candidates(target, input_dir, workdir, pid_thresholds,
+        filters.effective_specieslist, metadata;
+        pid_sample_count,
+        pid_sample_fraction,
+        sample_seed,
+        overwrite = overwrite || !summary_matches_metadata,
+        timeout_seconds = thoraxe_timeout_seconds)
     _summarize_candidate_scores(score_rows, summary_path)
-    seeds = if Int(pid_sample_count) == 0
-        _eligible_candidate_seeds(summary_path)
-    else
-        [select_best_seed(summary_path)]
-    end
+    seeds = _select_scored_candidate_seeds(summary_path, pid_sample_count)
     _mark_selected_candidates!(summary_path, seeds)
-    selected_msas = [read_file(seed.stockholm_path, Stockholm; keepinserts = true)
-                     for seed in seeds]
-    warnings = unique(vcat(species_filter.warnings,
-        biomart_filter.warnings,
-        _biomart_transcript_query_warnings(input_dir, _thoraxe_logs_dir(workdir)),
-        _candidate_summary_warnings(summary_path),
-        Iterators.flatten(
-            _validate_transcript_translation(
-                target, selected_msa;
-                workdir = target.workdir === nothing ? workdir :
-                          target.workdir)
-        for selected_msa in selected_msas)...))
-    status = isempty(warnings) ? :ok : :warn
+    warnings = _thoraxe_result_warnings(target, seeds, workdir, input_dir, summary_path,
+        filters.species_filter, filters.biomart_filter)
     artifacts = [_seed_artifacts(seed, workdir) for seed in seeds]
-
-    return ThorAxeMSAResult(;
-        input_dir,
-        thoraxe_dirs = [artifact.thoraxe_dir for artifact in artifacts],
-        msa_dir = _thoraxe_msa_dir(workdir),
-        baseline_fastas = [String(artifact.seed_fasta) for artifact in artifacts],
-        baseline_stockholms = [artifact.seed_path for artifact in artifacts],
-        sequence_fastas = [artifact.sequence_fasta for artifact in artifacts],
-        species_files = [artifact.species_file for artifact in artifacts],
-        pid_summary = summary_path,
-        seeds,
-        logs_dir = _thoraxe_logs_dir(workdir),
-        pid_sample_count = Int(pid_sample_count),
-        pid_sample_fraction = Float64(pid_sample_fraction),
-        pid_sample_seed = sample_seed,
-        warnings,
-        status
-    )
+    return _thoraxe_msa_result(
+        input_dir, summary_path, workdir, seeds, artifacts, warnings;
+        pid_sample_count,
+        pid_sample_fraction,
+        pid_sample_seed = sample_seed)
 end
 
 end

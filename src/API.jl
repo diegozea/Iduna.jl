@@ -231,8 +231,7 @@ function _exception_summary(err, workdir::Union{Nothing, AbstractString} = nothi
     return summary
 end
 
-function _normalize_primary_input(; id, uniprot_id, ensembl_transcript_id, transcript_id)
-    # Accept old and new argument names, but still require one clear input.
+function _provided_primary_ids(; id, uniprot_id, ensembl_transcript_id)
     provided_primary = Pair{Symbol, String}[]
     id !== nothing && push!(provided_primary, :id => String(id))
     ensembl_transcript_id !== nothing &&
@@ -240,22 +239,39 @@ function _normalize_primary_input(; id, uniprot_id, ensembl_transcript_id, trans
     if isempty(provided_primary) && uniprot_id !== nothing
         push!(provided_primary, :uniprot_id => String(uniprot_id))
     end
+    return provided_primary
+end
 
-    if isempty(provided_primary)
-        transcript_id === nothing &&
-            error("Pass id, uniprot_id, ensembl_transcript_id, or transcript_id.")
-        return String(transcript_id), nothing, nothing
-    end
+function _transcript_primary_input(transcript_id)
+    transcript_id === nothing &&
+        error("Pass id, uniprot_id, ensembl_transcript_id, or transcript_id.")
+    return String(transcript_id), nothing, nothing
+end
+
+function _consistent_primary_value(provided_primary)
     first_value = first(provided_primary).second
     if any(pair -> pair.second != first_value, provided_primary)
         error("Conflicting primary identifiers were provided: $(provided_primary).")
     end
+    return first_value
+end
 
-    kind = Utils.id_kind(first_value)
-    # For UniProt input, transcript_id is only a tie-breaker among candidates.
+function _validate_uniprot_alias(kind::Symbol, first_value::String, uniprot_id)
     if kind === :uniprot && uniprot_id !== nothing && String(uniprot_id) != first_value
         error("Conflicting UniProt identifiers were provided: id=$(first_value), uniprot_id=$(uniprot_id).")
     end
+    return nothing
+end
+
+function _normalize_primary_input(; id, uniprot_id, ensembl_transcript_id, transcript_id)
+    # Accept old and new argument names, but still require one clear input.
+    provided_primary = _provided_primary_ids(; id, uniprot_id, ensembl_transcript_id)
+    isempty(provided_primary) && return _transcript_primary_input(transcript_id)
+
+    first_value = _consistent_primary_value(provided_primary)
+    kind = Utils.id_kind(first_value)
+    # For UniProt input, transcript_id is only a tie-breaker among candidates.
+    _validate_uniprot_alias(kind, first_value, uniprot_id)
     disambiguating_transcript = kind === :uniprot ? transcript_id : nothing
     supplied_uniprot = kind === :uniprot ? first_value :
                        (uniprot_id === nothing ? nothing : String(uniprot_id))

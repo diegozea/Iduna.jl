@@ -94,50 +94,70 @@ function _extract_uniprot_sequence(data)::Union{Nothing, String}
     return value isa AbstractString ? uppercase(String(value)) : nothing
 end
 
+function _new_xref_data()
+    return (;
+        gene_ids = String[],
+        transcripts = String[],
+        transcript_to_protein = Dict{String, String}(),
+        transcript_to_gene = Dict{String, String}(),
+        transcript_to_isoform = Dict{String, String}()
+    )
+end
+
+function _record_ensembl_transcript!(xrefs, ref)::Union{Nothing, String}
+    transcript = get(ref, "id", nothing)
+    transcript isa AbstractString || return nothing
+
+    transcript = String(transcript)
+    push!(xrefs.transcripts, transcript)
+    isoform = get(ref, "isoformId", nothing)
+    isoform isa AbstractString &&
+        (xrefs.transcript_to_isoform[transcript] = String(isoform))
+    return transcript
+end
+
+function _record_ensembl_property!(xrefs, transcript::Union{Nothing, String}, prop)
+    key = get(prop, "key", "")
+    value = get(prop, "value", nothing)
+    if key == "GeneId" && value isa AbstractString
+        gene_id = String(value)
+        push!(xrefs.gene_ids, gene_id)
+        transcript !== nothing && (xrefs.transcript_to_gene[transcript] = gene_id)
+    elseif key == "ProteinId" && value isa AbstractString && transcript !== nothing
+        xrefs.transcript_to_protein[transcript] = String(value)
+    end
+    return nothing
+end
+
+function _fill_default_transcript_genes!(transcript_to_gene, transcripts, gene_ids)
+    isempty(gene_ids) && return transcript_to_gene
+
+    default_gene = first(gene_ids)
+    for transcript in transcripts
+        haskey(transcript_to_gene, transcript) ||
+            (transcript_to_gene[transcript] = default_gene)
+    end
+    return transcript_to_gene
+end
+
 function _parse_xrefs(data)
-    gene_ids = String[]
-    transcripts = String[]
-    transcript_to_protein = Dict{String, String}()
-    transcript_to_gene = Dict{String, String}()
-    transcript_to_isoform = Dict{String, String}()
+    xrefs = _new_xref_data()
 
     # UniProt stores Ensembl links as cross-references with extra properties.
     for ref in get(data, "uniProtKBCrossReferences", Any[])
         get(ref, "database", "") == "Ensembl" || continue
-        transcript = get(ref, "id", nothing)
-        if transcript isa AbstractString
-            transcript = String(transcript)
-            push!(transcripts, transcript)
-            isoform = get(ref, "isoformId", nothing)
-            isoform isa AbstractString &&
-                (transcript_to_isoform[transcript] = String(isoform))
-        end
-
+        transcript = _record_ensembl_transcript!(xrefs, ref)
         for prop in get(ref, "properties", Any[])
-            key = get(prop, "key", "")
-            value = get(prop, "value", nothing)
-            if key == "GeneId" && value isa AbstractString
-                push!(gene_ids, String(value))
-                transcript isa AbstractString &&
-                    (transcript_to_gene[String(transcript)] = String(value))
-            elseif key == "ProteinId" && value isa AbstractString &&
-                   transcript isa AbstractString
-                transcript_to_protein[String(transcript)] = String(value)
-            end
+            _record_ensembl_property!(xrefs, transcript, prop)
         end
     end
 
-    gene_ids = unique(gene_ids)
-    transcripts = unique(transcripts)
-    if !isempty(gene_ids)
-        default_gene = first(gene_ids)
-        for transcript in transcripts
-            haskey(transcript_to_gene, transcript) ||
-                (transcript_to_gene[transcript] = default_gene)
-        end
-    end
-    return gene_ids, transcripts, transcript_to_protein, transcript_to_gene,
-    transcript_to_isoform
+    gene_ids = unique(xrefs.gene_ids)
+    transcripts = unique(xrefs.transcripts)
+    _fill_default_transcript_genes!(xrefs.transcript_to_gene, transcripts, gene_ids)
+    return gene_ids, transcripts, xrefs.transcript_to_protein,
+    xrefs.transcript_to_gene,
+    xrefs.transcript_to_isoform
 end
 
 function _fetch_ensembl_protein_sequence(protein_id::AbstractString;
@@ -246,49 +266,50 @@ function resolve_transcript_gene(transcript_id::AbstractString)::String
     return _resolve_transcript_metadata(transcript_id).ensembl_gene_id
 end
 
-function resolve_target(input_id::AbstractString;
-        workdir::AbstractString,
-        uniprot_id::Union{Nothing, AbstractString} = nothing,
-        ensembl_gene_id::Union{Nothing, AbstractString} = nothing,
-        ensembl_protein_id::Union{Nothing, AbstractString} = nothing,
-        transcript_id::Union{Nothing, AbstractString} = nothing,
-        species::Union{Nothing, AbstractString} = nothing,
-        _transcript_metadata_resolver::Function = _resolve_transcript_metadata,
-        _uniprot_entry_fetcher::Function = fetch_uniprot_entry,
-        _candidate_validator::Function = _validate_candidates)
-    kind = id_kind(input_id)
-    sequence_dir = joinpath(workdir, "sequences")
+function _resolve_uniprot_target(input_id::AbstractString,
+        sequence_dir::AbstractString,
+        workdir::AbstractString;
+        ensembl_gene_id::Union{Nothing, AbstractString},
+        ensembl_protein_id::Union{Nothing, AbstractString},
+        transcript_id::Union{Nothing, AbstractString},
+        species::Union{Nothing, AbstractString},
+        _uniprot_entry_fetcher::Function,
+        _candidate_validator::Function)
+    entry = _uniprot_entry_fetcher(input_id)
+    candidates, uniprot_path = _candidate_validator(entry, sequence_dir)
+    chosen, warnings = _choose_candidate(candidates, transcript_id)
+    gene = ensembl_gene_id === nothing ? chosen.ensembl_gene_id : String(ensembl_gene_id)
+    gene === nothing && error("Could not resolve an Ensembl gene ID for $(input_id).")
+    protein = ensembl_protein_id === nothing ? chosen.ensembl_protein_id :
+              String(ensembl_protein_id)
+    protein_path = protein === nothing ? nothing :
+                   joinpath(sequence_dir, "ensembl_proteins", "$(protein).fasta")
+    return ResolvedTarget(;
+        input_id = String(input_id),
+        input_kind = :uniprot,
+        uniprot_id = String(input_id),
+        ensembl_gene_id = String(gene),
+        transcript_id = chosen.transcript_id,
+        ensembl_protein_id = protein,
+        species = species === nothing ? chosen.species : String(species),
+        uniprot_sequence_path = uniprot_path,
+        ensembl_protein_sequence_path = protein_path,
+        sequence_validated = chosen.sequence_validated,
+        mapping_confirmed = chosen.mapping_confirmed,
+        workdir = String(workdir),
+        warnings
+    )
+end
 
-    if kind === :uniprot
-        entry = _uniprot_entry_fetcher(input_id)
-        candidates, uniprot_path = _candidate_validator(entry, sequence_dir)
-        chosen, warnings = _choose_candidate(candidates, transcript_id)
-        gene = ensembl_gene_id === nothing ? chosen.ensembl_gene_id :
-               String(ensembl_gene_id)
-        gene === nothing && error("Could not resolve an Ensembl gene ID for $(input_id).")
-        protein = ensembl_protein_id === nothing ? chosen.ensembl_protein_id :
-                  String(ensembl_protein_id)
-        protein_path = protein === nothing ? nothing :
-                       joinpath(sequence_dir, "ensembl_proteins", "$(protein).fasta")
-        return ResolvedTarget(;
-            input_id = String(input_id),
-            input_kind = :uniprot,
-            uniprot_id = String(input_id),
-            ensembl_gene_id = String(gene),
-            transcript_id = chosen.transcript_id,
-            ensembl_protein_id = protein,
-            species = species === nothing ? chosen.species : String(species),
-            uniprot_sequence_path = uniprot_path,
-            ensembl_protein_sequence_path = protein_path,
-            sequence_validated = chosen.sequence_validated,
-            mapping_confirmed = chosen.mapping_confirmed,
-            workdir = String(workdir),
-            warnings
-        )
-    end
-
-    # Transcript input is intentionally lighter: ThorAxe needs the parent gene,
-    # and UniProt mapping is not required for this path.
+function _resolve_transcript_target(input_id::AbstractString,
+        workdir::AbstractString;
+        uniprot_id::Union{Nothing, AbstractString},
+        ensembl_gene_id::Union{Nothing, AbstractString},
+        ensembl_protein_id::Union{Nothing, AbstractString},
+        transcript_id::Union{Nothing, AbstractString},
+        species::Union{Nothing, AbstractString},
+        _transcript_metadata_resolver::Function)
+    # Transcript input is intentionally lighter: ThorAxe needs the parent gene.
     tx = transcript_id === nothing ? String(input_id) : String(transcript_id)
     is_ensembl_transcript_id(tx) ||
         error("Transcript input $(tx) is not an Ensembl transcript ID.")
@@ -310,6 +331,27 @@ function resolve_target(input_id::AbstractString;
         mapping_confirmed = nothing,
         workdir = String(workdir)
     )
+end
+
+function resolve_target(input_id::AbstractString;
+        workdir::AbstractString,
+        uniprot_id::Union{Nothing, AbstractString} = nothing,
+        ensembl_gene_id::Union{Nothing, AbstractString} = nothing,
+        ensembl_protein_id::Union{Nothing, AbstractString} = nothing,
+        transcript_id::Union{Nothing, AbstractString} = nothing,
+        species::Union{Nothing, AbstractString} = nothing,
+        _transcript_metadata_resolver::Function = _resolve_transcript_metadata,
+        _uniprot_entry_fetcher::Function = fetch_uniprot_entry,
+        _candidate_validator::Function = _validate_candidates)
+    kind = id_kind(input_id)
+    sequence_dir = joinpath(workdir, "sequences")
+    kind === :uniprot &&
+        return _resolve_uniprot_target(input_id, sequence_dir, workdir;
+            ensembl_gene_id, ensembl_protein_id, transcript_id, species,
+            _uniprot_entry_fetcher, _candidate_validator)
+    return _resolve_transcript_target(input_id, workdir;
+        uniprot_id, ensembl_gene_id, ensembl_protein_id, transcript_id, species,
+        _transcript_metadata_resolver)
 end
 
 end

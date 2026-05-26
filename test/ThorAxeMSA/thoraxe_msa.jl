@@ -437,6 +437,17 @@
             @test Iduna.ThorAxeMSA._next_timeout(2, nothing) == 2.0
             @test Iduna.ThorAxeMSA._next_timeout(20, 30) == 30.0
             @test Iduna.ThorAxeMSA._retry_wait_seconds(6) == 30.0
+            @test Iduna.ThorAxeMSA._transcript_query_retry_state(
+                :retry_without_specieslist, "homo_sapiens", 10, 20, 40, true,
+                "ENSG", 1) == (nothing, 10)
+            timeout_fallback = @test_logs (:warn, r"timed out with a species list") begin
+                Iduna.ThorAxeMSA._transcript_query_retry_state(
+                    :timeout_retry, "homo_sapiens", 10, 20, 40, true, "ENSG", 1)
+            end
+            @test timeout_fallback == (nothing, 40)
+            @test Iduna.ThorAxeMSA._transcript_query_retry_state(
+                :timeout_retry, "homo_sapiens", 10, 20, 40, false, "ENSG", 1) ==
+                  ("homo_sapiens", 20.0)
         end
 
         mktempdir() do tmp
@@ -792,6 +803,63 @@ TableSet\tptroglodytes_gene_ensembl\tChimpanzee genes (Pan_tro_3.0)\t1
             @test "--specieslist" in parts
             @test parts[findfirst(==("--specieslist"), parts) + 1] ==
                   "homo_sapiens,mus_musculus"
+        end
+    end
+
+    @testset "transcript_query retry helper branches" begin
+        mktempdir() do tmp
+            gene_core = "ENSG00000000001"
+            stdout_log = joinpath(tmp, "stdout.log")
+            stderr_log = joinpath(tmp, "stderr.log")
+            tmp_gene_dir = joinpath(tmp, gene_core)
+
+            failed_action = Iduna.ThorAxeMSA._transcript_query_attempt_action!(
+                gene_core, tmp, "homo_sapiens", "homo_sapiens,mus_musculus",
+                stdout_log, stderr_log, tmp_gene_dir;
+                attempt = 1,
+                attempts = 1,
+                timeout_seconds = nothing,
+                orthology = "1:1",
+                runner = command -> nothing)
+            @test failed_action === :failed
+
+            invalid_action = @test_logs (:warn, r"invalid bundle") Iduna.ThorAxeMSA._transcript_query_attempt_action!(
+                gene_core, tmp, "homo_sapiens", "homo_sapiens,mus_musculus",
+                stdout_log, stderr_log, tmp_gene_dir;
+                attempt = 1,
+                attempts = 2,
+                timeout_seconds = nothing,
+                orthology = "1:1",
+                runner = command -> nothing)
+            @test invalid_action === :retry_without_specieslist
+
+            ensembl = joinpath(tmp_gene_dir, "Ensembl")
+            mkpath(ensembl)
+            for file in Iduna.ThorAxeMSA._REQUIRED_ENSEMBL_FILES
+                write(joinpath(ensembl, file), "$(file)\n")
+            end
+            timeout = Iduna.ThorAxeMSA._CommandTimeoutError(
+                "transcript_query", 1.0, stdout_log, stderr_log)
+            valid_timeout_action = @test_logs (:warn, r"timed out but produced a usable") Iduna.ThorAxeMSA._transcript_query_attempt_action!(
+                gene_core, tmp, "homo_sapiens", "homo_sapiens,mus_musculus",
+                stdout_log, stderr_log, tmp_gene_dir;
+                attempt = 1,
+                attempts = 2,
+                timeout_seconds = 1,
+                orthology = "1:1",
+                runner = command -> throw(timeout))
+            @test valid_timeout_action === :done
+
+            rm(tmp_gene_dir; recursive = true, force = true)
+            retry_timeout_action = Iduna.ThorAxeMSA._transcript_query_attempt_action!(
+                gene_core, tmp, "homo_sapiens", "homo_sapiens,mus_musculus",
+                stdout_log, stderr_log, tmp_gene_dir;
+                attempt = 1,
+                attempts = 2,
+                timeout_seconds = 1,
+                orthology = "1:1",
+                runner = command -> throw(timeout))
+            @test retry_timeout_action === :timeout_retry
         end
     end
 

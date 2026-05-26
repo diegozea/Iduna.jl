@@ -106,7 +106,7 @@ function _write_alignment_log(path::AbstractString,
     return path
 end
 
-function validate_results(target::ResolvedTarget,
+function _validation_input_paths(target::ResolvedTarget,
         seed::SeedSelection,
         expansion::Union{Nothing, ExpansionResult},
         workdir::AbstractString)
@@ -118,49 +118,81 @@ function validate_results(target::ResolvedTarget,
     uniprot_path = target.uniprot_sequence_path === nothing ? nothing :
                    _resolve_artifact_path(target.uniprot_sequence_path,
         target.workdir === nothing ? workdir : target.workdir)
+    return (; seed_path, expanded_path, uniprot_path)
+end
 
-    seed_stats = alignment_stats(seed_path)
+function _validation_alignment_stats(paths, expansion::Union{Nothing, ExpansionResult})
+    seed_stats = alignment_stats(paths.seed_path)
     expanded_stats = expansion === nothing ? nothing :
-                     alignment_stats(expanded_path)
+                     alignment_stats(paths.expanded_path)
     final_stats = expansion === nothing ? seed_stats : expanded_stats
+    return (; seed_stats, expanded_stats, final_stats)
+end
 
-    query_name = nothing
-    aln_path = nothing
-    aln_identical = nothing
-    aln_mismatches = nothing
-    aln_insertions = nothing
-    aln_deletions = nothing
-    warnings = String[]
+function _empty_uniprot_comparison()
+    return (;
+        query_name = nothing,
+        aln_path = nothing,
+        aln_identical = nothing,
+        aln_mismatches = nothing,
+        aln_insertions = nothing,
+        aln_deletions = nothing,
+        warnings = String[]
+    )
+end
 
-    if uniprot_path !== nothing && isfile(uniprot_path)
-        # Compare the final available query sequence against UniProt when a reference exists.
-        query_name,
-        query_seq = _extract_query_sequence(final_stats.msa,
-            target.ensembl_gene_id, target.transcript_id)
-        uniprot_seq = _read_fasta_sequence(uniprot_path)
-        aln_stats = _align_sequences(query_seq, uniprot_seq)
-        validation_dir = joinpath(workdir, "validation", format_pid_dir(seed.pid))
-        aln_path = joinpath(validation_dir, "query_vs_uniprot_alignment.txt")
-        _write_alignment_log(
-            aln_path, target, query_name, query_seq, uniprot_seq, aln_stats)
-        aln_identical = aln_stats.identical
-        aln_mismatches = aln_stats.mismatches
-        aln_insertions = aln_stats.insertions
-        aln_deletions = aln_stats.deletions
-        if aln_insertions != 0 || aln_deletions != 0
-            label = expansion === nothing ? "Seed query" : "Expanded query"
-            push!(warnings, "$(label) has indels relative to the UniProt sequence.")
-        elseif aln_identical == false
-            label = expansion === nothing ? "Seed query" : "Expanded query"
-            push!(warnings, "$(label) has substitutions relative to the UniProt sequence.")
-        end
+function _alignment_warnings(expansion::Union{Nothing, ExpansionResult}, aln_stats)
+    label = expansion === nothing ? "Seed query" : "Expanded query"
+    if aln_stats.insertions != 0 || aln_stats.deletions != 0
+        return ["$(label) has indels relative to the UniProt sequence."]
+    elseif aln_stats.identical == false
+        return ["$(label) has substitutions relative to the UniProt sequence."]
     end
+    return String[]
+end
 
+function _compare_final_query_to_uniprot(target::ResolvedTarget,
+        seed::SeedSelection,
+        expansion::Union{Nothing, ExpansionResult},
+        final_stats,
+        uniprot_path::Union{Nothing, AbstractString},
+        workdir::AbstractString)
+    (uniprot_path !== nothing && isfile(uniprot_path)) ||
+        return _empty_uniprot_comparison()
+
+    # Compare the final available query sequence against UniProt when a reference exists.
+    query_name,
+    query_seq = _extract_query_sequence(
+        final_stats.msa, target.ensembl_gene_id, target.transcript_id)
+    uniprot_seq = _read_fasta_sequence(uniprot_path)
+    aln_stats = _align_sequences(query_seq, uniprot_seq)
+    validation_dir = joinpath(workdir, "validation", format_pid_dir(seed.pid))
+    aln_path = joinpath(validation_dir, "query_vs_uniprot_alignment.txt")
+    _write_alignment_log(aln_path, target, query_name, query_seq, uniprot_seq, aln_stats)
+    return (;
+        query_name,
+        aln_path,
+        aln_identical = aln_stats.identical,
+        aln_mismatches = aln_stats.mismatches,
+        aln_insertions = aln_stats.insertions,
+        aln_deletions = aln_stats.deletions,
+        warnings = _alignment_warnings(expansion, aln_stats)
+    )
+end
+
+function _write_validation_stats(target::ResolvedTarget,
+        seed::SeedSelection,
+        stats,
+        comparison,
+        paths,
+        workdir::AbstractString)
     stats_path = joinpath(workdir, "validation", format_pid_dir(seed.pid), "stats.csv")
     mkpath(dirname(stats_path))
-    seed_summary_path = _relative_artifact_path(seed_path, workdir)
-    expanded_summary_path = _relative_artifact_path(expanded_path, workdir)
-    aln_summary_path = _relative_artifact_path(aln_path, workdir)
+    seed_summary_path = _relative_artifact_path(paths.seed_path, workdir)
+    expanded_summary_path = _relative_artifact_path(paths.expanded_path, workdir)
+    aln_summary_path = _relative_artifact_path(comparison.aln_path, workdir)
+    seed_stats = stats.seed_stats
+    expanded_stats = stats.expanded_stats
     expanded_nseq = expanded_stats === nothing ? nothing : expanded_stats.n_sequences
     expanded_ncol = expanded_stats === nothing ? nothing : expanded_stats.n_columns
     expanded_clusters62 = expanded_stats === nothing ? nothing : expanded_stats.n_clusters
@@ -182,20 +214,29 @@ function validate_results(target::ResolvedTarget,
             expanded_clusters62 = [expanded_clusters62],
             seed_neff80 = [seed_stats.neff],
             expanded_neff80 = [expanded_neff80],
-            query_name = [query_name],
+            query_name = [comparison.query_name],
             query_vs_uniprot_path = [aln_summary_path],
-            aln_identical = [aln_identical],
-            aln_mismatches = [aln_mismatches],
-            aln_insertions = [aln_insertions],
-            aln_deletions = [aln_deletions]
+            aln_identical = [comparison.aln_identical],
+            aln_mismatches = [comparison.aln_mismatches],
+            aln_insertions = [comparison.aln_insertions],
+            aln_deletions = [comparison.aln_deletions]
         );
         transform = (_, val) -> something(val, missing))
+    return stats_path
+end
 
+function _validation_result(stats_path::AbstractString, stats, comparison, warnings)
+    seed_stats = stats.seed_stats
+    expanded_stats = stats.expanded_stats
+    expanded_nseq = expanded_stats === nothing ? nothing : expanded_stats.n_sequences
+    expanded_ncol = expanded_stats === nothing ? nothing : expanded_stats.n_columns
+    expanded_clusters62 = expanded_stats === nothing ? nothing : expanded_stats.n_clusters
+    expanded_neff80 = expanded_stats === nothing ? nothing : expanded_stats.neff
     status = isempty(warnings) ? :ok : :warn
     return ValidationResult(;
         stats_path,
-        query_name,
-        query_vs_uniprot_path = aln_path,
+        query_name = comparison.query_name,
+        query_vs_uniprot_path = comparison.aln_path,
         seed_nseq = seed_stats.n_sequences,
         seed_ncol = seed_stats.n_columns,
         seed_clusters62 = seed_stats.n_clusters,
@@ -204,13 +245,26 @@ function validate_results(target::ResolvedTarget,
         expanded_ncol,
         expanded_clusters62,
         expanded_neff80,
-        aln_identical,
-        aln_mismatches,
-        aln_insertions,
-        aln_deletions,
+        aln_identical = comparison.aln_identical,
+        aln_mismatches = comparison.aln_mismatches,
+        aln_insertions = comparison.aln_insertions,
+        aln_deletions = comparison.aln_deletions,
         warnings,
         status
     )
+end
+
+function validate_results(target::ResolvedTarget,
+        seed::SeedSelection,
+        expansion::Union{Nothing, ExpansionResult},
+        workdir::AbstractString)
+    paths = _validation_input_paths(target, seed, expansion, workdir)
+    stats = _validation_alignment_stats(paths, expansion)
+    comparison = _compare_final_query_to_uniprot(
+        target, seed, expansion, stats.final_stats, paths.uniprot_path, workdir)
+    warnings = comparison.warnings
+    stats_path = _write_validation_stats(target, seed, stats, comparison, paths, workdir)
+    return _validation_result(stats_path, stats, comparison, warnings)
 end
 
 end
