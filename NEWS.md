@@ -1,5 +1,24 @@
 ## Iduna.jl Release Notes
 
+### Changes from v0.4.0 to v0.5.0
+
+Breaking changes:
+
+- Changed expansion cache reuse to require a matching `step_state.json` input
+  identity. Expansion directories created by older Iduna versions do not have
+  this file, so they are treated as outdated and rebuilt once instead of being
+  reused solely because output files exist.
+
+Added:
+
+- Added `step_state.json` to each expansion PID directory, recording the seed
+  MSA identity, expansion parameters, MMseqs2 database path, requested centroid
+  output state, expected output paths, status, warnings, and failed-run
+  exception summaries.
+- Added checks that rebuild cached expansion outputs when the seed MSA,
+  expansion options, MMseqs2 database path, or centroid request differs from the
+  recorded expansion state.
+
 ### Changes from v0.3.0 to v0.4.0
 
 Breaking changes:
