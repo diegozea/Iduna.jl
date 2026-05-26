@@ -226,103 +226,139 @@ function prepare_stockholm_for_mmseqs(source::AbstractString, dest::AbstractStri
     return dest
 end
 
+function _stockholm_annotation_data()
+    return (;
+        comments = String[],
+        gf_order = String[],
+        gf_data = Dict{String, Vector{String}}(),
+        gs_order = Tuple{String, String}[],
+        gs_data = Dict{Tuple{String, String}, Vector{String}}(),
+        gc_order = String[],
+        gc_data = Dict{String, String}(),
+        gr_order = Tuple{String, String}[],
+        gr_data = Dict{Tuple{String, String}, String}(),
+        seq_order = String[],
+        seq_data = Dict{String, String}()
+    )
+end
+
+function _append_stockholm_vector!(order, data, key, value)
+    haskey(data, key) || (push!(order, key); data[key] = String[])
+    push!(data[key], value)
+    return nothing
+end
+
+function _append_stockholm_string!(order, data, key, value)
+    if haskey(data, key)
+        data[key] = string(data[key], value)
+    else
+        push!(order, key)
+        data[key] = value
+    end
+    return nothing
+end
+
+function _record_gf_line!(records, line::AbstractString)
+    parts = split(line; limit = 3)
+    length(parts) < 3 && return nothing
+    _append_stockholm_vector!(records.gf_order, records.gf_data, parts[2], parts[3])
+    return nothing
+end
+
+function _record_gs_line!(records, line::AbstractString)
+    parts = split(line; limit = 4)
+    length(parts) < 4 && return nothing
+    key = (parts[2], parts[3])
+    _append_stockholm_vector!(records.gs_order, records.gs_data, key, parts[4])
+    return nothing
+end
+
+function _record_gc_line!(records, line::AbstractString)
+    parts = split(line; limit = 3)
+    length(parts) < 3 && return nothing
+    _append_stockholm_string!(
+        records.gc_order, records.gc_data, parts[2], replace(parts[3], ' ' => ""))
+    return nothing
+end
+
+function _record_gr_line!(records, line::AbstractString)
+    parts = split(line; limit = 4)
+    length(parts) < 4 && return nothing
+    key = (parts[2], parts[3])
+    _append_stockholm_string!(
+        records.gr_order, records.gr_data, key, replace(parts[4], ' ' => ""))
+    return nothing
+end
+
+function _record_sequence_line!(records, line::AbstractString)
+    parts = split(line; limit = 2)
+    length(parts) < 2 && return nothing
+    name = strip(parts[1])
+    fragment = replace(strip(parts[2]), ' ' => "")
+    _append_stockholm_string!(records.seq_order, records.seq_data, name, fragment)
+    return nothing
+end
+
+function _record_stockholm_line!(records, line::AbstractString)
+    stripped = strip(line)
+    isempty(stripped) && return nothing
+    (startswith(stripped, "# STOCKHOLM") || startswith(stripped, "//")) &&
+        return nothing
+    startswith(line, "#=GF") && return _record_gf_line!(records, line)
+    startswith(line, "#=GS") && return _record_gs_line!(records, line)
+    startswith(line, "#=GC") && return _record_gc_line!(records, line)
+    startswith(line, "#=GR") && return _record_gr_line!(records, line)
+    startswith(line, '#') && (push!(records.comments, stripped); return nothing)
+    return _record_sequence_line!(records, line)
+end
+
+function _write_stockholm_metadata(io, records)
+    foreach(line -> println(io, line), records.comments)
+    for feature in records.gf_order, value in records.gf_data[feature]
+
+        println(io, "#=GF ", feature, ' ', value)
+    end
+    for key in records.gs_order, value in records.gs_data[key]
+
+        println(io, "#=GS ", key[1], ' ', key[2], ' ', value)
+    end
+    for feature in records.gc_order
+        println(io, "#=GC ", feature, ' ', records.gc_data[feature])
+    end
+    return nothing
+end
+
+function _write_stockholm_sequences(io, records)
+    for name in records.seq_order
+        println(io, name, '\t', records.seq_data[name])
+        for key in records.gr_order
+            key[1] == name || continue
+            println(io, "#=GR ", key[1], ' ', key[2], ' ', records.gr_data[key])
+        end
+    end
+    return nothing
+end
+
+function _write_normalized_stockholm(path::AbstractString, records)
+    open(path, "w") do io
+        println(io, "# STOCKHOLM 1.0")
+        _write_stockholm_metadata(io, records)
+        _write_stockholm_sequences(io, records)
+        println(io, "//")
+    end
+    return path
+end
+
 function normalize_stockholm_annotations!(path::AbstractString)
     lines = readlines(path)
     isempty(lines) && return path
 
-    comments = String[]
-    gf_order = String[]
-    gf_data = Dict{String, Vector{String}}()
-    gs_order = Tuple{String, String}[]
-    gs_data = Dict{Tuple{String, String}, Vector{String}}()
-    gc_order = String[]
-    gc_data = Dict{String, String}()
-    gr_order = Tuple{String, String}[]
-    gr_data = Dict{Tuple{String, String}, String}()
-    seq_order = String[]
-    seq_data = Dict{String, String}()
-
+    records = _stockholm_annotation_data()
     # Merge split Stockholm records while keeping the original output order.
     for line in lines
-        stripped = strip(line)
-        isempty(stripped) && continue
-        if startswith(stripped, "# STOCKHOLM") || startswith(stripped, "//")
-            continue
-        elseif startswith(line, "#=GF")
-            parts = split(line; limit = 3)
-            length(parts) < 3 && continue
-            feature = parts[2]
-            haskey(gf_data, feature) ||
-                (push!(gf_order, feature); gf_data[feature] = String[])
-            push!(gf_data[feature], parts[3])
-        elseif startswith(line, "#=GS")
-            parts = split(line; limit = 4)
-            length(parts) < 4 && continue
-            key = (parts[2], parts[3])
-            haskey(gs_data, key) || (push!(gs_order, key); gs_data[key] = String[])
-            push!(gs_data[key], parts[4])
-        elseif startswith(line, "#=GC")
-            parts = split(line; limit = 3)
-            length(parts) < 3 && continue
-            feature = parts[2]
-            data = replace(parts[3], ' ' => "")
-            if haskey(gc_data, feature)
-                gc_data[feature] = string(gc_data[feature], data)
-            else
-                push!(gc_order, feature)
-                gc_data[feature] = data
-            end
-        elseif startswith(line, "#=GR")
-            parts = split(line; limit = 4)
-            length(parts) < 4 && continue
-            key = (parts[2], parts[3])
-            data = replace(parts[4], ' ' => "")
-            if haskey(gr_data, key)
-                gr_data[key] = string(gr_data[key], data)
-            else
-                push!(gr_order, key)
-                gr_data[key] = data
-            end
-        elseif startswith(line, '#')
-            push!(comments, stripped)
-        else
-            parts = split(line; limit = 2)
-            length(parts) < 2 && continue
-            name = strip(parts[1])
-            fragment = replace(strip(parts[2]), ' ' => "")
-            if haskey(seq_data, name)
-                seq_data[name] = string(seq_data[name], fragment)
-            else
-                push!(seq_order, name)
-                seq_data[name] = fragment
-            end
-        end
+        _record_stockholm_line!(records, line)
     end
-
-    open(path, "w") do io
-        println(io, "# STOCKHOLM 1.0")
-        foreach(line -> println(io, line), comments)
-        for feature in gf_order, value in gf_data[feature]
-
-            println(io, "#=GF ", feature, ' ', value)
-        end
-        for key in gs_order, value in gs_data[key]
-
-            println(io, "#=GS ", key[1], ' ', key[2], ' ', value)
-        end
-        for feature in gc_order
-            println(io, "#=GC ", feature, ' ', gc_data[feature])
-        end
-        for name in seq_order
-            println(io, name, '\t', seq_data[name])
-            for key in gr_order
-                key[1] == name || continue
-                println(io, "#=GR ", key[1], ' ', key[2], ' ', gr_data[key])
-            end
-        end
-        println(io, "//")
-    end
-    return path
+    return _write_normalized_stockholm(path, records)
 end
 
 function _run_labeled(cmd::Cmd, label::AbstractString, logs_dir::AbstractString)
@@ -496,6 +532,275 @@ function _write_centroid_msa(transcript_id::AbstractString,
     return nothing
 end
 
+function _expansion_context(target::ResolvedTarget,
+        seed::SeedSelection,
+        workdir::AbstractString,
+        mmseqs_db::AbstractString;
+        match_mode::Integer,
+        match_ratio::Union{Nothing, Real},
+        hmmbuild_symfrac::Real,
+        centroids::Bool)
+    seed_workdir = seed.workdir === nothing ? workdir : seed.workdir
+    seed_stockholm = _resolve_artifact_path(seed.stockholm_path, seed_workdir)
+    seed_fasta = seed.fasta_path === nothing ? nothing :
+                 _resolve_artifact_path(seed.fasta_path, seed_workdir)
+    run_dir = joinpath(_expansion_root(workdir), target.ensembl_gene_id,
+        target.transcript_id, format_pid_dir(seed.pid))
+    outputs = _expansion_output_paths(run_dir, target.transcript_id; centroids)
+    identity = _expansion_identity(target, seed, seed_stockholm, seed_fasta, mmseqs_db;
+        match_mode, match_ratio, hmmbuild_symfrac, centroids)
+    return (;
+        seed_stockholm,
+        seed_fasta,
+        run_dir,
+        unpack_dir = joinpath(run_dir, "expanded_msa"),
+        logs_dir = joinpath(run_dir, "logs"),
+        outputs,
+        identity,
+        db_dir = joinpath(run_dir, "dbs"),
+        seed_dir = joinpath(run_dir, "seeds"),
+        hmm_dir = joinpath(run_dir, "hmm"),
+        tmp_root = joinpath(run_dir, "tmp")
+    )
+end
+
+function _prepare_expansion_cache!(run_dir::AbstractString,
+        workdir::AbstractString,
+        identity,
+        outputs;
+        overwrite::Bool)
+    cache_warnings = String[]
+    if overwrite && isdir(run_dir)
+        safe_rm(run_dir, workdir)
+    elseif !overwrite
+        cache = _classify_step_state(run_dir, identity, outputs)
+        cache.reusable && return (; reusable = true, cache_warnings)
+        if cache.warning !== nothing
+            warning = String(cache.warning)
+            push!(cache_warnings, warning)
+            @warn warning run_dir status=cache.status
+            isdir(run_dir) && safe_rm(run_dir, workdir)
+        end
+    end
+    return (; reusable = false, cache_warnings)
+end
+
+function _cached_expansion_result(ctx, workdir::AbstractString)
+    counts = _cached_hit_counts(ctx.outputs.hits_fasta, _seed_id_set(ctx.seed_stockholm))
+    return ExpansionResult(;
+        run_dir = ctx.run_dir,
+        seed_stockholm = ctx.seed_stockholm,
+        seed_fasta = ctx.seed_fasta,
+        hits_fasta = ctx.outputs.hits_fasta,
+        full_stockholm = ctx.outputs.full_stockholm,
+        match_stockholm = ctx.outputs.match_stockholm,
+        a3m_path = ctx.outputs.a3m_path,
+        db_dir = ctx.db_dir,
+        hmm_dir = ctx.hmm_dir,
+        logs_dir = ctx.logs_dir,
+        n_hits = counts.n_hits,
+        n_new_hits = counts.n_new_hits,
+        status = :skipped,
+        workdir = String(workdir)
+    )
+end
+
+function _prepare_expansion_dirs!(ctx, cache_warnings::Vector{String})
+    mkpath.((
+        ctx.db_dir, ctx.seed_dir, ctx.hmm_dir, ctx.tmp_root, ctx.unpack_dir, ctx.logs_dir))
+    foreach(warning -> _write_cache_warning(ctx.logs_dir, warning), cache_warnings)
+    _write_step_state(ctx.run_dir, :unfinished, ctx.identity, ctx.outputs;
+        warnings = cache_warnings)
+    return nothing
+end
+
+function _archive_expansion_seed(seed::SeedSelection, ctx)
+    seed_label = "seed_pid$(format_pid(seed.pid))"
+    archived_seed_sto = joinpath(ctx.seed_dir, "$(seed_label).sto")
+    cp(ctx.seed_stockholm, archived_seed_sto; force = true)
+    archived_seed_fasta = nothing
+    if ctx.seed_fasta !== nothing && isfile(ctx.seed_fasta)
+        archived_seed_fasta = joinpath(ctx.seed_dir, "$(seed_label).fasta")
+        cp(ctx.seed_fasta, archived_seed_fasta; force = true)
+    end
+    sanitized_seed = prepare_stockholm_for_mmseqs(ctx.seed_stockholm,
+        joinpath(ctx.seed_dir, "$(seed_label)_mmseqs.sto"))
+    seed_alignment = read_file(archived_seed_sto, Stockholm; keepinserts = true)
+    seed_names = String.(sequencenames(seed_alignment))
+    return (;
+        archived_seed_sto,
+        archived_seed_fasta,
+        sanitized_seed,
+        seed_names,
+        seed_set = Set(_normalize_id.(seed_names))
+    )
+end
+
+function _write_expansion_hits!(hits_tsv::AbstractString,
+        run_dir::AbstractString,
+        hmm_dir::AbstractString,
+        seed_set::Set{String})
+    all_hits, filtered_hits = _collect_hits(hits_tsv, seed_set)
+    raw_hits_fasta = joinpath(run_dir, "mmseqs_hits_raw.fasta")
+    filtered_fasta = joinpath(hmm_dir, "mmseqs_hits_filtered.fasta")
+    write_fasta(raw_hits_fasta, all_hits)
+    write_fasta(filtered_fasta, filtered_hits)
+    return (; all_hits, filtered_hits, raw_hits_fasta, filtered_fasta)
+end
+
+function _build_seed_hmm!(seed_dir::AbstractString,
+        sanitized_seed::AbstractString,
+        hmmbuild_symfrac::Real,
+        logs_dir::AbstractString)
+    hmm_path = joinpath(seed_dir, "seed.hmm")
+    annotated_seed = joinpath(seed_dir, "seed_annotated.sto")
+    _run_labeled(
+        `$(HMMER_jll.hmmbuild()) --symfrac $(Float64(hmmbuild_symfrac)) -O $annotated_seed $hmm_path $sanitized_seed`,
+        "hmmbuild", logs_dir)
+    normalize_stockholm_annotations!(annotated_seed)
+    return (; hmm_path, annotated_seed)
+end
+
+function _align_expansion_hits!(hmm_dir::AbstractString,
+        annotated_seed::AbstractString,
+        sanitized_seed::AbstractString,
+        hmm_path::AbstractString,
+        filtered_fasta::AbstractString,
+        filtered_hits,
+        seed_set::Set{String},
+        logs_dir::AbstractString)
+    aligned_sto = joinpath(hmm_dir, "alignment_with_hits.sto")
+    hits_aligned_sto = joinpath(hmm_dir, "aligned_hits_only.sto")
+    if isempty(filtered_hits)
+        # With no new hits, the expanded alignment is just the annotated seed.
+        cp(annotated_seed, aligned_sto; force = true)
+    else
+        _run_labeled(
+            `$(HMMER_jll.hmmalign()) --mapali $sanitized_seed --trim --outformat stockholm -o $aligned_sto $hmm_path $filtered_fasta`,
+            "hmmalign", logs_dir)
+        aligned_msa = read_file(aligned_sto, Stockholm; keepinserts = true)
+        hit_indices = [i
+                       for (i, name) in enumerate(sequencenames(aligned_msa))
+                       if !(_normalize_id(String(name)) in seed_set)]
+        write_file(hits_aligned_sto, aligned_msa[hit_indices, :], Stockholm)
+    end
+    normalize_stockholm_annotations!(aligned_sto)
+    return aligned_sto
+end
+
+function _write_expansion_alignment_outputs!(target::ResolvedTarget,
+        unpack_dir::AbstractString,
+        aligned_sto::AbstractString,
+        seed_names::Vector{String},
+        raw_hits_fasta::AbstractString)
+    match_stockholm = joinpath(unpack_dir, "$(target.transcript_id)_matchonly.sto")
+    open(match_stockholm, "w") do io
+        run(pipeline(`$(HMMER_jll.esl_alimask()) --rf-is-mask $aligned_sto`, stdout = io))
+    end
+    normalize_stockholm_annotations!(match_stockholm)
+
+    full_stockholm = joinpath(unpack_dir, "$(target.transcript_id)_full.sto")
+    full_alignment = _reorder_alignment(
+        read_file(aligned_sto, Stockholm; keepinserts = true), seed_names)
+    match_alignment = _reorder_alignment(
+        read_file(match_stockholm, Stockholm; keepinserts = true), seed_names)
+    write_file(full_stockholm, full_alignment, Stockholm)
+    write_file(match_stockholm, match_alignment, Stockholm)
+
+    a3m_path = joinpath(unpack_dir, "$(target.transcript_id)_expanded.a3m")
+    write_file(a3m_path, match_alignment, A3M)
+    hits_copy = joinpath(unpack_dir, "$(target.transcript_id)_hits_raw.fasta")
+    cp(raw_hits_fasta, hits_copy; force = true)
+    return (; match_stockholm, full_stockholm, a3m_path, hits_copy)
+end
+
+function _write_centroids_if_requested!(target::ResolvedTarget,
+        mmseqs_db::AbstractString,
+        db_paths,
+        tmp_dir::AbstractString,
+        ctx,
+        archived,
+        hmm_paths,
+        centroids::Bool)
+    centroids || return nothing
+    _write_centroid_msa(target.transcript_id,
+        mmseqs_db,
+        db_paths,
+        tmp_dir,
+        joinpath(ctx.run_dir, "centroid_msa"),
+        archived.seed_set,
+        archived.seed_names,
+        archived.sanitized_seed,
+        hmm_paths.hmm_path,
+        hmm_paths.annotated_seed,
+        ctx.logs_dir)
+    return nothing
+end
+
+function _run_expansion_workflow!(target::ResolvedTarget,
+        ctx,
+        archived,
+        mmseqs_db::AbstractString;
+        match_mode::Integer,
+        match_ratio::Union{Nothing, Real},
+        hmmbuild_symfrac::Real,
+        centroids::Bool,
+        threads::Union{Nothing, Integer})
+    return mktempdir(ctx.tmp_root; prefix = "mmseqs_tmp_") do tmp_dir
+        # MMseqs finds candidate homologs; HMMER maps them back to seed columns.
+        db_paths = _mmseqs_search(archived.sanitized_seed, mmseqs_db, ctx.db_dir,
+            tmp_dir, ctx.logs_dir; match_mode, match_ratio, threads)
+        hits_tsv = joinpath(ctx.run_dir, "mmseqs_hits_raw.tsv")
+        _run_labeled(
+            `$(MMseqs2_jll.mmseqs()) convertalis $(db_paths.profile_db) $(db_paths.seq_db) $(db_paths.realigned_result_db) $hits_tsv --format-output query,target,tseq`,
+            "convertalis", ctx.logs_dir)
+
+        hits = _write_expansion_hits!(
+            hits_tsv, ctx.run_dir, ctx.hmm_dir, archived.seed_set)
+        hmm_paths = _build_seed_hmm!(
+            ctx.seed_dir, archived.sanitized_seed, hmmbuild_symfrac, ctx.logs_dir)
+        aligned_sto = _align_expansion_hits!(ctx.hmm_dir,
+            hmm_paths.annotated_seed,
+            archived.sanitized_seed,
+            hmm_paths.hmm_path,
+            hits.filtered_fasta,
+            hits.filtered_hits,
+            archived.seed_set,
+            ctx.logs_dir)
+        output_paths = _write_expansion_alignment_outputs!(
+            target, ctx.unpack_dir, aligned_sto, archived.seed_names, hits.raw_hits_fasta)
+        _write_centroids_if_requested!(
+            target, mmseqs_db, db_paths, tmp_dir, ctx, archived, hmm_paths, centroids)
+        return (;
+            output_paths,
+            n_hits = length(hits.all_hits),
+            n_new_hits = length(hits.filtered_hits)
+        )
+    end
+end
+
+function _finished_expansion_result(ctx,
+        archived,
+        run_outputs,
+        workdir::AbstractString)
+    return ExpansionResult(;
+        run_dir = ctx.run_dir,
+        seed_stockholm = archived.archived_seed_sto,
+        seed_fasta = archived.archived_seed_fasta,
+        hits_fasta = run_outputs.output_paths.hits_copy,
+        full_stockholm = run_outputs.output_paths.full_stockholm,
+        match_stockholm = run_outputs.output_paths.match_stockholm,
+        a3m_path = run_outputs.output_paths.a3m_path,
+        db_dir = ctx.db_dir,
+        hmm_dir = ctx.hmm_dir,
+        logs_dir = ctx.logs_dir,
+        n_hits = run_outputs.n_hits,
+        n_new_hits = run_outputs.n_new_hits,
+        status = :ok,
+        workdir = String(workdir)
+    )
+end
+
 function expand_msa(target::ResolvedTarget,
         seed::SeedSelection,
         workdir::AbstractString;
@@ -509,166 +814,26 @@ function expand_msa(target::ResolvedTarget,
     0.0 <= hmmbuild_symfrac <= 1.0 ||
         error("hmmbuild_symfrac must be between 0.0 and 1.0.")
     ensure_mmseqs_db(mmseqs_db)
-    seed_workdir = seed.workdir === nothing ? workdir : seed.workdir
-    seed_stockholm = _resolve_artifact_path(seed.stockholm_path, seed_workdir)
-    seed_fasta = seed.fasta_path === nothing ? nothing :
-                 _resolve_artifact_path(seed.fasta_path, seed_workdir)
 
-    run_dir = joinpath(_expansion_root(workdir), target.ensembl_gene_id,
-        target.transcript_id, format_pid_dir(seed.pid))
-    unpack_dir = joinpath(run_dir, "expanded_msa")
-    logs_dir = joinpath(run_dir, "logs")
-    outputs = _expansion_output_paths(run_dir, target.transcript_id; centroids)
-    identity = _expansion_identity(target, seed, seed_stockholm, seed_fasta, mmseqs_db;
+    ctx = _expansion_context(target, seed, workdir, mmseqs_db;
         match_mode, match_ratio, hmmbuild_symfrac, centroids)
-    cache_warnings = String[]
-    if overwrite && isdir(run_dir)
-        safe_rm(run_dir, workdir)
-    elseif !overwrite
-        cache = _classify_step_state(run_dir, identity, outputs)
-        if cache.reusable
-            counts = _cached_hit_counts(outputs.hits_fasta, _seed_id_set(seed_stockholm))
-            return ExpansionResult(;
-                run_dir,
-                seed_stockholm,
-                seed_fasta,
-                hits_fasta = outputs.hits_fasta,
-                full_stockholm = outputs.full_stockholm,
-                match_stockholm = outputs.match_stockholm,
-                a3m_path = outputs.a3m_path,
-                db_dir = joinpath(run_dir, "dbs"),
-                hmm_dir = joinpath(run_dir, "hmm"),
-                logs_dir,
-                n_hits = counts.n_hits,
-                n_new_hits = counts.n_new_hits,
-                status = :skipped,
-                workdir = String(workdir)
-            )
-        elseif cache.warning !== nothing
-            warning = String(cache.warning)
-            push!(cache_warnings, warning)
-            @warn warning run_dir status=cache.status
-            isdir(run_dir) && safe_rm(run_dir, workdir)
-        end
-    end
+    cache = _prepare_expansion_cache!(ctx.run_dir, workdir, ctx.identity, ctx.outputs;
+        overwrite)
+    cache.reusable && return _cached_expansion_result(ctx, workdir)
 
-    db_dir = joinpath(run_dir, "dbs")
-    seed_dir = joinpath(run_dir, "seeds")
-    hmm_dir = joinpath(run_dir, "hmm")
-    tmp_root = joinpath(run_dir, "tmp")
-    mkpath.((db_dir, seed_dir, hmm_dir, tmp_root, unpack_dir, logs_dir))
-    foreach(warning -> _write_cache_warning(logs_dir, warning), cache_warnings)
-    _write_step_state(run_dir, :unfinished, identity, outputs; warnings = cache_warnings)
-
-    seed_label = "seed_pid$(format_pid(seed.pid))"
-    archived_seed_sto = joinpath(seed_dir, "$(seed_label).sto")
-    cp(seed_stockholm, archived_seed_sto; force = true)
-    archived_seed_fasta = nothing
-    if seed_fasta !== nothing && isfile(seed_fasta)
-        archived_seed_fasta = joinpath(seed_dir, "$(seed_label).fasta")
-        cp(seed_fasta, archived_seed_fasta; force = true)
-    end
-    sanitized_seed = prepare_stockholm_for_mmseqs(seed_stockholm,
-        joinpath(seed_dir, "$(seed_label)_mmseqs.sto"))
-    seed_alignment = read_file(archived_seed_sto, Stockholm; keepinserts = true)
-    seed_names = String.(sequencenames(seed_alignment))
-    seed_set = Set(_normalize_id.(seed_names))
+    _prepare_expansion_dirs!(ctx, cache.cache_warnings)
+    archived = _archive_expansion_seed(seed, ctx)
 
     try
-        mktempdir(tmp_root; prefix = "mmseqs_tmp_") do tmp_dir
-            # MMseqs finds candidate homologs; HMMER maps them back to seed columns.
-            db_paths = _mmseqs_search(sanitized_seed, mmseqs_db, db_dir, tmp_dir, logs_dir;
-                match_mode, match_ratio, threads)
-            hits_tsv = joinpath(run_dir, "mmseqs_hits_raw.tsv")
-            _run_labeled(
-                `$(MMseqs2_jll.mmseqs()) convertalis $(db_paths.profile_db) $(db_paths.seq_db) $(db_paths.realigned_result_db) $hits_tsv --format-output query,target,tseq`,
-                "convertalis", logs_dir)
-
-            all_hits, filtered_hits = _collect_hits(hits_tsv, seed_set)
-            raw_hits_fasta = joinpath(run_dir, "mmseqs_hits_raw.fasta")
-            filtered_fasta = joinpath(hmm_dir, "mmseqs_hits_filtered.fasta")
-            write_fasta(raw_hits_fasta, all_hits)
-            write_fasta(filtered_fasta, filtered_hits)
-
-            hmm_path = joinpath(seed_dir, "seed.hmm")
-            annotated_seed = joinpath(seed_dir, "seed_annotated.sto")
-            _run_labeled(
-                `$(HMMER_jll.hmmbuild()) --symfrac $(Float64(hmmbuild_symfrac)) -O $annotated_seed $hmm_path $sanitized_seed`,
-                "hmmbuild", logs_dir)
-            normalize_stockholm_annotations!(annotated_seed)
-
-            aligned_sto = joinpath(hmm_dir, "alignment_with_hits.sto")
-            hits_aligned_sto = joinpath(hmm_dir, "aligned_hits_only.sto")
-            if isempty(filtered_hits)
-                # With no new hits, the expanded alignment is just the annotated seed.
-                cp(annotated_seed, aligned_sto; force = true)
-            else
-                _run_labeled(
-                    `$(HMMER_jll.hmmalign()) --mapali $sanitized_seed --trim --outformat stockholm -o $aligned_sto $hmm_path $filtered_fasta`,
-                    "hmmalign", logs_dir)
-                aligned_msa = read_file(aligned_sto, Stockholm; keepinserts = true)
-                hit_indices = [i
-                               for (i, name) in enumerate(sequencenames(aligned_msa))
-                               if !(_normalize_id(String(name)) in seed_set)]
-                write_file(hits_aligned_sto, aligned_msa[hit_indices, :], Stockholm)
-            end
-            normalize_stockholm_annotations!(aligned_sto)
-
-            match_stockholm = joinpath(unpack_dir, "$(target.transcript_id)_matchonly.sto")
-            open(match_stockholm, "w") do io
-                run(pipeline(`$(HMMER_jll.esl_alimask()) --rf-is-mask $aligned_sto`, stdout = io))
-            end
-            normalize_stockholm_annotations!(match_stockholm)
-
-            full_stockholm = joinpath(unpack_dir, "$(target.transcript_id)_full.sto")
-            full_alignment = _reorder_alignment(
-                read_file(aligned_sto, Stockholm; keepinserts = true), seed_names)
-            match_alignment = _reorder_alignment(
-                read_file(match_stockholm, Stockholm; keepinserts = true), seed_names)
-            write_file(full_stockholm, full_alignment, Stockholm)
-            write_file(match_stockholm, match_alignment, Stockholm)
-
-            a3m_path = joinpath(unpack_dir, "$(target.transcript_id)_expanded.a3m")
-            write_file(a3m_path, match_alignment, A3M)
-            hits_copy = joinpath(unpack_dir, "$(target.transcript_id)_hits_raw.fasta")
-            cp(raw_hits_fasta, hits_copy; force = true)
-
-            if centroids
-                _write_centroid_msa(target.transcript_id,
-                    mmseqs_db,
-                    db_paths,
-                    tmp_dir,
-                    joinpath(run_dir, "centroid_msa"),
-                    seed_set,
-                    seed_names,
-                    sanitized_seed,
-                    hmm_path,
-                    annotated_seed,
-                    logs_dir)
-            end
-
-            _write_step_state(run_dir, :done, identity, outputs; warnings = cache_warnings)
-            return ExpansionResult(;
-                run_dir,
-                seed_stockholm = archived_seed_sto,
-                seed_fasta = archived_seed_fasta,
-                hits_fasta = hits_copy,
-                full_stockholm,
-                match_stockholm,
-                a3m_path,
-                db_dir,
-                hmm_dir,
-                logs_dir,
-                n_hits = length(all_hits),
-                n_new_hits = length(filtered_hits),
-                status = :ok,
-                workdir = String(workdir)
-            )
-        end
+        run_outputs = _run_expansion_workflow!(target, ctx, archived, mmseqs_db;
+            match_mode, match_ratio, hmmbuild_symfrac, centroids, threads)
+        _write_step_state(ctx.run_dir, :done, ctx.identity, ctx.outputs;
+            warnings = cache.cache_warnings)
+        return _finished_expansion_result(ctx, archived, run_outputs, workdir)
     catch err
         err isa InterruptException && rethrow()
-        _write_step_state(run_dir, :failed, identity, outputs;
-            warnings = cache_warnings,
+        _write_step_state(ctx.run_dir, :failed, ctx.identity, ctx.outputs;
+            warnings = cache.cache_warnings,
             exception = _exception_summary(err))
         rethrow()
     end

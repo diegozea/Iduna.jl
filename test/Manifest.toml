@@ -2,7 +2,7 @@
 
 julia_version = "1.12.6"
 manifest_format = "2.0"
-project_hash = "888ab2250e622e19e523f998fc6fc299f75059bb"
+project_hash = "d73629a299309dcf81287f460b4fd44fecc8a027"
 
 [[deps.Aqua]]
 deps = ["Compat", "Pkg", "Test"]
@@ -21,6 +21,12 @@ version = "1.11.0"
 [[deps.Base64]]
 uuid = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
 version = "1.11.0"
+
+[[deps.CodeComplexity]]
+deps = ["JuliaSyntax"]
+git-tree-sha1 = "6c4a957ff2c288d26c4038f76b88631ec537956a"
+uuid = "6a833b0f-2137-4092-987b-66bce4e6b438"
+version = "0.2.0"
 
 [[deps.Compat]]
 deps = ["TOML", "UUIDs"]
@@ -64,6 +70,11 @@ version = "1.11.0"
 deps = ["Markdown"]
 uuid = "b77e0a4c-d291-57a0-90e8-8db25a27a240"
 version = "1.11.0"
+
+[[deps.JuliaSyntax]]
+git-tree-sha1 = "0d4b3dab95018bcf3925204475693d9f09dc45b8"
+uuid = "70703baa-626e-46a2-a12c-08ffd08c73b4"
+version = "1.0.2"
 
 [[deps.JuliaSyntaxHighlighting]]
 deps = ["StyledStrings"]
