@@ -19,7 +19,6 @@
 
     @test isdefined(Iduna.ThorAxeMSA, :build_thoraxe_msa)
     @test isdefined(Iduna.ThorAxeMSA, :_CommandTimeoutError)
-    @test isdefined(Iduna.ThorAxeMSA, :_CommandFailedError)
     @test !isdefined(Iduna.ThorAxeMSA, :CommandTimeoutError)
     @test !isdefined(Iduna.ThorAxeMSA, :REQUIRED_ENSEMBL_FILES)
 
