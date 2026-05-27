@@ -147,10 +147,13 @@ function _read_step_state(run_dir::AbstractString)
     end
 end
 
-_step_state_unreadable_message(::Any) = nothing
-_step_state_unreadable_message(::Nothing) = "state file disappeared while reading"
-function _step_state_unreadable_message(state::NamedTuple)
-    return haskey(state, :unreadable) ? state.unreadable : nothing
+function _step_state_unreadable_message(state)
+    if state === nothing
+        return "state file disappeared while reading"
+    elseif state isa NamedTuple && haskey(state, :unreadable)
+        return state.unreadable
+    end
+    return nothing
 end
 
 function _classify_step_state(run_dir::AbstractString, identity, outputs::NamedTuple)
