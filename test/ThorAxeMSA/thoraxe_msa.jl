@@ -771,7 +771,7 @@ TableSet\tptroglodytes_gene_ensembl\tChimpanzee genes (Pan_tro_3.0)\t1
                 @test status_exception == false
                 attempts[] == 1 ? response(500) : response(200, """{"data": []}""")
             end)
-        @test get(data, :data, nothing) !== nothing
+        @test get(data, "data", nothing) !== nothing
         @test attempts[] == 2
 
         attempts[] = 0

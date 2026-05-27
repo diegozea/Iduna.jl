@@ -3,9 +3,8 @@ module Utils
 using BioAlignments: AffineGapScoreModel, BLOSUM62, GlobalAlignment, alignment,
                      count_deletions, count_insertions, count_mismatches, pairalign
 using BioSequences: LongAA
-using CodecZlib: GzipDecompressor
 import HTTP
-import JSON3
+import JSON
 using MIToS.MSA: AbstractMultipleSequenceAlignment, sequencenames
 using Printf: @sprintf
 
@@ -155,7 +154,7 @@ format_pid_dir(pid::Real) = "pid_$(@sprintf("%.2f", Float64(pid)))"
 function decode_body(resp::HTTP.Response)::String
     body = resp.body
     if length(body) >= 2 && body[1] == 0x1f && body[2] == 0x8b
-        return String(transcode(GzipDecompressor, body))
+        return String(HTTP.decode(resp))
     end
     return String(body)
 end
@@ -260,7 +259,7 @@ end
 function write_json(path::AbstractString, obj)
     mkpath(dirname(path))
     open(path, "w") do io
-        JSON3.pretty(io, obj)
+        JSON.json(io, obj; pretty = true)
         println(io)
     end
     return path

@@ -1,7 +1,7 @@
 module IDMapping
 
 import HTTP
-import JSON3
+import JSON
 
 using ..Utils: ResolvedTarget, _http_get_with_retries, _is_transient_http_status,
                decode_body, fasta_sequence, format_fasta, id_kind,
@@ -65,7 +65,7 @@ function fetch_uniprot_entry(uniprot_id::AbstractString;
     url = "$(_UNIPROT_BASE)/uniprotkb/$(strip(String(uniprot_id))).json"
     resp = _http_get_fn(url)
     resp === nothing && error("Could not fetch UniProt metadata for $(uniprot_id).")
-    data = JSON3.read(decode_body(resp))
+    data = JSON.parse(decode_body(resp))
     gene_ids, transcripts, transcript_to_protein,
     transcript_to_gene, transcript_to_isoform = _parse_xrefs(data)
     return _UniProtEntry(;
@@ -258,7 +258,7 @@ function _resolve_transcript_metadata(transcript_id::AbstractString)::_EnsemblTr
     resp = _http_get(url)
     resp === nothing &&
         error("Could not resolve Ensembl metadata for transcript $(transcript_id).")
-    data = JSON3.read(decode_body(resp))
+    data = JSON.parse(decode_body(resp))
     return _parse_transcript_lookup(data, transcript_id)
 end
 

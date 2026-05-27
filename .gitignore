@@ -7,3 +7,4 @@
 /.CondaPkg/
 .agents
 .vscode/
+.*.md
