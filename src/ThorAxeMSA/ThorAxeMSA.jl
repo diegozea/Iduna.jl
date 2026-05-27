@@ -35,10 +35,19 @@ struct _CommandTimeoutError <: Exception
     stderr_log::String
 end
 
+struct _CommandFailedError <: Exception
+    command::String
+    stderr_log::String
+end
+
 function Base.showerror(io::IO, err::_CommandTimeoutError)
     print(io,
         "ThorAxe command timed out after $(err.seconds) seconds: $(err.command). ",
         "See $(err.stdout_log) and $(err.stderr_log).")
+end
+
+function Base.showerror(io::IO, err::_CommandFailedError)
+    print(io, "ThorAxe command failed: $(err.command). See $(err.stderr_log).")
 end
 
 const _REQUIRED_ENSEMBL_FILES = (
@@ -209,7 +218,7 @@ function _run_logged_command(command::Cmd,
         timed_out && throw(_CommandTimeoutError(
             string(command), timeout::Float64, String(stdout_log), String(stderr_log)))
         success(process) ||
-            error("ThorAxe command failed: $(command). See $(stderr_log).")
+            throw(_CommandFailedError(string(command), String(stderr_log)))
     end
     return nothing
 end
@@ -635,14 +644,30 @@ function _transcript_query_attempt_action!(gene_core::AbstractString,
         @warn "transcript_query produced an invalid bundle; retrying." gene=gene_core attempt
         return :retry_without_specieslist
     catch err
-        err isa _CommandTimeoutError || rethrow(err)
+        return _transcript_query_error_action(
+            err, gene_core, active_specieslist, tmp_gene_dir, attempt, attempts)
+    end
+end
+
+function _transcript_query_error_action(err,
+        gene_core::AbstractString,
+        active_specieslist::Union{Nothing, AbstractString},
+        tmp_gene_dir::AbstractString,
+        attempt::Integer,
+        attempts::Integer)
+    if err isa _CommandTimeoutError
         if _has_valid_ensembl_bundle(tmp_gene_dir)
             @warn "transcript_query timed out but produced a usable Ensembl bundle." gene=gene_core attempt
             return :done
         end
-        attempt < attempts || rethrow(err)
+        attempt < attempts || throw(err)
         return :timeout_retry
     end
+    if err isa _CommandFailedError && active_specieslist !== nothing && attempt < attempts
+        @warn "transcript_query failed with a species list; retrying without it." gene=gene_core attempt
+        return :retry_without_specieslist
+    end
+    throw(err)
 end
 
 function _transcript_query_retry_state(action::Symbol,

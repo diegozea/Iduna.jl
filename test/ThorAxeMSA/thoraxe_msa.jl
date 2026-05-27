@@ -380,6 +380,12 @@
             joinpath(tmp, "slow_stdout.log"),
             joinpath(tmp, "slow_stderr.log");
             timeout_seconds = 0.1)
+
+        @test_throws Iduna.ThorAxeMSA._CommandFailedError Iduna.ThorAxeMSA._run_logged_command(
+            `$(Base.julia_cmd()) --startup-file=no -e "exit(2)"`,
+            joinpath(tmp, "failed_stdout.log"),
+            joinpath(tmp, "failed_stderr.log");
+            timeout_seconds = 10)
     end
 
     mktempdir() do tmp
@@ -860,6 +866,26 @@ TableSet\tptroglodytes_gene_ensembl\tChimpanzee genes (Pan_tro_3.0)\t1
                 orthology = "1:1",
                 runner = command -> throw(timeout))
             @test retry_timeout_action === :timeout_retry
+
+            failed = Iduna.ThorAxeMSA._CommandFailedError("transcript_query", stderr_log)
+            retry_failed_action = @test_logs (:warn, r"failed with a species list") Iduna.ThorAxeMSA._transcript_query_attempt_action!(
+                gene_core, tmp, "homo_sapiens", "homo_sapiens,mus_musculus",
+                stdout_log, stderr_log, tmp_gene_dir;
+                attempt = 1,
+                attempts = 2,
+                timeout_seconds = 1,
+                orthology = "1:1",
+                runner = command -> throw(failed))
+            @test retry_failed_action === :retry_without_specieslist
+
+            @test_throws Iduna.ThorAxeMSA._CommandFailedError Iduna.ThorAxeMSA._transcript_query_attempt_action!(
+                gene_core, tmp, "homo_sapiens", nothing,
+                stdout_log, stderr_log, tmp_gene_dir;
+                attempt = 1,
+                attempts = 2,
+                timeout_seconds = 1,
+                orthology = "1:1",
+                runner = command -> throw(failed))
         end
     end
 
