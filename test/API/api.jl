@@ -1,3 +1,5 @@
+import JSON
+
 @testset "API" begin
     @test Iduna._pipeline_status(String[]) === :ok
     @test Iduna._pipeline_status(["target warning"]) === :warn
@@ -243,15 +245,15 @@
             @test result.validations[1].stats_path ==
                   joinpath("validation", "pid_10.00", "stats.csv")
 
-            target_json = Iduna.JSON3.read(read(joinpath(workdir, "target.json"), String))
-            @test target_json.uniprot_sequence_path ==
+            target_json = JSON.parse(read(joinpath(workdir, "target.json"), String))
+            @test target_json["uniprot_sequence_path"] ==
                   joinpath("sequences", "uniprot", "Q13148.fasta")
-            written = Iduna.JSON3.read(read(joinpath(workdir, "result.json"), String))
-            @test written.thoraxe_msa.pid_summary ==
+            written = JSON.parse(read(joinpath(workdir, "result.json"), String))
+            @test written["thoraxe_msa"]["pid_summary"] ==
                   joinpath("thoraxe_msa", "candidate_summary.csv")
-            @test written.expansions[1].match_stockholm ==
+            @test written["expansions"][1]["match_stockholm"] ==
                   result.expansions[1].match_stockholm
-            @test written.validations[1].stats_path ==
+            @test written["validations"][1]["stats_path"] ==
                   joinpath("validation", "pid_10.00", "stats.csv")
         end
     end
@@ -402,9 +404,9 @@
             @test validation_expansion[] === nothing
             @test isempty(result.expansions)
             @test isempty(Iduna.Utils.result_summary(result).expansions)
-            written = Iduna.JSON3.read(
+            written = JSON.parse(
                 read(joinpath(result.workdir, "result.json"), String))
-            @test isempty(written.expansions)
+            @test isempty(written["expansions"])
             @test_throws ErrorException Iduna.load_expanded_msa(result)
         end
 
@@ -429,7 +431,7 @@
     end
 
     @testset "failure result artifacts" begin
-        _read_result(path) = Iduna.JSON3.read(read(joinpath(path, "result.json"), String))
+        _read_result(path) = JSON.parse(read(joinpath(path, "result.json"), String))
 
         mktempdir() do tmp
             workdir = joinpath(tmp, "target_failure")
@@ -441,11 +443,11 @@
                 _resolve_target = target_failure)
 
             failed = _read_result(workdir)
-            @test failed.status == "error"
-            @test failed.failed_stage == "resolve_target"
-            @test failed.target === nothing
-            @test failed.exception.type == "ErrorException"
-            @test failed.exception.message == "target boom"
+            @test failed["status"] == "error"
+            @test failed["failed_stage"] == "resolve_target"
+            @test failed["target"] === nothing
+            @test failed["exception"]["type"] == "ErrorException"
+            @test failed["exception"]["message"] == "target boom"
             @test !isfile(joinpath(workdir, "target.json"))
         end
 
@@ -460,12 +462,12 @@
                 _build_thoraxe_msa = thoraxe_failure)
 
             failed = _read_result(workdir)
-            @test failed.status == "error"
-            @test failed.failed_stage == "thoraxe_msa"
-            @test failed.target.uniprot_id == "Q13148"
-            @test failed.warnings == String[]
-            @test failed.exception.type == "ErrorException"
-            @test failed.exception.message == "thoraxe boom"
+            @test failed["status"] == "error"
+            @test failed["failed_stage"] == "thoraxe_msa"
+            @test failed["target"]["uniprot_id"] == "Q13148"
+            @test failed["warnings"] == String[]
+            @test failed["exception"]["type"] == "ErrorException"
+            @test failed["exception"]["message"] == "thoraxe boom"
             @test isfile(joinpath(workdir, "target.json"))
         end
 
@@ -485,13 +487,13 @@
                 _build_thoraxe_msa = timeout_failure)
 
             failed = _read_result(workdir)
-            @test failed.status == "error"
-            @test failed.failed_stage == "thoraxe_msa"
-            @test failed.exception.type == "Iduna.ThorAxeMSA._CommandTimeoutError"
-            @test failed.exception.command == "thoraxe --example"
-            @test failed.exception.stdout_log == joinpath("logs", "thoraxe", "stdout.log")
-            @test failed.exception.stderr_log == joinpath("logs", "thoraxe", "stderr.log")
-            @test occursin("timed out after 12.0 seconds", failed.exception.message)
+            @test failed["status"] == "error"
+            @test failed["failed_stage"] == "thoraxe_msa"
+            @test failed["exception"]["type"] == "Iduna.ThorAxeMSA._CommandTimeoutError"
+            @test failed["exception"]["command"] == "thoraxe --example"
+            @test failed["exception"]["stdout_log"] == joinpath("logs", "thoraxe", "stdout.log")
+            @test failed["exception"]["stderr_log"] == joinpath("logs", "thoraxe", "stderr.log")
+            @test occursin("timed out after 12.0 seconds", failed["exception"]["message"])
         end
     end
 end

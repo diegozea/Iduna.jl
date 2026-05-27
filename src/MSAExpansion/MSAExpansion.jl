@@ -1,7 +1,7 @@
 module MSAExpansion
 
 import HMMER_jll
-import JSON3
+import JSON
 import MMseqs2_jll
 import SHA
 
@@ -11,7 +11,7 @@ using MIToS.MSA: A3M, AbstractMultipleSequenceAlignment, FASTA, Stockholm,
 
 using ..Utils: ExpansionResult, ResolvedTarget, SeedSelection, _resolve_artifact_path,
                ensure_mmseqs_db, format_pid, format_pid_dir, run_logged, safe_rm,
-               write_fasta
+               write_fasta, write_json
 
 export expand_msa,
        normalize_stockholm_annotations!,
@@ -102,7 +102,7 @@ function _expansion_identity(target::ResolvedTarget,
 end
 
 function _identity_hash(identity)
-    return bytes2hex(SHA.sha256(JSON3.write(identity)))
+    return bytes2hex(SHA.sha256(JSON.json(identity)))
 end
 
 function _exception_summary(err)
@@ -132,10 +132,7 @@ function _write_step_state(run_dir::AbstractString,
         updated_at = string(now(UTC))
     )
     tmp_path = string(state_path, ".tmp")
-    open(tmp_path, "w") do io
-        JSON3.pretty(io, state)
-        println(io)
-    end
+    write_json(tmp_path, state)
     mv(tmp_path, state_path; force = true)
     return state_path
 end
@@ -144,10 +141,19 @@ function _read_step_state(run_dir::AbstractString)
     state_path = _step_state_path(run_dir)
     isfile(state_path) || return nothing
     try
-        return JSON3.read(read(state_path, String))
+        return JSON.parse(read(state_path, String))
     catch err
         return (; unreadable = sprint(showerror, err))
     end
+end
+
+function _step_state_unreadable_message(state)
+    if state === nothing
+        return "state file disappeared while reading"
+    elseif state isa NamedTuple && haskey(state, :unreadable)
+        return state.unreadable
+    end
+    return nothing
 end
 
 function _classify_step_state(run_dir::AbstractString, identity, outputs::NamedTuple)
@@ -170,23 +176,22 @@ function _classify_step_state(run_dir::AbstractString, identity, outputs::NamedT
     end
 
     state = _read_step_state(run_dir)
-    if state === nothing || haskey(state, :unreadable)
-        unreadable = state === nothing ? "state file disappeared while reading" :
-                     state.unreadable
+    unreadable = _step_state_unreadable_message(state)
+    if unreadable !== nothing
         return (;
             reusable = false,
             status = :outdated,
             warning = "Could not read MSA expansion $(_STEP_STATE_FILE): $(unreadable); rebuilding.")
     end
 
-    status = Symbol(String(get(state, :status, "outdated")))
+    status = Symbol(String(get(state, "status", "outdated")))
     if status != :done
         return (;
             reusable = false,
             status,
             warning = "Previous MSA expansion status was $(status); rebuilding.")
     end
-    if String(get(state, :identity_hash, "")) != expected_hash
+    if String(get(state, "identity_hash", "")) != expected_hash
         return (;
             reusable = false,
             status = :outdated,

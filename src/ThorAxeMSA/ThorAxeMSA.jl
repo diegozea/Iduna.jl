@@ -4,7 +4,7 @@ import CSV
 import Dates
 import HHsuite_jll
 import HTTP
-import JSON3
+import JSON
 import Scratch
 import SHA
 import ThorAxe
@@ -21,7 +21,7 @@ using ..Utils: DEFAULT_PID_THRESHOLDS, ResolvedTarget, SeedSelection, ThorAxeMSA
                _http_get_with_retries, _resolve_artifact_path, decode_body,
                fasta_sequence, format_pid, format_pid_dir, protein_alignment_stats,
                resolve_sequence_name, safe_rm,
-               strip_ensembl_version, write_fasta
+               strip_ensembl_version, write_fasta, write_json, write_text
 
 export assemble_transcript_msa,
        build_thoraxe_msa,
@@ -130,10 +130,11 @@ end
 function _metadata_matches(path::AbstractString, expected)
     isfile(path) || return false
     try
-        metadata = JSON3.read(read(path, String))
+        metadata = JSON.parse(read(path, String))
         for (key, expected_value) in pairs(expected)
-            hasproperty(metadata, key) || return false
-            _metadata_value_matches(getproperty(metadata, key), expected_value) ||
+            string_key = String(key)
+            haskey(metadata, string_key) || return false
+            _metadata_value_matches(get(metadata, string_key, nothing), expected_value) ||
                 return false
         end
         return true
@@ -150,11 +151,7 @@ function _write_transcript_query_metadata!(input_dir::AbstractString, expected)
             written_at = string(Dates.now())
         ))
     path = _transcript_query_metadata_path(input_dir)
-    open(path, "w") do io
-        JSON3.pretty(io, metadata)
-        println(io)
-    end
-    return path
+    return write_json(path, metadata)
 end
 
 function _has_matching_transcript_query_metadata(input_dir::AbstractString, expected)
@@ -324,8 +321,8 @@ end
 function _read_biomart_cache_date(metadata_path::AbstractString)
     isfile(metadata_path) || return nothing
     try
-        metadata = JSON3.read(read(metadata_path, String))
-        date = get(metadata, :download_date, nothing)
+        metadata = JSON.parse(read(metadata_path, String))
+        date = get(metadata, "download_date", nothing)
         date === nothing && return nothing
         return String(date)
     catch err
@@ -342,9 +339,7 @@ function _write_biomart_datasets_cache!(cache_dir::AbstractString,
     datasets_path = joinpath(cache_dir, _BIOMART_DATASETS_FILE)
     metadata_path = joinpath(cache_dir, _BIOMART_DATASETS_METADATA_FILE)
     tmp_datasets = string(datasets_path, ".tmp")
-    open(tmp_datasets, "w") do io
-        write(io, text)
-    end
+    write_text(tmp_datasets, text)
     mv(tmp_datasets, datasets_path; force = true)
     metadata = (;
         download_date = string(today),
@@ -353,10 +348,7 @@ function _write_biomart_datasets_cache!(cache_dir::AbstractString,
         status = 200
     )
     tmp_metadata = string(metadata_path, ".tmp")
-    open(tmp_metadata, "w") do io
-        JSON3.pretty(io, metadata)
-        println(io)
-    end
+    write_json(tmp_metadata, metadata)
     mv(tmp_metadata, metadata_path; force = true)
     return datasets_path
 end
@@ -502,7 +494,7 @@ function _fetch_ensembl_homology_data(species::AbstractString,
     url = "$(_ENSEMBL_REST_BASE)/homology/id/$(species)/$(gene_core)?type=orthologues;sequence=none"
     resp = _http_get_with_retries(
         url, _ENSEMBL_JSON_HEADERS; retries, sleep_seconds, http_get)
-    resp.status == 200 && return JSON3.read(decode_body(resp))
+    resp.status == 200 && return JSON.parse(decode_body(resp))
     error("Ensembl homology specieslist filter failed for $(gene_core) in $(species) with HTTP status $(resp.status).")
 end
 
@@ -648,7 +640,7 @@ function _transcript_query_attempt_action!(gene_core::AbstractString,
             @warn "transcript_query timed out but produced a usable Ensembl bundle." gene=gene_core attempt
             return :done
         end
-        attempt < attempts || rethrow(err)
+        attempt < attempts || throw(err)
         return :timeout_retry
     end
 end

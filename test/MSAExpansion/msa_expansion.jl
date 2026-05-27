@@ -165,6 +165,8 @@
         state = Iduna.MSAExpansion._read_step_state(run_dir)
         @test state.status == "done"
         @test state.step == "msa_expansion"
+        @test Iduna.MSAExpansion._step_state_unreadable_message(nothing) ==
+              "state file disappeared while reading"
         hits_fasta = outputs.hits_fasta
 
         cached = Iduna.MSAExpansion.expand_msa(target, seed, tmp; mmseqs_db = db,

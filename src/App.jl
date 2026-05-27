@@ -1,5 +1,5 @@
 import ArgParse
-import JSON3
+import JSON
 
 using ArgParse: ArgParseSettings, @add_arg_table!, parse_args
 
@@ -197,13 +197,13 @@ function _parse_app_args(args::Vector{String};
     return _postprocess_app_args(parsed)
 end
 
-function _run_app(args::Vector{String} = ARGS)
+function _run_app(args::Vector{String} = ARGS; runner::Function = iduna)
     kwargs = _parse_app_args(args; exc_handler = ArgParse.default_handler)
     if get(kwargs, :help, false)
         return nothing
     end
-    result = iduna(; kwargs...)
-    JSON3.pretty(stdout, Utils.result_summary(result))
+    result = runner(; kwargs...)
+    JSON.json(stdout, Utils.result_summary(result); pretty = true)
     println()
     return result
 end
