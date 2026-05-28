@@ -1,5 +1,45 @@
 ## Iduna.jl Release Notes
 
+### Changes from v0.5.0 to v0.6.0
+
+Breaking changes:
+
+- Iduna now needs ThorAxe runs to contain the extra files used to track s-exon
+  columns. Older cached ThorAxe outputs that do not have those files are rebuilt
+  or completed instead of being reused as they are.
+- `result.json` and result summaries now include paths to the new s-exon block
+  tables. Programs that expect an exact list of JSON fields should allow these
+  new fields.
+- Seed and expansion result objects now include `s_exon_blocks_tsv`, the path to
+  the s-exon block table. Code that checks the exact fields of these objects may
+  need to be updated.
+
+Added:
+
+- Added a way to keep track of which ThorAxe s-exon each alignment column came
+  from. This information is stored in Stockholm files as MIToS annotations:
+  `SExonCode` has one short symbol per column, and `SExonCodeMap` explains
+  which s-exon ID each symbol means.
+- Added `*_s_exon_blocks.tsv` files for seed, expanded, and centroid
+  alignments. These tables group neighboring columns that come from the same
+  s-exon, which makes them easier to use for plots and manual inspection.
+- Iduna keeps the s-exon column labels when the seed MSA is expanded with HMMER
+  and MMseqs. Insert columns that cannot be assigned to one s-exon are left
+  unassigned.
+- Iduna now reads ThorAxe's PhyloSofS s-exon symbols and `s_exons.tsv` mapping,
+  including `0_` s-exons when they have protein sequence.
+- Added documentation showing how to read the block tables and the MIToS
+  annotations.
+
+Internal changes:
+
+- Replaced JSON3 and CodecZlib usage with JSON.jl and HTTP body decoding.
+- Added tests for ThorAxe retry, cache, scoring, and s-exon annotation paths
+  that do not depend on live web services.
+- Added CodeComplexity checks to the test suite.
+- Skipped the live MAPK8 integration smoke test on GitHub Actions while keeping
+  it enabled for local test runs.
+
 ### Changes from v0.4.0 to v0.5.0
 
 Breaking changes:
