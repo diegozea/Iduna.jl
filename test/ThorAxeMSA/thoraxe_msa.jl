@@ -663,6 +663,30 @@
             @test fake_calls[] == 1
             @test isfile(temp_paths.stockholm_path)
 
+            generated_pid = 55.0
+            generated_paths = Iduna.ThorAxeMSA._pid_sample_paths(tmp, generated_pid, 0)
+            generated_thoraxe_dir = Iduna.ThorAxeMSA._pid_sample_thoraxe_dir(
+                tmp, generated_pid, 0)
+            write_fake_thoraxe_dir(generated_thoraxe_dir)
+            generated_candidate = Iduna.ThorAxeMSA._generate_pid_candidate(
+                Iduna.ResolvedTarget(;
+                    input_id = "ENST",
+                    input_kind = :ensembl_transcript,
+                    ensembl_gene_id = "ENSG",
+                    transcript_id = "ENST"),
+                joinpath(tmp, "input"), tmp, generated_pid, nothing)
+            @test generated_candidate.fasta_path == generated_paths.fasta_path
+            @test generated_candidate.stockholm_path == generated_paths.stockholm_path
+            @test generated_candidate.thoraxe_dir == generated_thoraxe_dir
+            @test generated_candidate.s_exon_blocks_tsv == generated_paths.s_exon_blocks_tsv
+            @test isfile(generated_candidate.stockholm_path)
+            @test isfile(generated_candidate.s_exon_blocks_tsv)
+            generated_sequence_fasta = read(generated_candidate.sequence_fasta, String)
+            @test occursin(">ENSG\nAA", generated_sequence_fasta)
+            @test occursin(">ORTHO1\nAX", generated_sequence_fasta)
+            @test read(generated_candidate.species_file, String) ==
+                  "homo_sapiens\nmus_musculus\n"
+
             stale_paths = Iduna.ThorAxeMSA._pid_sample_paths(tmp, 80.0, 0)
             mkpath(dirname(stale_paths.fasta_path))
             Iduna.ThorAxeMSA.write_file(stale_paths.fasta_path, msa, Iduna.ThorAxeMSA.FASTA)
