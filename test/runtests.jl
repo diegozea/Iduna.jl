@@ -13,7 +13,11 @@ using TestItemRunner
     include("ThorAxeMSA/thoraxe_msa.jl")
     include("MSAExpansion/msa_expansion.jl")
     include("ResultsValidation/results_validation.jl")
-    include("Integration/mapk8_smoke.jl")
+    if get(ENV, "GITHUB_ACTIONS", "false") == "true"
+        @info "Skipping MAPK8 live integration smoke test on GitHub Actions"
+    else
+        include("Integration/mapk8_smoke.jl")
+    end
 end
 
 @run_package_tests
