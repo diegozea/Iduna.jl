@@ -509,11 +509,12 @@ function _fetch_ensembl_homology_data(species::AbstractString,
     error("Ensembl homology specieslist filter failed for $(gene_core) in $(species) with HTTP status $(resp.status).")
 end
 
-function _fetch_ortholog_species(target::ResolvedTarget, orthology::AbstractString)
+function _fetch_ortholog_species(target::ResolvedTarget, orthology::AbstractString;
+        homology_data_fetcher::Function = _fetch_ensembl_homology_data)
     species = _normalize_species_name(target.species)
     species === nothing &&
         error("Cannot run Ensembl specieslist filter because the target species is unknown.")
-    data = _fetch_ensembl_homology_data(species, target.ensembl_gene_id)
+    data = homology_data_fetcher(species, target.ensembl_gene_id)
     return _homology_species(data, orthology)
 end
 
@@ -688,7 +689,10 @@ function _run_transcript_query_with_retries!(tmp_gene_dir::AbstractString,
         timeout_seconds::Union{Nothing, Real},
         timeout_max_seconds::Union{Nothing, Real},
         orthology::AbstractString,
-        allow_specieslist_timeout_fallback::Bool)
+        allow_specieslist_timeout_fallback::Bool,
+        runner_factory::Function = (timeout -> _thoraxe_runner(
+            stdout_log, stderr_log; timeout_seconds = timeout)),
+        sleep_fn::Function = sleep)
     active_specieslist = initial_specieslist
     current_timeout = initial_timeout
     for attempt in 1:attempts
@@ -696,14 +700,15 @@ function _run_transcript_query_with_retries!(tmp_gene_dir::AbstractString,
         action = _transcript_query_attempt_action!(
             gene_core, query_workdir, species, active_specieslist,
             stdout_log, stderr_log, tmp_gene_dir;
-            attempt, attempts, timeout_seconds = current_timeout, orthology)
+            attempt, attempts, timeout_seconds = current_timeout, orthology,
+            runner = runner_factory(current_timeout))
         action === :done && return nothing
         action === :failed && break
         active_specieslist,
         current_timeout = _transcript_query_retry_state(
             action, active_specieslist, current_timeout, timeout_seconds,
             timeout_max_seconds, allow_specieslist_timeout_fallback, gene_core, attempt)
-        sleep(_retry_wait_seconds(attempt))
+        sleep_fn(_retry_wait_seconds(attempt))
     end
     return nothing
 end
@@ -716,7 +721,9 @@ function _ensure_transcript_query(target::ResolvedTarget, workdir::AbstractStrin
         timeout_max_seconds::Union{Nothing, Real} = 240,
         max_retries::Integer = 2,
         orthology::AbstractString = "1:1",
-        allow_specieslist_timeout_fallback::Bool = true)
+        allow_specieslist_timeout_fallback::Bool = true,
+        transcript_query_runner_factory::Union{Nothing, Function} = nothing,
+        sleep_fn::Function = sleep)
     _orthology_relationships(orthology)
     metadata = _expected_transcript_query_metadata(target;
         specieslist,
@@ -742,6 +749,11 @@ function _ensure_transcript_query(target::ResolvedTarget, workdir::AbstractStrin
 
     attempts = max(Int(max_retries), 1)
     active_specieslist = _normalized_specieslist(specieslist)
+    runner_factory = if transcript_query_runner_factory === nothing
+        timeout -> _thoraxe_runner(stdout_log, stderr_log; timeout_seconds = timeout)
+    else
+        transcript_query_runner_factory
+    end
     # Retry transcript_query because BioMart downloads often fail transiently.
     return mktempdir(workdir; prefix = "transcript_query_") do query_workdir
         tmp_gene_dir = joinpath(query_workdir, gene_core)
@@ -751,7 +763,9 @@ function _ensure_transcript_query(target::ResolvedTarget, workdir::AbstractStrin
             timeout_seconds,
             timeout_max_seconds,
             orthology,
-            allow_specieslist_timeout_fallback)
+            allow_specieslist_timeout_fallback,
+            runner_factory,
+            sleep_fn)
 
         _has_valid_ensembl_bundle(tmp_gene_dir) ||
             error("transcript_query did not create a valid Ensembl bundle at $(tmp_gene_dir). See $(stderr_log).")
@@ -1506,12 +1520,13 @@ function _generate_pid_candidate(target::ResolvedTarget,
         pid::Real,
         specieslist::Union{Nothing, AbstractString};
         overwrite::Bool = false,
-        timeout_seconds::Union{Nothing, Real} = nothing)
+        timeout_seconds::Union{Nothing, Real} = nothing,
+        thoraxe_fn::Function = ThorAxe.thoraxe)
     paths = _pid_sample_paths(workdir, pid, 0)
     fasta_path, sto_path,
     thoraxe_dir = _run_thoraxe_pid_msa(
         target, input_dir, workdir, pid, specieslist, 0;
-        overwrite, timeout_seconds, keep_thoraxe_dir = true)
+        overwrite, timeout_seconds, keep_thoraxe_dir = true, thoraxe_fn)
     msa,
     species = assemble_transcript_msa(thoraxe_dir,
         target.ensembl_gene_id, target.transcript_id)
@@ -1601,10 +1616,12 @@ function _score_pid_candidate(target::ResolvedTarget,
         sample_seed::UInt64,
         metadata,
         overwrite::Bool = false,
-        timeout_seconds::Union{Nothing, Real} = nothing)
+        timeout_seconds::Union{Nothing, Real} = nothing,
+        thoraxe_fn::Function = ThorAxe.thoraxe,
+        identity_fn::Function = compute_identity_against_reference)
     candidate = merge(
         _generate_pid_candidate(target, input_dir, workdir, pid, specieslist;
-            overwrite, timeout_seconds),
+            overwrite, timeout_seconds, thoraxe_fn),
         (; workdir))
     validation = _candidate_msa0_validation(target, candidate.msa, pid, workdir)
     if !validation.eligible
@@ -1634,9 +1651,9 @@ function _score_pid_candidate(target::ResolvedTarget,
         isfile(species_file) || continue
         _run_thoraxe_pid_msa(
             target, input_dir, workdir, pid, species_file, sample_idx;
-            overwrite, timeout_seconds)
+            overwrite, timeout_seconds, thoraxe_fn)
         isfile(sample_paths.fasta_path) || continue
-        identity = compute_identity_against_reference(
+        identity = identity_fn(
             candidate.fasta_path, sample_paths.fasta_path;
             logs_dir = joinpath(_thoraxe_logs_dir(workdir), "hhalign",
                 format_pid_dir(pid)),
@@ -1981,14 +1998,16 @@ function _resolve_thoraxe_species_filters(target::ResolvedTarget,
         orthology::AbstractString,
         cached_thoraxe_input_dir::Union{Nothing, AbstractString},
         specieslist_filter::Bool,
-        biomart_datasets_filter::Bool)
+        biomart_datasets_filter::Bool;
+        specieslist_resolver::Function = _resolve_effective_specieslist,
+        biomart_resolver::Function = _resolve_biomart_datasets_specieslist)
     species_filter = if cached_thoraxe_input_dir === nothing && specieslist_filter
-        _resolve_effective_specieslist(target, specieslist, orthology)
+        specieslist_resolver(target, specieslist, orthology)
     else
         (specieslist = _normalized_specieslist(specieslist), warnings = String[])
     end
     biomart_filter = if cached_thoraxe_input_dir === nothing && biomart_datasets_filter
-        _resolve_biomart_datasets_specieslist(target, species_filter.specieslist)
+        biomart_resolver(target, species_filter.specieslist)
     else
         (specieslist = species_filter.specieslist, warnings = String[])
     end
@@ -2088,7 +2107,9 @@ function _score_pid_candidates(target::ResolvedTarget,
         pid_sample_fraction::Real,
         sample_seed::UInt64,
         overwrite::Bool,
-        timeout_seconds::Union{Nothing, Real})
+        timeout_seconds::Union{Nothing, Real},
+        thoraxe_fn::Function = ThorAxe.thoraxe,
+        identity_fn::Function = compute_identity_against_reference)
     score_rows = NamedTuple[]
     for (pid_order, pid) in enumerate(Float64.(pid_thresholds))
         push!(score_rows,
@@ -2099,7 +2120,9 @@ function _score_pid_candidates(target::ResolvedTarget,
                 sample_seed,
                 metadata,
                 overwrite,
-                timeout_seconds))
+                timeout_seconds,
+                thoraxe_fn,
+                identity_fn))
     end
     return score_rows
 end
