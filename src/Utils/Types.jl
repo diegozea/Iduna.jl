@@ -32,6 +32,7 @@ Base.@kwdef struct SeedSelection
     mean_identity::Union{Missing, Float64}
     stockholm_path::String
     fasta_path::Union{Nothing, String} = nothing
+    s_exon_blocks_tsv::Union{Nothing, String} = nothing
     summary_path::String
     used_fallback_dir::Bool = false
     workdir::Union{Nothing, String} = nothing
@@ -73,6 +74,7 @@ Base.@kwdef struct ExpansionResult
     full_stockholm::String
     match_stockholm::String
     a3m_path::String
+    s_exon_blocks_tsv::Union{Nothing, String} = nothing
     db_dir::String
     hmm_dir::String
     logs_dir::String

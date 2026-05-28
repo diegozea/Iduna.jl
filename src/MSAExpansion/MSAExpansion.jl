@@ -7,11 +7,13 @@ import SHA
 
 using Dates: UTC, now
 using MIToS.MSA: A3M, AbstractMultipleSequenceAlignment, FASTA, Stockholm,
-                 nsequences, read_file, sequencenames, write_file
+                 getannotcolumn, ncolumns, nsequences, read_file, sequencenames,
+                 write_file
 
 using ..Utils: ExpansionResult, ResolvedTarget, SeedSelection, _resolve_artifact_path,
                ensure_mmseqs_db, format_pid, format_pid_dir, run_logged, safe_rm,
-               write_fasta, write_json
+               s_exon_code_map, s_exon_codes, set_s_exon_annotations!, write_fasta,
+               write_json, write_s_exon_blocks_tsv
 
 export expand_msa,
        normalize_stockholm_annotations!,
@@ -34,6 +36,7 @@ function _expansion_output_paths(run_dir::AbstractString,
         full_stockholm = joinpath(expanded_dir, "$(transcript_id)_full.sto"),
         match_stockholm = joinpath(expanded_dir, "$(transcript_id)_matchonly.sto"),
         a3m_path = joinpath(expanded_dir, "$(transcript_id)_expanded.a3m"),
+        s_exon_blocks_tsv = joinpath(expanded_dir, "$(transcript_id)_s_exon_blocks.tsv"),
         hits_fasta = joinpath(expanded_dir, "$(transcript_id)_hits_raw.fasta")
     )
     if !centroids
@@ -47,6 +50,8 @@ function _expansion_output_paths(run_dir::AbstractString,
             centroid_match_stockholm = joinpath(
                 centroid_dir, "$(transcript_id)_centroids_matchonly.sto"),
             centroid_a3m_path = joinpath(centroid_dir, "$(transcript_id)_centroids.a3m"),
+            centroid_s_exon_blocks_tsv = joinpath(
+                centroid_dir, "$(transcript_id)_centroids_s_exon_blocks.tsv"),
             centroid_hits_fasta = joinpath(
                 centroid_dir, "$(transcript_id)_centroid_hits_raw.fasta")
         ))
@@ -55,7 +60,10 @@ end
 _step_state_path(run_dir::AbstractString) = joinpath(run_dir, _STEP_STATE_FILE)
 
 function _outputs_exist(outputs::NamedTuple)
-    all(path -> path isa AbstractString && isfile(path), values(outputs))
+    all(pairs(outputs)) do (name, path)
+        endswith(String(name), "s_exon_blocks_tsv") ||
+            (path isa AbstractString && isfile(path))
+    end
 end
 
 function _relative_output_paths(outputs::NamedTuple, run_dir::AbstractString)
@@ -214,6 +222,11 @@ function _write_cache_warning(logs_dir::AbstractString, warning::AbstractString)
     return nothing
 end
 
+function _is_s_exon_provenance_stockholm_line(line::AbstractString)
+    return startswith(line, "#=GC SExonCode") ||
+           startswith(line, "#=GF SExonCodeMap")
+end
+
 function prepare_stockholm_for_mmseqs(source::AbstractString, dest::AbstractString)
     mkpath(dirname(dest))
     lines = readlines(source)
@@ -222,6 +235,7 @@ function prepare_stockholm_for_mmseqs(source::AbstractString, dest::AbstractStri
         # MMseqs expects a complete Stockholm file with header and terminator.
         has_header || println(io, "# STOCKHOLM 1.0")
         for line in lines
+            _is_s_exon_provenance_stockholm_line(line) && continue
             println(io, line)
         end
         if isempty(lines) || strip(lines[end]) != "//"
@@ -432,6 +446,139 @@ function _reorder_alignment(msa::AbstractMultipleSequenceAlignment, priority::Ve
     return msa[vcat(priority_idx, remaining), :]
 end
 
+function _is_rf_match(rf_char::Char)
+    return !(rf_char == '.' || rf_char == '-' || rf_char == ' ')
+end
+
+function _rf_match_state_mask(rf::AbstractString, ncols::Integer)
+    if isempty(rf)
+        return nothing
+    end
+    length(rf) == ncols ||
+        error("RF annotation has $(length(rf)) characters, but the MSA has $(ncols) columns.")
+    return [_is_rf_match(rf_char) for rf_char in rf]
+end
+
+function _aligned_match_state_mask(aligned::AbstractString, ncols::Integer)
+    if isempty(aligned)
+        return nothing
+    end
+    length(aligned) == ncols ||
+        error("Aligned annotation has $(length(aligned)) characters, but the MSA has $(ncols) columns.")
+    return [aligned_char == '1' ? true :
+            aligned_char == '0' ? false :
+            error("Aligned annotation contains $(repr(aligned_char)); expected '0' or '1'.")
+            for aligned_char in aligned]
+end
+
+function _match_state_mask(msa::AbstractMultipleSequenceAlignment;
+        default_aligned::Bool)
+    ncols = ncolumns(msa)
+    aligned_mask = _aligned_match_state_mask(getannotcolumn(msa, "Aligned", ""), ncols)
+    aligned_mask === nothing || return aligned_mask
+    rf_mask = _rf_match_state_mask(getannotcolumn(msa, "RF", ""), ncols)
+    rf_mask === nothing || return rf_mask
+    return fill(default_aligned, ncols)
+end
+
+function _project_s_exon_codes(msa::AbstractMultipleSequenceAlignment,
+        seed_match_codes::AbstractString)
+    match_mask = _match_state_mask(msa; default_aligned = false)
+    seed_match_chars = collect(seed_match_codes)
+    io = IOBuffer(; sizehint = ncolumns(msa))
+    seed_idx = 0
+    for is_match in match_mask
+        if is_match
+            seed_idx += 1
+            write(io, seed_idx <= length(seed_match_chars) ? seed_match_chars[seed_idx] :
+                      '.')
+        else
+            write(io, '.')
+        end
+    end
+    return String(take!(io))
+end
+
+function _seed_match_s_exon_codes(seed_codes::AbstractString,
+        annotated_seed::AbstractMultipleSequenceAlignment)
+    match_mask = _match_state_mask(annotated_seed; default_aligned = true)
+    length(match_mask) == length(seed_codes) ||
+        error("Annotated seed match mask has $(length(match_mask)) characters, but SExonCode has $(length(seed_codes)) characters.")
+    io = IOBuffer(; sizehint = length(seed_codes))
+    for (is_match, code) in zip(match_mask, seed_codes)
+        is_match && write(io, code)
+    end
+    return String(take!(io))
+end
+
+function _with_seed_match_s_exon_codes(archived, annotated_seed_path::AbstractString)
+    annotated_seed = read_file(annotated_seed_path, Stockholm; keepinserts = true)
+    return merge(archived,
+        (;
+            seed_match_s_exon_codes = _seed_match_s_exon_codes(
+            archived.seed_s_exon_codes, annotated_seed)))
+end
+
+function _restore_s_exon_annotations!(msa::AbstractMultipleSequenceAlignment, archived)
+    seed_match_codes = :seed_match_s_exon_codes in propertynames(archived) ?
+                       archived.seed_match_s_exon_codes : archived.seed_s_exon_codes
+    codes = _project_s_exon_codes(msa, seed_match_codes)
+    set_s_exon_annotations!(msa, codes, archived.seed_s_exon_code_map)
+    return msa
+end
+
+function _write_expansion_s_exon_blocks(path::AbstractString,
+        full_alignment::AbstractMultipleSequenceAlignment,
+        match_alignment::AbstractMultipleSequenceAlignment,
+        pid::Real)
+    write_s_exon_blocks_tsv(path, match_alignment;
+        alignment = "expanded_match",
+        pid = Float64(pid))
+    write_s_exon_blocks_tsv(path, full_alignment;
+        alignment = "expanded_full",
+        pid = Float64(pid),
+        append = true)
+    return path
+end
+
+function _ensure_alignment_s_exon_blocks(path::AbstractString,
+        full_stockholm::AbstractString,
+        match_stockholm::AbstractString,
+        pid::Real;
+        full_label::AbstractString,
+        match_label::AbstractString)
+    isfile(path) && return path
+    (isfile(full_stockholm) && isfile(match_stockholm)) || return path
+    full_alignment = read_file(full_stockholm, Stockholm; keepinserts = true)
+    match_alignment = read_file(match_stockholm, Stockholm; keepinserts = true)
+    write_s_exon_blocks_tsv(path, match_alignment;
+        alignment = match_label,
+        pid = Float64(pid))
+    write_s_exon_blocks_tsv(path, full_alignment;
+        alignment = full_label,
+        pid = Float64(pid),
+        append = true)
+    return path
+end
+
+function _ensure_expansion_s_exon_blocks(outputs::NamedTuple, pid::Real)
+    _ensure_alignment_s_exon_blocks(outputs.s_exon_blocks_tsv,
+        outputs.full_stockholm,
+        outputs.match_stockholm,
+        pid;
+        full_label = "expanded_full",
+        match_label = "expanded_match")
+    if :centroid_s_exon_blocks_tsv in propertynames(outputs)
+        _ensure_alignment_s_exon_blocks(outputs.centroid_s_exon_blocks_tsv,
+            outputs.centroid_full_stockholm,
+            outputs.centroid_match_stockholm,
+            pid;
+            full_label = "centroid_full",
+            match_label = "centroid_match")
+    end
+    return outputs.s_exon_blocks_tsv
+end
+
 function _collect_hits(hits_tsv::AbstractString, seed_set::Set{String})
     all_hits = Tuple{String, String}[]
     filtered_hits = Tuple{String, String}[]
@@ -488,6 +635,7 @@ function _write_centroid_msa(transcript_id::AbstractString,
         sanitized_seed::AbstractString,
         hmm_path::AbstractString,
         annotated_seed::AbstractString,
+        archived,
         logs_dir::AbstractString)
     mkpath(centroid_dir)
 
@@ -529,10 +677,21 @@ function _write_centroid_msa(transcript_id::AbstractString,
         full_alignment = _reorder_alignment(read_file(aligned_sto, Stockholm; keepinserts = true), seed_names)
         match_alignment = _reorder_alignment(
             read_file(match_stockholm, Stockholm; keepinserts = true), seed_names)
+        _restore_s_exon_annotations!(full_alignment, archived)
+        _restore_s_exon_annotations!(match_alignment, archived)
         write_file(full_stockholm, full_alignment, Stockholm)
         write_file(match_stockholm, match_alignment, Stockholm)
         write_file(joinpath(centroid_dir, "$(transcript_id)_centroids.a3m"),
             match_alignment, A3M)
+        s_exon_blocks_tsv = joinpath(
+            centroid_dir, "$(transcript_id)_centroids_s_exon_blocks.tsv")
+        write_s_exon_blocks_tsv(s_exon_blocks_tsv, match_alignment;
+            alignment = "centroid_match",
+            pid = Float64(archived.seed_pid))
+        write_s_exon_blocks_tsv(s_exon_blocks_tsv, full_alignment;
+            alignment = "centroid_full",
+            pid = Float64(archived.seed_pid),
+            append = true)
     end
     return nothing
 end
@@ -592,6 +751,7 @@ end
 
 function _cached_expansion_result(ctx, workdir::AbstractString)
     counts = _cached_hit_counts(ctx.outputs.hits_fasta, _seed_id_set(ctx.seed_stockholm))
+    _ensure_expansion_s_exon_blocks(ctx.outputs, ctx.identity.seed.pid)
     return ExpansionResult(;
         run_dir = ctx.run_dir,
         seed_stockholm = ctx.seed_stockholm,
@@ -600,6 +760,7 @@ function _cached_expansion_result(ctx, workdir::AbstractString)
         full_stockholm = ctx.outputs.full_stockholm,
         match_stockholm = ctx.outputs.match_stockholm,
         a3m_path = ctx.outputs.a3m_path,
+        s_exon_blocks_tsv = ctx.outputs.s_exon_blocks_tsv,
         db_dir = ctx.db_dir,
         hmm_dir = ctx.hmm_dir,
         logs_dir = ctx.logs_dir,
@@ -632,11 +793,16 @@ function _archive_expansion_seed(seed::SeedSelection, ctx)
         joinpath(ctx.seed_dir, "$(seed_label)_mmseqs.sto"))
     seed_alignment = read_file(archived_seed_sto, Stockholm; keepinserts = true)
     seed_names = String.(sequencenames(seed_alignment))
+    seed_s_exon_codes = s_exon_codes(seed_alignment)
+    seed_s_exon_code_map = sort!(collect(s_exon_code_map(seed_alignment)); by = first)
     return (;
         archived_seed_sto,
         archived_seed_fasta,
         sanitized_seed,
         seed_names,
+        seed_pid = seed.pid,
+        seed_s_exon_codes,
+        seed_s_exon_code_map,
         seed_set = Set(_normalize_id.(seed_names))
     )
 end
@@ -697,7 +863,9 @@ function _write_expansion_alignment_outputs!(target::ResolvedTarget,
         unpack_dir::AbstractString,
         aligned_sto::AbstractString,
         seed_names::Vector{String},
-        raw_hits_fasta::AbstractString)
+        raw_hits_fasta::AbstractString,
+        archived,
+        pid::Real)
     match_stockholm = joinpath(unpack_dir, "$(target.transcript_id)_matchonly.sto")
     open(match_stockholm, "w") do io
         run(pipeline(`$(HMMER_jll.esl_alimask()) --rf-is-mask $aligned_sto`, stdout = io))
@@ -709,14 +877,19 @@ function _write_expansion_alignment_outputs!(target::ResolvedTarget,
         read_file(aligned_sto, Stockholm; keepinserts = true), seed_names)
     match_alignment = _reorder_alignment(
         read_file(match_stockholm, Stockholm; keepinserts = true), seed_names)
+    _restore_s_exon_annotations!(full_alignment, archived)
+    _restore_s_exon_annotations!(match_alignment, archived)
     write_file(full_stockholm, full_alignment, Stockholm)
     write_file(match_stockholm, match_alignment, Stockholm)
 
     a3m_path = joinpath(unpack_dir, "$(target.transcript_id)_expanded.a3m")
     write_file(a3m_path, match_alignment, A3M)
+    s_exon_blocks_tsv = joinpath(unpack_dir, "$(target.transcript_id)_s_exon_blocks.tsv")
+    _write_expansion_s_exon_blocks(
+        s_exon_blocks_tsv, full_alignment, match_alignment, pid)
     hits_copy = joinpath(unpack_dir, "$(target.transcript_id)_hits_raw.fasta")
     cp(raw_hits_fasta, hits_copy; force = true)
-    return (; match_stockholm, full_stockholm, a3m_path, hits_copy)
+    return (; match_stockholm, full_stockholm, a3m_path, s_exon_blocks_tsv, hits_copy)
 end
 
 function _write_centroids_if_requested!(target::ResolvedTarget,
@@ -738,6 +911,7 @@ function _write_centroids_if_requested!(target::ResolvedTarget,
         archived.sanitized_seed,
         hmm_paths.hmm_path,
         hmm_paths.annotated_seed,
+        archived,
         ctx.logs_dir)
     return nothing
 end
@@ -764,6 +938,7 @@ function _run_expansion_workflow!(target::ResolvedTarget,
             hits_tsv, ctx.run_dir, ctx.hmm_dir, archived.seed_set)
         hmm_paths = _build_seed_hmm!(
             ctx.seed_dir, archived.sanitized_seed, hmmbuild_symfrac, ctx.logs_dir)
+        archived = _with_seed_match_s_exon_codes(archived, hmm_paths.annotated_seed)
         aligned_sto = _align_expansion_hits!(ctx.hmm_dir,
             hmm_paths.annotated_seed,
             archived.sanitized_seed,
@@ -773,7 +948,8 @@ function _run_expansion_workflow!(target::ResolvedTarget,
             archived.seed_set,
             ctx.logs_dir)
         output_paths = _write_expansion_alignment_outputs!(
-            target, ctx.unpack_dir, aligned_sto, archived.seed_names, hits.raw_hits_fasta)
+            target, ctx.unpack_dir, aligned_sto, archived.seed_names,
+            hits.raw_hits_fasta, archived, archived.seed_pid)
         _write_centroids_if_requested!(
             target, mmseqs_db, db_paths, tmp_dir, ctx, archived, hmm_paths, centroids)
         return (;
@@ -796,6 +972,7 @@ function _finished_expansion_result(ctx,
         full_stockholm = run_outputs.output_paths.full_stockholm,
         match_stockholm = run_outputs.output_paths.match_stockholm,
         a3m_path = run_outputs.output_paths.a3m_path,
+        s_exon_blocks_tsv = run_outputs.output_paths.s_exon_blocks_tsv,
         db_dir = ctx.db_dir,
         hmm_dir = ctx.hmm_dir,
         logs_dir = ctx.logs_dir,

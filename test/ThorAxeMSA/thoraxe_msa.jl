@@ -4,20 +4,32 @@
         msa_dir = joinpath(thoraxe, "msa")
         mkpath(msa_dir)
         write(joinpath(thoraxe, "path_table.csv"),
-            "TranscriptIDCluster,Path\nENST00000000001,start/1_0/2_0/stop\n")
+            "TranscriptIDCluster,Path\nENST00000000001/ENST00000000002,start/1_0/2_0/stop\n")
         write(joinpath(thoraxe, "s_exon_table.csv"),
             "GeneID,Species\nENSG00000000001,homo_sapiens\nORTHO1,mus_musculus\n")
         write(joinpath(msa_dir, "msa_s_exon_1_0.fasta"),
-            ">ENSG00000000001\nAA\n>ORTHO1\nAB\n")
+            ">ENSG00000000001\nA-A.\n>ORTHO1\nABCD\n")
         write(joinpath(msa_dir, "msa_s_exon_2_0.fasta"),
             ">ENSG00000000001\nCC\n>ORTHO1\nCD\n")
+        phylosofs_dir = joinpath(thoraxe, "phylosofs")
+        mkpath(phylosofs_dir)
+        write(joinpath(phylosofs_dir, "s_exons.tsv"), "1_0\ta\n2_0\t=\n")
+        write(joinpath(phylosofs_dir, "transcripts.pir"), """
+        >P1;ENSG00000000001 ENST00000000001/ENST00000000002 a=
+        aa==
+        AACC*
+        """)
 
         msa,
         species = Iduna.ThorAxeMSA.assemble_transcript_msa(
-            thoraxe, "ENSG00000000001.1", "ENST00000000001.1")
+            thoraxe, "ENSG00000000001.1", "ENST00000000002.1")
         @test Iduna.ThorAxeMSA.nsequences(msa) == 2
         name = first(Iduna.ThorAxeMSA.sequencenames(msa))
-        @test length(Iduna.ThorAxeMSA.stringsequence(msa, name)) == 4
+        @test length(Iduna.ThorAxeMSA.stringsequence(msa, name)) == 6
+        @test Iduna.Utils.s_exon_codes(msa) == "aaaa=="
+        @test Iduna.ThorAxeMSA._s_exon_symbol_for_reference_residue('-', 'a') == 'a'
+        @test Iduna.ThorAxeMSA._s_exon_symbol_for_reference_residue('.', 'a') == '.'
+        @test Iduna.Utils.s_exon_code_map(msa) == Dict('a' => "1_0", '=' => "2_0")
         @test species == ["homo_sapiens", "mus_musculus"]
 
         uniprot = joinpath(tmp, "uniprot.fasta")
@@ -86,6 +98,95 @@
             uniprot_sequence_path = uniprot)
         @test_throws ErrorException Iduna.ThorAxeMSA._validate_transcript_translation(
             missing_reference, msa)
+    end
+
+    mktempdir() do tmp
+        thoraxe = joinpath(tmp, "thoraxe")
+        msa_dir = joinpath(thoraxe, "msa")
+        mkpath(msa_dir)
+        write(joinpath(thoraxe, "path_table.csv"),
+            "TranscriptIDCluster,Path\nENST00000000001,start/0_0/1_0/stop\n")
+        write(joinpath(thoraxe, "s_exon_table.csv"),
+            "GeneID,Species,TranscriptIDCluster,S_exonID,S_exon_Sequence\n" *
+            "ENSG00000000001,homo_sapiens,ENST00000000001,0_0,MM\n" *
+            "ENSG00000000001,homo_sapiens,ENST00000000001,1_0,AA\n" *
+            "ORTHO1,mus_musculus,ORTHO1,1_0,AB\n")
+        write(joinpath(msa_dir, "msa_s_exon_1_0.fasta"),
+            ">ENSG00000000001\nAA\n>ORTHO1\nAB\n")
+        phylosofs_dir = joinpath(thoraxe, "phylosofs")
+        mkpath(phylosofs_dir)
+        write(joinpath(phylosofs_dir, "s_exons.tsv"), "1_0\ta\n")
+        write(joinpath(phylosofs_dir, "transcripts.pir"), """
+        >P1;ENSG00000000001 ENST00000000001 za
+        zzaa
+        MMAA*
+        """)
+
+        msa,
+        species = Iduna.ThorAxeMSA.assemble_transcript_msa(
+            thoraxe, "ENSG00000000001.1", "ENST00000000001.1")
+        reference = Iduna.ThorAxeMSA.resolve_sequence_name(msa, "ENSG00000000001")
+        @test Iduna.ThorAxeMSA.stringsequence(msa, reference) == "MMAA"
+        codes = Iduna.Utils.s_exon_codes(msa)
+        @test length(codes) == 4
+        @test codes[3:4] == "aa"
+        @test codes[1] == codes[2]
+        @test codes[1] != 'a'
+        @test Iduna.Utils.s_exon_code_map(msa)[codes[1]] == "0_0"
+        @test Iduna.Utils.s_exon_code_map(msa)['a'] == "1_0"
+        @test species == ["homo_sapiens", "mus_musculus"]
+    end
+
+    mktempdir() do tmp
+        thoraxe = joinpath(tmp, "thoraxe")
+        msa_dir = joinpath(thoraxe, "msa")
+        mkpath(msa_dir)
+        write(joinpath(thoraxe, "path_table.csv"),
+            "TranscriptIDCluster,Path\nENST00000000001,start/1_0/0_1/stop\n")
+        write(joinpath(thoraxe, "s_exon_table.csv"),
+            "GeneID,Species,TranscriptIDCluster,S_exonID,S_exon_Sequence\n" *
+            "ENSG00000000001,homo_sapiens,ENST00000000001,1_0,AA\n" *
+            "ENSG00000000001,homo_sapiens,ENST00000000001,0_1,\n")
+        write(joinpath(msa_dir, "msa_s_exon_1_0.fasta"),
+            ">ENSG00000000001\nAA\n>ORTHO1\nAB\n")
+        phylosofs_dir = joinpath(thoraxe, "phylosofs")
+        mkpath(phylosofs_dir)
+        write(joinpath(phylosofs_dir, "s_exons.tsv"), "1_0\ta\n0_1\tb\n")
+        write(joinpath(phylosofs_dir, "transcripts.pir"), """
+        >P1;ENSG00000000001 ENST00000000001 ab
+        aa
+        AA*
+        """)
+
+        @test Iduna.ThorAxeMSA._s_exon_sequence_value(missing) == ""
+        @test Iduna.ThorAxeMSA._s_exon_sequence_value("") == ""
+        @test Iduna.ThorAxeMSA._s_exon_sequence_value("A*") == "A"
+        msa,
+        species = Iduna.ThorAxeMSA.assemble_transcript_msa(
+            thoraxe, "ENSG00000000001.1", "ENST00000000001.1")
+        reference = Iduna.ThorAxeMSA.resolve_sequence_name(msa, "ENSG00000000001")
+        @test Iduna.ThorAxeMSA.stringsequence(msa, reference) == "AA"
+        @test Iduna.Utils.s_exon_codes(msa) == "aa"
+        @test Iduna.Utils.s_exon_code_map(msa)['a'] == "1_0"
+        @test Iduna.Utils.s_exon_code_map(msa)['b'] == "0_1"
+        @test species == ["homo_sapiens", "unknown"]
+    end
+
+    mktempdir() do tmp
+        thoraxe = joinpath(tmp, "thoraxe")
+        msa_dir = joinpath(thoraxe, "msa")
+        mkpath(msa_dir)
+        write(joinpath(thoraxe, "path_table.csv"),
+            "TranscriptIDCluster,Path\nENST00000000001,start/1_0/stop\n")
+        write(joinpath(msa_dir, "msa_s_exon_1_0.fasta"),
+            ">ENSG00000000001\nAA\n>ORTHO1\nAB\n")
+
+        msa,
+        species = Iduna.ThorAxeMSA.assemble_transcript_msa(
+            thoraxe, "ENSG00000000001.1", "ENST00000000001.1")
+        @test Iduna.ThorAxeMSA.nsequences(msa) == 2
+        @test !Iduna.Utils.has_s_exon_annotations(msa)
+        @test species == ["unknown", "unknown"]
     end
 
     mktempdir() do tmp
@@ -454,6 +555,7 @@
             fasta = joinpath(tmp, "candidate.fasta")
             write(fasta, ">ENSG\nA-C\n>ORTHO1\nABC\n")
             msa = Iduna.ThorAxeMSA.read_file(fasta, Iduna.ThorAxeMSA.FASTA)
+            Iduna.Utils.set_s_exon_annotations!(msa, "000", ['0' => "1_0"])
             paths = Iduna.ThorAxeMSA._pid_sample_paths(tmp, 60.0, 0)
             Iduna.ThorAxeMSA._write_candidate_sample_inputs(
                 paths, msa, ["homo_sapiens", "mus_musculus"], [1, 2])
@@ -474,6 +576,12 @@
             thoraxe_dir = Iduna.ThorAxeMSA._pid_sample_thoraxe_dir(tmp, 60.0, 0)
             mkpath(thoraxe_dir)
             write(joinpath(thoraxe_dir, "path_table.csv"), "TranscriptIDCluster,Path\n")
+            @test !Iduna.ThorAxeMSA._has_phylosofs_outputs(thoraxe_dir)
+            phylosofs_dir = joinpath(thoraxe_dir, "phylosofs")
+            mkpath(phylosofs_dir)
+            write(joinpath(phylosofs_dir, "s_exons.tsv"), "1_0\t0\n")
+            write(joinpath(phylosofs_dir, "transcripts.pir"), ">P1;ENST\n0\nA*\n")
+            @test Iduna.ThorAxeMSA._has_phylosofs_outputs(thoraxe_dir)
             @test Iduna.ThorAxeMSA._run_thoraxe_pid_msa(
                 Iduna.ResolvedTarget(;
                     input_id = "ENST",
@@ -483,6 +591,32 @@
                 joinpath(tmp, "input"), tmp, 60.0, nothing, 0;
                 keep_thoraxe_dir = true) ==
                   (paths.fasta_path, paths.stockholm_path, thoraxe_dir)
+
+            stale_paths = Iduna.ThorAxeMSA._pid_sample_paths(tmp, 80.0, 0)
+            mkpath(dirname(stale_paths.fasta_path))
+            Iduna.ThorAxeMSA.write_file(stale_paths.fasta_path, msa, Iduna.ThorAxeMSA.FASTA)
+            Iduna.ThorAxeMSA.write_file(
+                stale_paths.stockholm_path, msa, Iduna.ThorAxeMSA.Stockholm)
+            stale_thoraxe_dir = Iduna.ThorAxeMSA._pid_sample_thoraxe_dir(tmp, 80.0, 0)
+            mkpath(stale_thoraxe_dir)
+            write(joinpath(stale_thoraxe_dir, "path_table.csv"), "TranscriptIDCluster,Path\n")
+            @test_throws Exception Iduna.ThorAxeMSA._run_thoraxe_pid_msa(
+                Iduna.ResolvedTarget(;
+                    input_id = "ENST",
+                    input_kind = :ensembl_transcript,
+                    ensembl_gene_id = "ENSG",
+                    transcript_id = "ENST"),
+                joinpath(tmp, "missing_input"), tmp, 80.0, nothing, 0;
+                keep_thoraxe_dir = true)
+            @test_throws Exception Iduna.ThorAxeMSA._run_thoraxe_pid_msa(
+                Iduna.ResolvedTarget(;
+                    input_id = "ENST",
+                    input_kind = :ensembl_transcript,
+                    ensembl_gene_id = "ENSG",
+                    transcript_id = "ENST"),
+                joinpath(tmp, "missing_input"), tmp, 60.0, nothing, 0;
+                overwrite = true,
+                keep_thoraxe_dir = true)
 
             positions,
             codes = Iduna.ThorAxeMSA._get_codes(
@@ -898,6 +1032,7 @@ TableSet\tptroglodytes_gene_ensembl\tChimpanzee genes (Pan_tro_3.0)\t1
             write(joinpath(tmp, "seed.fasta"), ">ENSG00000000001\nAA\n>ORTHO1\nAB\n")
             seed_msa = Iduna.ThorAxeMSA.read_file(
                 joinpath(tmp, "seed.fasta"), Iduna.ThorAxeMSA.FASTA)
+            Iduna.Utils.set_s_exon_annotations!(seed_msa, "00", ['0' => "1_0"])
             mkpath(dirname(paths.fasta_path))
             Iduna.ThorAxeMSA.write_file(paths.fasta_path, seed_msa, Iduna.ThorAxeMSA.FASTA)
             Iduna.ThorAxeMSA.write_file(
@@ -934,6 +1069,17 @@ TableSet\tptroglodytes_gene_ensembl\tChimpanzee genes (Pan_tro_3.0)\t1
                 fasta_path = paths.fasta_path,
                 summary_path)
             Iduna.ThorAxeMSA._mark_selected_candidates!(summary_path, [seed])
+            @test Iduna.ThorAxeMSA._cached_selected_seeds(
+                summary_path, workdir, metadata) !== nothing
+
+            stale_seed = Iduna.ThorAxeMSA.read_file(
+                joinpath(tmp, "seed.fasta"), Iduna.ThorAxeMSA.FASTA)
+            Iduna.ThorAxeMSA.write_file(
+                paths.stockholm_path, stale_seed, Iduna.ThorAxeMSA.Stockholm)
+            @test Iduna.ThorAxeMSA._cached_selected_seeds(
+                summary_path, workdir, metadata) === nothing
+            Iduna.ThorAxeMSA.write_file(
+                paths.stockholm_path, seed_msa, Iduna.ThorAxeMSA.Stockholm)
 
             result = Iduna.ThorAxeMSA.build_thoraxe_msa(target, workdir;
                 pid_thresholds = [10.0],

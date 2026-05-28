@@ -187,6 +187,8 @@ import JSON
                     "pid_10.00", "candidate_msa_full.sto"),
                 fasta_path = joinpath(workdir, "thoraxe_msa", "candidates", "pid_10.00",
                     "candidate_msa_full.fasta"),
+                s_exon_blocks_tsv = joinpath(workdir, "thoraxe_msa", "candidates",
+                    "pid_10.00", "candidate_msa_full_s_exon_blocks.tsv"),
                 summary_path = joinpath(workdir, "thoraxe_msa", "candidate_summary.csv"))
             abs_thoraxe = Iduna.ThorAxeMSAResult(;
                 input_dir = joinpath(workdir, "thoraxe_input"),
@@ -212,6 +214,8 @@ import JSON
                     expansion_dir, "expanded_msa", "$(transcript)_matchonly.sto"),
                 a3m_path = joinpath(
                     expansion_dir, "expanded_msa", "$(transcript)_expanded.a3m"),
+                s_exon_blocks_tsv = joinpath(
+                    expansion_dir, "expanded_msa", "$(transcript)_s_exon_blocks.tsv"),
                 db_dir = joinpath(expansion_dir, "dbs"),
                 hmm_dir = joinpath(expansion_dir, "hmm"),
                 logs_dir = joinpath(expansion_dir, "logs"))
@@ -237,10 +241,16 @@ import JSON
             @test result.thoraxe_msa.seeds[1].stockholm_path ==
                   joinpath("thoraxe_msa", "candidates", "pid_10.00",
                 "candidate_msa_full.sto")
+            @test result.thoraxe_msa.seeds[1].s_exon_blocks_tsv ==
+                  joinpath("thoraxe_msa", "candidates", "pid_10.00",
+                "candidate_msa_full_s_exon_blocks.tsv")
             @test result.thoraxe_msa.seeds[1].workdir == result.workdir
             @test result.expansions[1].match_stockholm == joinpath(
                 "expansion", gene, transcript, "expanded_msa",
                 "$(transcript)_matchonly.sto")
+            @test result.expansions[1].s_exon_blocks_tsv == joinpath(
+                "expansion", gene, transcript, "expanded_msa",
+                "$(transcript)_s_exon_blocks.tsv")
             @test result.expansions[1].workdir == result.workdir
             @test result.validations[1].stats_path ==
                   joinpath("validation", "pid_10.00", "stats.csv")
@@ -253,6 +263,8 @@ import JSON
                   joinpath("thoraxe_msa", "candidate_summary.csv")
             @test written["expansions"][1]["match_stockholm"] ==
                   result.expansions[1].match_stockholm
+            @test written["expansions"][1]["s_exon_blocks_tsv"] ==
+                  result.expansions[1].s_exon_blocks_tsv
             @test written["validations"][1]["stats_path"] ==
                   joinpath("validation", "pid_10.00", "stats.csv")
         end
@@ -491,8 +503,10 @@ import JSON
             @test failed["failed_stage"] == "thoraxe_msa"
             @test failed["exception"]["type"] == "Iduna.ThorAxeMSA._CommandTimeoutError"
             @test failed["exception"]["command"] == "thoraxe --example"
-            @test failed["exception"]["stdout_log"] == joinpath("logs", "thoraxe", "stdout.log")
-            @test failed["exception"]["stderr_log"] == joinpath("logs", "thoraxe", "stderr.log")
+            @test failed["exception"]["stdout_log"] ==
+                  joinpath("logs", "thoraxe", "stdout.log")
+            @test failed["exception"]["stderr_log"] ==
+                  joinpath("logs", "thoraxe", "stderr.log")
             @test occursin("timed out after 12.0 seconds", failed["exception"]["message"])
         end
     end

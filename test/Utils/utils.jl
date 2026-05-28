@@ -9,6 +9,36 @@
     @test Iduna.Utils.format_pid_dir(10) == "pid_10.00"
     @test Iduna.Utils.format_pid_dir(12.34) == "pid_12.34"
 
+    @testset "s-exon provenance annotations" begin
+        mktempdir() do tmp
+            sto = joinpath(tmp, "annotated.sto")
+            write(sto, """
+            # STOCKHOLM 1.0
+            #=GF SExonCodeMap "0"=>"1_0","β"=>"2_0","="=>"3_0"
+            seq1 ACDE
+            seq2 A-DE
+            #=GC SExonCode 00β=
+            //
+            """)
+            msa = Iduna.MSAExpansion.read_file(sto, Iduna.MSAExpansion.Stockholm;
+                keepinserts = true)
+            @test Iduna.Utils.s_exon_codes(msa) == "00β="
+            @test Iduna.Utils.s_exon_code_map(msa) ==
+                  Dict('0' => "1_0", 'β' => "2_0", '=' => "3_0")
+            @test Iduna.Utils.s_exon_codes(msa[:, [1, 3, 4]]) == "0β="
+
+            blocks = joinpath(tmp, "blocks.tsv")
+            Iduna.Utils.write_s_exon_blocks_tsv(blocks, msa;
+                alignment = "seed",
+                pid = 10.0)
+            @test read(blocks, String) ==
+                  "alignment\tpid\tcode\ts_exon_id\tstart_col\tend_col\tn_columns\n" *
+                  "seed\t10.0\t0\t1_0\t1\t2\t2\n" *
+                  "seed\t10.0\tβ\t2_0\t3\t3\t1\n" *
+                  "seed\t10.0\t=\t3_0\t4\t4\t1\n"
+        end
+    end
+
     plain = Iduna.Utils.HTTP.Response(200, Vector{UInt8}("plain body"))
     @test Iduna.Utils.decode_body(plain) == "plain body"
     gzip_body = UInt8[

@@ -5,7 +5,8 @@ using BioAlignments: AffineGapScoreModel, BLOSUM62, GlobalAlignment, alignment,
 using BioSequences: LongAA
 import HTTP
 import JSON
-using MIToS.MSA: AbstractMultipleSequenceAlignment, sequencenames
+using MIToS.MSA: AbstractMultipleSequenceAlignment, getannotcolumn, getannotfile,
+                 ncolumns, sequencenames, setannotcolumn!, setannotfile!
 using Printf: @sprintf
 
 include("Types.jl")
@@ -36,9 +37,21 @@ export DEFAULT_PID_THRESHOLDS,
        write_json,
        write_text,
        format_pid,
-       format_pid_dir
+       format_pid_dir,
+       S_EXON_CODE_FEATURE,
+       S_EXON_CODE_MAP_FEATURE,
+       S_EXON_MISSING_CODE,
+       s_exon_blocks_path,
+       s_exon_code_map,
+       s_exon_codes,
+       has_s_exon_annotations,
+       set_s_exon_annotations!,
+       write_s_exon_blocks_tsv
 
 const DEFAULT_PID_THRESHOLDS = Float64[10, 20, 30, 60, 80]
+const S_EXON_CODE_FEATURE = "SExonCode"
+const S_EXON_CODE_MAP_FEATURE = "SExonCodeMap"
+const S_EXON_MISSING_CODE = '.'
 const _PROTEIN_ALIGNMENT_SCORE_MODEL = AffineGapScoreModel(BLOSUM62, gap_open = -10, gap_extend = -1)
 const _TRANSIENT_HTTP_STATUSES = Set([429, 500, 502, 503, 504])
 
@@ -265,6 +278,127 @@ function write_json(path::AbstractString, obj)
     return path
 end
 
+function s_exon_blocks_path(stockholm_path::AbstractString)
+    root, _ = splitext(String(stockholm_path))
+    return string(root, "_s_exon_blocks.tsv")
+end
+
+function s_exon_codes(msa::AbstractMultipleSequenceAlignment;
+        feature::AbstractString = S_EXON_CODE_FEATURE)
+    codes = getannotcolumn(msa, String(feature), "")
+    if isempty(codes)
+        return repeat(string(S_EXON_MISSING_CODE), ncolumns(msa))
+    end
+    length(codes) == ncolumns(msa) ||
+        error("$(feature) has $(length(codes)) characters, but the MSA has $(ncolumns(msa)) columns.")
+    return String(codes)
+end
+
+function has_s_exon_annotations(msa::AbstractMultipleSequenceAlignment;
+        feature::AbstractString = S_EXON_CODE_FEATURE)
+    codes = getannotcolumn(msa, String(feature), "")
+    return !isempty(codes) && length(codes) == ncolumns(msa)
+end
+
+function s_exon_code_map(msa::AbstractMultipleSequenceAlignment;
+        feature::AbstractString = S_EXON_CODE_MAP_FEATURE)
+    raw = getannotfile(msa, String(feature), "")
+    map = Dict{Char, String}()
+    isempty(raw) && return map
+    pos = firstindex(raw)
+    for match in eachmatch(r"(\"(?:\\.|[^\"])*\")=>(\"(?:\\.|[^\"])*\")", raw)
+        match_start = match.offset
+        separator = pos == match_start ? "" : raw[pos:prevind(raw, match_start)]
+        all(==(','), separator) ||
+            error("Invalid $(feature) entry $(repr(raw)); expected quoted code=>s_exon_id pairs.")
+        code = only(String(Meta.parse(match.captures[1])))
+        code == S_EXON_MISSING_CODE &&
+            error("$(S_EXON_MISSING_CODE) is reserved for columns without s-exon provenance.")
+        map[code] = String(Meta.parse(match.captures[2]))
+        pos = nextind(raw, match.offset + ncodeunits(match.match) - 1)
+    end
+    pos > lastindex(raw) ||
+        error("Invalid $(feature) entry $(repr(raw)); expected quoted code=>s_exon_id pairs.")
+    return map
+end
+
+function _format_s_exon_code_map(code_map)
+    entries = ["$(repr(string(code)))=>$(repr(String(id)))" for (code, id) in code_map]
+    return join(entries, ',')
+end
+
+function set_s_exon_annotations!(msa::AbstractMultipleSequenceAlignment,
+        codes::AbstractString,
+        code_map;
+        code_feature::AbstractString = S_EXON_CODE_FEATURE,
+        map_feature::AbstractString = S_EXON_CODE_MAP_FEATURE)
+    length(codes) == ncolumns(msa) ||
+        error("$(code_feature) has $(length(codes)) characters, but the MSA has $(ncolumns(msa)) columns.")
+    setannotcolumn!(msa, String(code_feature), String(codes))
+    setannotfile!(msa, String(map_feature), _format_s_exon_code_map(code_map))
+    return msa
+end
+
+function _write_s_exon_block_line(io,
+        alignment::AbstractString,
+        pid_value::AbstractString,
+        code::Char,
+        s_exon_id::AbstractString,
+        start_col::Integer,
+        end_col::Integer)
+    println(io,
+        alignment, '\t',
+        pid_value, '\t',
+        code, '\t',
+        s_exon_id, '\t',
+        start_col, '\t',
+        end_col, '\t',
+        end_col - start_col + 1)
+    return nothing
+end
+
+function _write_s_exon_block_rows(io,
+        codes::AbstractString,
+        code_map,
+        alignment::AbstractString,
+        pid_value::AbstractString)
+    start_col = 0
+    current = S_EXON_MISSING_CODE
+    for (idx, code) in enumerate(codes)
+        if code != current
+            if current != S_EXON_MISSING_CODE
+                _write_s_exon_block_line(io, alignment, pid_value, current,
+                    get(code_map, current, ""), start_col, idx - 1)
+            end
+            current = code
+            start_col = idx
+        end
+    end
+    current == S_EXON_MISSING_CODE && return nothing
+    _write_s_exon_block_line(io, alignment, pid_value, current,
+        get(code_map, current, ""), start_col, length(codes))
+    return nothing
+end
+
+function write_s_exon_blocks_tsv(path::AbstractString,
+        msa::AbstractMultipleSequenceAlignment;
+        alignment::AbstractString,
+        pid = nothing,
+        append::Bool = false,
+        code_feature::AbstractString = S_EXON_CODE_FEATURE,
+        map_feature::AbstractString = S_EXON_CODE_MAP_FEATURE)
+    codes = s_exon_codes(msa; feature = code_feature)
+    code_map = s_exon_code_map(msa; feature = map_feature)
+    mkpath(dirname(path))
+    pid_value = pid === nothing ? "" : string(pid)
+    open(path, append ? "a" : "w") do io
+        append ||
+            println(io, "alignment\tpid\tcode\ts_exon_id\tstart_col\tend_col\tn_columns")
+        _write_s_exon_block_rows(io, codes, code_map, alignment, pid_value)
+    end
+    return path
+end
+
 function ensure_mmseqs_db(db::AbstractString)
     for db_path in (String(db), string(db, "_aln"), string(db, "_seq"))
         dbtype = string(db_path, ".dbtype")
@@ -308,6 +442,7 @@ function _relative_seed_paths(seed::SeedSelection, workdir::AbstractString)
         mean_identity = seed.mean_identity,
         stockholm_path = _relative_artifact_path(seed.stockholm_path, workdir),
         fasta_path = _relative_artifact_path(seed.fasta_path, workdir),
+        s_exon_blocks_tsv = _relative_artifact_path(seed.s_exon_blocks_tsv, workdir),
         summary_path = _relative_artifact_path(seed.summary_path, workdir),
         used_fallback_dir = seed.used_fallback_dir,
         workdir
@@ -367,6 +502,7 @@ function _relative_expansion_paths(expansion::ExpansionResult, workdir::Abstract
         full_stockholm = _relative_artifact_path(expansion.full_stockholm, workdir),
         match_stockholm = _relative_artifact_path(expansion.match_stockholm, workdir),
         a3m_path = _relative_artifact_path(expansion.a3m_path, workdir),
+        s_exon_blocks_tsv = _relative_artifact_path(expansion.s_exon_blocks_tsv, workdir),
         db_dir = _relative_artifact_path(expansion.db_dir, workdir),
         hmm_dir = _relative_artifact_path(expansion.hmm_dir, workdir),
         logs_dir = _relative_artifact_path(expansion.logs_dir, workdir),
@@ -420,6 +556,7 @@ function _expansion_summary(expansion::ExpansionResult)
         match_stockholm = expansion.match_stockholm,
         full_stockholm = expansion.full_stockholm,
         a3m_path = expansion.a3m_path,
+        s_exon_blocks_tsv = expansion.s_exon_blocks_tsv,
         hits_fasta = expansion.hits_fasta,
         n_hits = expansion.n_hits,
         n_new_hits = expansion.n_new_hits,
@@ -460,6 +597,8 @@ function result_summary(result::IdunaResult)
             pid_summary = result.thoraxe_msa.pid_summary,
             selected_pids = [seed.pid for seed in result.thoraxe_msa.seeds],
             seed_stockholms = [seed.stockholm_path for seed in result.thoraxe_msa.seeds],
+            s_exon_blocks_tsvs = [seed.s_exon_blocks_tsv
+                                  for seed in result.thoraxe_msa.seeds],
             pid_sample_count = result.thoraxe_msa.pid_sample_count,
             pid_sample_fraction = result.thoraxe_msa.pid_sample_fraction,
             pid_sample_seed = result.thoraxe_msa.pid_sample_seed,
