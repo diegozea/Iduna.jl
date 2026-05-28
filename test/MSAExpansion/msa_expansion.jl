@@ -15,6 +15,20 @@
         complete_text = read(complete_out, String)
         @test complete_text == "# STOCKHOLM 1.0\nseq1 AC\n//\n"
 
+        annotated_seed = joinpath(tmp, "annotated_seed.sto")
+        sanitized_seed = joinpath(tmp, "sanitized_seed.sto")
+        write(annotated_seed, """
+        # STOCKHOLM 1.0
+        #=GF SExonCodeMap "a"=>"1_0"
+        seq1 AC
+        #=GC SExonCode aa
+        //
+        """)
+        Iduna.MSAExpansion.prepare_stockholm_for_mmseqs(annotated_seed, sanitized_seed)
+        sanitized_text = read(sanitized_seed, String)
+        @test !occursin("SExonCode", sanitized_text)
+        @test occursin("seq1 AC", sanitized_text)
+
         empty_sto = joinpath(tmp, "empty.sto")
         touch(empty_sto)
         @test Iduna.MSAExpansion.normalize_stockholm_annotations!(empty_sto) == empty_sto
@@ -87,6 +101,63 @@
             ["a", "missing"])
         @test String.(Iduna.MSAExpansion.sequencenames(reordered)) == ["a", "b", "c"]
 
+        sexon_sto = joinpath(tmp, "sexon_project.sto")
+        write(sexon_sto, """
+        # STOCKHOLM 1.0
+        seed ACdeFG
+        hit AC-eFG
+        #=GC RF xxxxxx
+        //
+        """)
+        sexon_msa = Iduna.MSAExpansion.read_file(
+            sexon_sto, Iduna.MSAExpansion.Stockholm; keepinserts = true)
+        @test Iduna.MSAExpansion.getannotcolumn(sexon_msa, "Aligned", "") == "110011"
+        archived = (;
+            seed_s_exon_codes = "0β23",
+            seed_match_s_exon_codes = "0β23",
+            seed_s_exon_code_map = [
+                '0' => "1_0", 'β' => "2_0", '2' => "3_0", '3' => "4_0"]
+        )
+        Iduna.MSAExpansion._restore_s_exon_annotations!(sexon_msa, archived)
+        @test Iduna.Utils.s_exon_codes(sexon_msa) == "0β..23"
+        @test Iduna.Utils.s_exon_code_map(sexon_msa)['3'] == "4_0"
+
+        annotated_seed_sto = joinpath(tmp, "annotated_seed_rf.sto")
+        write(annotated_seed_sto, """
+        # STOCKHOLM 1.0
+        seed ACdE
+        #=GC RF xxxx
+        //
+        """)
+        annotated_seed = Iduna.MSAExpansion.read_file(
+            annotated_seed_sto, Iduna.MSAExpansion.Stockholm; keepinserts = true)
+        @test Iduna.MSAExpansion.getannotcolumn(annotated_seed, "Aligned", "") == "1101"
+        @test Iduna.MSAExpansion._seed_match_s_exon_codes("0123", annotated_seed) ==
+              "013"
+        masked_archived = (;
+            seed_s_exon_codes = "0123",
+            seed_match_s_exon_codes = "013",
+            seed_s_exon_code_map = ['0' => "1_0", '1' => "2_0", '3' => "4_0"]
+        )
+        Iduna.MSAExpansion._restore_s_exon_annotations!(sexon_msa, masked_archived)
+        @test Iduna.Utils.s_exon_codes(sexon_msa) == "01..3."
+
+        @test Iduna.MSAExpansion._rf_match_state_mask("xx..xx", 6) ==
+              [true, true, false, false, true, true]
+        @test Iduna.MSAExpansion._rf_match_state_mask("", 6) === nothing
+        @test Iduna.MSAExpansion._aligned_match_state_mask("", 6) === nothing
+        plain_sto = joinpath(tmp, "plain_no_annotations.sto")
+        write(plain_sto, "# STOCKHOLM 1.0\nseed AC\n//\n")
+        plain_msa = Iduna.MSAExpansion.read_file(
+            plain_sto, Iduna.MSAExpansion.Stockholm; keepinserts = true)
+        @test Iduna.MSAExpansion._match_state_mask(
+            plain_msa; default_aligned = true) == [true, true]
+        plain_msa_without_insert_annotation = Iduna.MSAExpansion.read_file(
+            plain_sto, Iduna.MSAExpansion.Stockholm)
+        @test Iduna.MSAExpansion._match_state_mask(
+            plain_msa_without_insert_annotation; default_aligned = false) ==
+              [false, false]
+
         gene_id = "ENSG00000198821"
         transcript_id = "ENST00000362089.10"
         seed_sto = joinpath(tmp, "seed.sto")
@@ -117,14 +188,18 @@
 
         function write_outputs(outputs; centroids::Bool = false)
             mkpath(dirname(outputs.full_stockholm))
-            write(outputs.full_stockholm, "cached full\n")
-            write(outputs.match_stockholm, "cached match\n")
+            write(outputs.full_stockholm,
+                "# STOCKHOLM 1.0\n#=GF SExonCodeMap \"0\"=>\"1_0\"\nseed ACDE\n#=GC SExonCode 0000\n//\n")
+            write(outputs.match_stockholm,
+                "# STOCKHOLM 1.0\n#=GF SExonCodeMap \"0\"=>\"1_0\"\nseed ACDE\n#=GC SExonCode 0000\n//\n")
             write(outputs.a3m_path, "cached a3m\n")
             write(outputs.hits_fasta, ">seed one\nACDE\n>hit one\nACDF\n>hit_two\nACDG\n")
             if centroids
                 mkpath(dirname(outputs.centroid_full_stockholm))
-                write(outputs.centroid_full_stockholm, "cached centroid full\n")
-                write(outputs.centroid_match_stockholm, "cached centroid match\n")
+                write(outputs.centroid_full_stockholm,
+                    "# STOCKHOLM 1.0\n#=GF SExonCodeMap \"0\"=>\"1_0\"\nseed ACDE\n#=GC SExonCode 0000\n//\n")
+                write(outputs.centroid_match_stockholm,
+                    "# STOCKHOLM 1.0\n#=GF SExonCodeMap \"0\"=>\"1_0\"\nseed ACDE\n#=GC SExonCode 0000\n//\n")
                 write(outputs.centroid_a3m_path, "cached centroid a3m\n")
                 write(outputs.centroid_hits_fasta, ">hit one\nACDF\n")
             end
@@ -151,6 +226,22 @@
                 "search", logs_dir)
             return db
         end
+
+        archive_seed_sto = joinpath(tmp, "archive_seed.sto")
+        archive_seed_fasta = joinpath(tmp, "archive_seed.fasta")
+        write(archive_seed_sto,
+            "# STOCKHOLM 1.0\n#=GF SExonCodeMap \"0\"=>\"1_0\"\nseed AC\n#=GC SExonCode 00\n//\n")
+        write(archive_seed_fasta, ">seed\nAC\n")
+        archive_ctx = (;
+            seed_dir = joinpath(tmp, "archive_seeds"),
+            seed_stockholm = archive_seed_sto,
+            seed_fasta = archive_seed_fasta)
+        mkpath(archive_ctx.seed_dir)
+        archived_with_fasta = Iduna.MSAExpansion._archive_expansion_seed(
+            seed, archive_ctx)
+        @test isfile(archived_with_fasta.archived_seed_fasta)
+        @test read(archived_with_fasta.archived_seed_fasta, String) == ">seed\nAC\n"
+        @test archived_with_fasta.seed_s_exon_codes == "00"
 
         run_dir = joinpath(tmp, "expansion", gene_id, transcript_id, "pid_10.00")
         outputs = write_outputs(
@@ -251,6 +342,8 @@
         cached_centroids = Iduna.MSAExpansion.expand_msa(
             target, centroids_seed, tmp; mmseqs_db = db, centroids = true)
         @test cached_centroids.status === :skipped
+        @test isfile(centroids_outputs.s_exon_blocks_tsv)
+        @test isfile(centroids_outputs.centroid_s_exon_blocks_tsv)
 
         missing_centroid_dir = joinpath(
             tmp, "expansion", gene_id, transcript_id, "pid_30.00")

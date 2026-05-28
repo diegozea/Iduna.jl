@@ -252,10 +252,11 @@ function _parse_transcript_lookup(data, transcript_id::AbstractString)::_Ensembl
     )
 end
 
-function _resolve_transcript_metadata(transcript_id::AbstractString)::_EnsemblTranscriptLookup
+function _resolve_transcript_metadata(transcript_id::AbstractString;
+        _http_get_fn::Function = _http_get)::_EnsemblTranscriptLookup
     core = strip_ensembl_version(transcript_id)
     url = "$(_ENSEMBL_REST_BASE)/lookup/id/$(core)?expand=0"
-    resp = _http_get(url)
+    resp = _http_get_fn(url)
     resp === nothing &&
         error("Could not resolve Ensembl metadata for transcript $(transcript_id).")
     data = JSON.parse(decode_body(resp))
