@@ -1436,12 +1436,13 @@ function _run_kept_thoraxe_pid_msa!(target::ResolvedTarget,
         specieslist::Union{Nothing, AbstractString},
         sample_idx::Integer,
         runner,
-        overwrite::Bool)
+        overwrite::Bool,
+        thoraxe_fn::Function = ThorAxe.thoraxe)
     if overwrite || !isfile(path_table) || !_has_phylosofs_outputs(thoraxe_dir)
         run_root = _pid_sample_run_root(workdir, pid, sample_idx)
         isdir(run_root) && safe_rm(run_root, workdir)
         mkpath(dirname(run_root))
-        ThorAxe.thoraxe(
+        thoraxe_fn(
             input_dir, run_root; identity = Float64(pid), specieslist = specieslist,
             phylosofs = true, runner = runner)
     end
@@ -1460,7 +1461,8 @@ function _run_thoraxe_pid_msa(target::ResolvedTarget,
         sample_idx::Integer;
         overwrite::Bool = false,
         timeout_seconds::Union{Nothing, Real} = nothing,
-        keep_thoraxe_dir::Bool = false)
+        keep_thoraxe_dir::Bool = false,
+        thoraxe_fn::Function = ThorAxe.thoraxe)
     paths = _pid_sample_paths(workdir, pid, sample_idx)
     thoraxe_dir = _pid_sample_thoraxe_dir(workdir, pid, sample_idx)
     path_table = joinpath(thoraxe_dir, "path_table.csv")
@@ -1480,13 +1482,14 @@ function _run_thoraxe_pid_msa(target::ResolvedTarget,
 
     if keep_thoraxe_dir
         return _run_kept_thoraxe_pid_msa!(target, input_dir, workdir, paths,
-            thoraxe_dir, path_table, pid, specieslist, sample_idx, runner, overwrite)
+            thoraxe_dir, path_table, pid, specieslist, sample_idx, runner, overwrite,
+            thoraxe_fn)
     end
 
     tmp_root = joinpath(_thoraxe_msa_dir(workdir), "tmp")
     mkpath(tmp_root)
     mktempdir(tmp_root; prefix = "$(sample_label)_") do tmp
-        ThorAxe.thoraxe(
+        thoraxe_fn(
             input_dir, tmp; identity = Float64(pid), specieslist = specieslist,
             phylosofs = true, runner = runner)
         pid_msa,

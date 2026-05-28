@@ -1,9 +1,18 @@
 @testset "IDMapping" begin
-    response(body::AbstractString) = Iduna.IDMapping.HTTP.Response(
-        200, Vector{UInt8}(body))
+    response(body::AbstractString; status::Integer = 200) = Iduna.IDMapping.HTTP.Response(
+        status, Vector{UInt8}(body))
 
     @test Iduna.IDMapping.sequences_match("ACDEFG", "ACDEFG")
     @test !Iduna.IDMapping.sequences_match("ACDEFG", "ACDFFG")
+    @test Iduna.IDMapping._http_get("https://example.org/ok";
+        http_get = (url; kwargs...) -> response("""{"ok":true}""")) !== nothing
+    @test_logs (:warn, r"HTTP request failed") begin
+        @test Iduna.IDMapping._http_get("https://example.org/retry";
+            retries = 1,
+            http_get = (url; kwargs...) -> response("busy"; status = 503)) === nothing
+    end
+    @test Iduna.IDMapping._http_get("https://example.org/missing";
+        http_get = (url; kwargs...) -> response("missing"; status = 404)) === nothing
 
     uniprot_json = """
     {
@@ -105,6 +114,15 @@
         Dict("species" => "mus_musculus"),
         "ENSMUST00000193812.2"
     )
+    fetched_lookup = Iduna.IDMapping._resolve_transcript_metadata(
+        "ENSMUST00000193812.2";
+        _http_get_fn = url -> begin
+            @test occursin("/lookup/id/ENSMUST00000193812?expand=0", url)
+            response("""{"Parent":"ENSMUSG00000102693","species":"mus_musculus"}""")
+        end)
+    @test fetched_lookup.ensembl_gene_id == "ENSMUSG00000102693"
+    @test_throws ErrorException Iduna.IDMapping._resolve_transcript_metadata(
+        "ENSMUST00000193812.2"; _http_get_fn = url -> nothing)
 
     mktempdir() do tmp
         candidate_entry = Iduna.IDMapping._UniProtEntry(;

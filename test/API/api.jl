@@ -223,6 +223,10 @@ import JSON
                 stats_path = joinpath(workdir, "validation", "pid_10.00", "stats.csv"),
                 query_vs_uniprot_path = joinpath(
                     workdir, "validation", "pid_10.00", "query_vs_uniprot_alignment.txt"))
+            mkpath(dirname(abs_seed.stockholm_path))
+            write(abs_seed.stockholm_path, "# STOCKHOLM 1.0\nseed AC\n//\n")
+            mkpath(dirname(abs_expansion.match_stockholm))
+            write(abs_expansion.match_stockholm, "# STOCKHOLM 1.0\nseed AC\n//\n")
 
             result = Iduna.iduna(;
                 id = "Q13148",
@@ -267,6 +271,8 @@ import JSON
                   result.expansions[1].s_exon_blocks_tsv
             @test written["validations"][1]["stats_path"] ==
                   joinpath("validation", "pid_10.00", "stats.csv")
+            @test Iduna.ResultsValidation.nsequences(Iduna.load_seed_msa(result)) == 1
+            @test Iduna.ResultsValidation.nsequences(Iduna.load_expanded_msa(result)) == 1
         end
     end
 
@@ -383,6 +389,7 @@ import JSON
             @test validated_pids == [10.0, 80.0]
             @test length(result.expansions) == 2
             @test length(result.validations) == 2
+            @test_throws ErrorException Iduna.load_seed_msa(result)
         end
     end
 
