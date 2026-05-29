@@ -140,6 +140,12 @@
         MMAA*
         """)
 
+        fallback_msa = Iduna.ThorAxeMSA._transcript_exon_msa(
+            thoraxe, "0_0", "ENSG00000000001.1", "ENST00000000001.1")
+        @test Iduna.ThorAxeMSA.nsequences(fallback_msa) == 1
+        fallback_name = only(Iduna.ThorAxeMSA.sequencenames(fallback_msa))
+        @test Iduna.ThorAxeMSA.stringsequence(fallback_msa, fallback_name) == "MM"
+
         msa,
         species = Iduna.ThorAxeMSA.assemble_transcript_msa(
             thoraxe, "ENSG00000000001.1", "ENST00000000001.1")
