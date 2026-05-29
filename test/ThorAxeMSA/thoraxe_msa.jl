@@ -594,7 +594,8 @@
         factory_calls = Ref(0)
         runner_calls = Ref(0)
         captured_logs = Tuple{String, String}[]
-        default_runner_factory = (stdout_log, stderr_log) -> begin
+        default_runner_factory = (stdout_log,
+            stderr_log) -> begin
             factory_calls[] += 1
             push!(captured_logs, (stdout_log, stderr_log))
             return command -> begin
@@ -1414,7 +1415,8 @@ TableSet\tptroglodytes_gene_ensembl\tChimpanzee genes (Pan_tro_3.0)\t1
             Iduna.ThorAxeMSA.write_file(
                 paths.stockholm_path, seed_msa, Iduna.ThorAxeMSA.Stockholm)
 
-            result = Iduna.ThorAxeMSA.build_thoraxe_msa(target, workdir;
+            result = @test_logs (:info, r"Reusing cached ThorAxe MSA candidates") match_mode=:any Iduna.ThorAxeMSA.build_thoraxe_msa(
+                target, workdir;
                 pid_thresholds = [10.0],
                 specieslist = "homo_sapiens",
                 cached_thoraxe_input_dir = source,

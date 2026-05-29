@@ -260,8 +260,8 @@
               "state file disappeared while reading"
         hits_fasta = outputs.hits_fasta
 
-        cached = Iduna.MSAExpansion.expand_msa(target, seed, tmp; mmseqs_db = db,
-            threads = 1)
+        cached = @test_logs (:info, r"Reusing cached MSA expansion") match_mode=:any Iduna.MSAExpansion.expand_msa(
+            target, seed, tmp; mmseqs_db = db, threads = 1)
         cached_with_new_threads = Iduna.MSAExpansion.expand_msa(
             target, seed, tmp; mmseqs_db = db, threads = 8)
         hits_msa = Iduna.MSAExpansion.read_file(hits_fasta, Iduna.MSAExpansion.FASTA)
