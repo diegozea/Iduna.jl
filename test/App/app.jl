@@ -6,7 +6,6 @@ import JSON
         @test kwargs[:id] == "P20963"
         @test kwargs[:mmseqs_db] == "db"
         @test kwargs[:overwrite] === false
-        @test kwargs[:allow_specieslist_timeout_fallback] === true
         @test kwargs[:specieslist_filter] === true
         @test kwargs[:biomart_datasets_filter] === true
         @test kwargs[:centroids] === false
@@ -29,7 +28,6 @@ import JSON
             "--workdir", "work",
             "--output-dir", "out",
             "--overwrite",
-            "--no-specieslist-timeout-fallback",
             "--orthology", "1:n",
             "--no-specieslist-filter",
             "--no-biomart-datasets-filter",
@@ -40,7 +38,6 @@ import JSON
         @test kwargs[:workdir] == "work"
         @test kwargs[:output_dir] == "out"
         @test kwargs[:overwrite] === true
-        @test kwargs[:allow_specieslist_timeout_fallback] === false
         @test kwargs[:orthology] == "1:n"
         @test kwargs[:specieslist_filter] === false
         @test kwargs[:biomart_datasets_filter] === false
@@ -54,17 +51,11 @@ import JSON
             "P20963",
             "--mmseqs-db", "db",
             "--pid-thresholds", "10,20,30",
-            "--transcript-query-timeout-seconds", "none",
-            "--transcript-query-timeout-max-seconds", "240",
-            "--thoraxe-timeout-seconds", "3600",
             "--pid-sample-count", "12",
             "--pid-sample-fraction", "0.65",
             "--pid-sample-seed", "42"
         ])
         @test kwargs[:pid_thresholds] == [10.0, 20.0, 30.0]
-        @test kwargs[:transcript_query_timeout_seconds] === nothing
-        @test kwargs[:transcript_query_timeout_max_seconds] == 240.0
-        @test kwargs[:thoraxe_timeout_seconds] == 3600.0
         @test kwargs[:pid_sample_count] == 12
         @test kwargs[:pid_sample_fraction] == 0.65
         @test kwargs[:pid_sample_seed] == 42
@@ -112,7 +103,8 @@ import JSON
             result
         end
 
-        returned, text = mktemp() do path, io
+        returned,
+        text = mktemp() do path, io
             value = redirect_stdout(io) do
                 Iduna._run_app(["Q13148", "--mmseqs-db", "db"]; runner)
             end

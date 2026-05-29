@@ -15,12 +15,11 @@ the resolved identifiers and validation statistics.
 `orthology` controls the ThorAxe relationship filter (`"1:1"`, `"1:n"`, or
 `"m:n"`). By default, Iduna filters the ThorAxe species list with Ensembl
 homology and then filters against currently available BioMart Ensembl Gene
-datasets before `transcript_query`. `transcript_query_timeout_seconds` limits
-each Ensembl query attempt. Iduna retries that step and can retry without
-`specieslist` after a timeout. Set `thoraxe_timeout_seconds` to give the
-PID ThorAxe runs the same kind of wall-clock guard. `pid_sample_count` controls
-how many PID-specific species samples are drawn from each candidate `msa_0` and
-scored against that PID's full-species MSA; the default is 45.
+datasets before `transcript_query`. That step can be slow, especially for broad
+species lists; runs are often faster when a small curated `specieslist` is
+provided. `pid_sample_count` controls how many PID-specific species samples are
+drawn from each candidate `msa_0` and scored against that PID's full-species
+MSA; the default is 45.
 `pid_sample_fraction` controls the fraction of non-reference species retained in
 each sample, and `pid_sample_seed` can make the sampling reproducible. If
 omitted, a random seed is recorded with the result. Candidate `msa_0`
@@ -54,11 +53,7 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
         specieslist_filter::Bool = true,
         biomart_datasets_filter::Bool = true,
         thoraxe_input_dir::Union{Nothing, AbstractString} = nothing,
-        transcript_query_timeout_seconds::Union{Nothing, Real} = 180,
-        transcript_query_timeout_max_seconds::Union{Nothing, Real} = 240,
         transcript_query_retries::Integer = 2,
-        allow_specieslist_timeout_fallback::Bool = true,
-        thoraxe_timeout_seconds::Union{Nothing, Real} = nothing,
         pid_sample_count::Integer = 45,
         pid_sample_fraction::Real = 0.8,
         pid_sample_seed::Union{Nothing, Integer} = nothing,
@@ -103,11 +98,7 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
             biomart_datasets_filter,
             cached_thoraxe_input_dir = thoraxe_input_dir,
             overwrite,
-            transcript_query_timeout_seconds,
-            transcript_query_timeout_max_seconds,
             transcript_query_retries,
-            allow_specieslist_timeout_fallback,
-            thoraxe_timeout_seconds,
             pid_sample_count,
             pid_sample_fraction,
             pid_sample_seed)
@@ -211,24 +202,11 @@ function _partial_warnings(target, thoraxe, validations)
     return warnings
 end
 
-function _exception_summary(err, workdir::Union{Nothing, AbstractString} = nothing)
-    summary = (;
+function _exception_summary(err, _workdir::Union{Nothing, AbstractString} = nothing)
+    return (;
         type = string(typeof(err)),
         message = sprint(showerror, err)
     )
-    if err isa ThorAxeMSA._CommandTimeoutError
-        stdout_log = workdir === nothing ? err.stdout_log :
-                     Utils._relative_artifact_path(err.stdout_log, workdir)
-        stderr_log = workdir === nothing ? err.stderr_log :
-                     Utils._relative_artifact_path(err.stderr_log, workdir)
-        return merge(
-            summary, (;
-                command = err.command,
-                stdout_log,
-                stderr_log
-            ))
-    end
-    return summary
 end
 
 function _provided_primary_ids(; id, uniprot_id, ensembl_transcript_id)

@@ -87,10 +87,7 @@
                 overwrite = true,
                 pid_thresholds = [10.0],
                 threads = 1,
-                transcript_query_retries = 3,
-                transcript_query_timeout_seconds = 240,
-                transcript_query_timeout_max_seconds = 480,
-                thoraxe_timeout_seconds = 480)
+                transcript_query_retries = 3)
             return checked_mapk8_smoke_result(result)
         end
     end

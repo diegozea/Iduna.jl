@@ -3,24 +3,10 @@ import JSON
 
 using ArgParse: ArgParseSettings, @add_arg_table!, parse_args
 
-const _APP_TIMEOUT_KEYS = Set([
-    :transcript_query_timeout_seconds,
-    :transcript_query_timeout_max_seconds,
-    :thoraxe_timeout_seconds
-])
-
 function _parse_pid_thresholds(value::AbstractString)
     vals = parse.(Float64, strip.(split(value, ',')))
     isempty(vals) && error("--pid-thresholds cannot be empty.")
     return vals
-end
-
-function _parse_timeout_value(value::AbstractString)
-    normalized = lowercase(strip(value))
-    normalized in ("none", "nothing", "off", "0") && return nothing
-    parsed = parse(Float64, value)
-    parsed > 0 || error("Timeout values must be positive, or use none.")
-    return parsed
 end
 
 function _throw_parse_error(settings, err)
@@ -124,30 +110,10 @@ function _app_arg_settings(;
         metavar = "path"
         arg_type = String
 
-        "--transcript-query-timeout-seconds"
-        help = "Stop transcript_query after n seconds."
-        metavar = "n"
-        arg_type = String
-
-        "--transcript-query-timeout-max-seconds"
-        help = "Maximum timeout after retry backoff."
-        metavar = "n"
-        arg_type = String
-
         "--transcript-query-retries"
         help = "Number of transcript_query attempts."
         metavar = "n"
         arg_type = Int
-
-        "--no-specieslist-timeout-fallback"
-        help = "Keep specieslist after transcript_query timeout."
-        dest_name = "allow_specieslist_timeout_fallback"
-        action = :store_false
-
-        "--thoraxe-timeout-seconds"
-        help = "Stop each thoraxe run after n seconds."
-        metavar = "n"
-        arg_type = String
 
         "--pid-sample-count"
         help = "PID-specific species samples per candidate MSA for seed selection, default 45."
@@ -176,11 +142,8 @@ function _postprocess_app_args(parsed::Dict{Symbol, Any})
     kwargs = Dict{Symbol, Any}()
     for (key, value) in parsed
         value === nothing && continue
-        # ArgParse reads a few options as strings so users can pass "none".
         if key === :pid_thresholds
             kwargs[key] = _parse_pid_thresholds(value)
-        elseif key in _APP_TIMEOUT_KEYS
-            kwargs[key] = _parse_timeout_value(value)
         else
             kwargs[key] = value
         end

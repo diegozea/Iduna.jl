@@ -24,7 +24,6 @@ result = iduna(
     workdir="P20963",
     overwrite=false,
     centroids=false,
-    transcript_query_timeout_seconds=180,
 )
 
 expanded = load_expanded_msa(result)
@@ -76,10 +75,10 @@ The BioMart dataset list is cached in package scratch space and refreshed when
 used on a later calendar date. Iduna also reports species recorded in
 `transcript_query` BioMart failure outputs when a run completes with partial
 BioMart failures.
-`transcript_query_timeout_seconds` defaults to 180 seconds, with a bounded retry
-that can drop the species list after a timeout.
-`thoraxe_timeout_seconds` is unset by default because ThorAxe runtime depends on
-gene complexity and the selected PID thresholds.
+`transcript_query` runtime depends heavily on the number of species it has to
+download, so runs can be faster when you provide a small curated `specieslist`.
+Use `thoraxe_input_dir` to reuse an existing complete `transcript_query` bundle
+instead of fetching it again.
 
 Seed selection is per PID threshold. Iduna runs `transcript_query` once and
 builds one full-species candidate `msa_0` at each PID threshold. Each candidate
