@@ -588,6 +588,36 @@
             sleep_fn = seconds -> nothing)
         @test rebuilt_input == Iduna.ThorAxeMSA._thoraxe_input_dir(queried_workdir)
         @test query_calls[] == 1
+
+        default_runner_workdir = joinpath(tmp, "default_runner_work")
+        mkpath(default_runner_workdir)
+        factory_calls = Ref(0)
+        runner_calls = Ref(0)
+        captured_logs = Tuple{String, String}[]
+        default_runner_factory = (stdout_log, stderr_log) -> begin
+            factory_calls[] += 1
+            push!(captured_logs, (stdout_log, stderr_log))
+            return command -> begin
+                runner_calls[] += 1
+                write_test_ensembl_bundle(joinpath(pwd(), "ENSG00000000001"))
+                nothing
+            end
+        end
+        default_runner_input = Iduna.ThorAxeMSA._ensure_transcript_query(
+            target, default_runner_workdir;
+            specieslist = "homo_sapiens",
+            orthology = "1:1",
+            thoraxe_runner_factory = default_runner_factory,
+            sleep_fn = seconds -> nothing)
+        @test default_runner_input ==
+              Iduna.ThorAxeMSA._thoraxe_input_dir(default_runner_workdir)
+        @test factory_calls[] == 1
+        @test runner_calls[] == 1
+        @test only(captured_logs) == (
+            joinpath(default_runner_workdir, "logs", "thoraxe",
+                "transcript_query_stdout.log"),
+            joinpath(default_runner_workdir, "logs", "thoraxe",
+                "transcript_query_stderr.log"))
     end
 
     @testset "metadata and cached branch helpers" begin

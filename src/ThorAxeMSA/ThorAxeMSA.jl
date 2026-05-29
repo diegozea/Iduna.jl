@@ -620,6 +620,7 @@ function _ensure_transcript_query(target::ResolvedTarget, workdir::AbstractStrin
         max_retries::Integer = 2,
         orthology::AbstractString = "1:1",
         transcript_query_runner::Union{Nothing, Function} = nothing,
+        thoraxe_runner_factory::Function = _thoraxe_runner,
         sleep_fn::Function = sleep)
     _orthology_relationships(orthology)
     metadata = _expected_transcript_query_metadata(target;
@@ -647,7 +648,7 @@ function _ensure_transcript_query(target::ResolvedTarget, workdir::AbstractStrin
     attempts = max(Int(max_retries), 1)
     active_specieslist = _normalized_specieslist(specieslist)
     runner = if transcript_query_runner === nothing
-        _thoraxe_runner(stdout_log, stderr_log)
+        thoraxe_runner_factory(stdout_log, stderr_log)
     else
         transcript_query_runner
     end
