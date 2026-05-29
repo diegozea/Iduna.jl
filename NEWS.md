@@ -13,6 +13,14 @@ Breaking changes:
 - Seed and expansion result objects now include `s_exon_blocks_tsv`, the path to
   the s-exon block table. Code that checks the exact fields of these objects may
   need to be updated.
+- Removed the transcript_query and ThorAxe wall-clock limit controls from the
+  API and CLI: `transcript_query_timeout_seconds`,
+  `transcript_query_timeout_max_seconds`, `allow_specieslist_timeout_fallback`,
+  and `thoraxe_timeout_seconds`. Use an external scheduler or process wrapper
+  when a hard runtime limit is needed.
+- transcript_query retries now preserve the same effective species list. If an
+  invalid or incomplete bundle persists, Iduna fails explicitly and suggests
+  trying a smaller curated `specieslist`.
 
 Added:
 

@@ -39,19 +39,6 @@ const _PHYLOSOFS_FALLBACK_SYMBOLS = [c
                                              collect(Char(0x00BC):Char(0x017F)))
                                      if !(c in _PHYLOSOFS_RESERVED_SYMBOLS)]
 
-struct _CommandTimeoutError <: Exception
-    command::String
-    seconds::Float64
-    stdout_log::String
-    stderr_log::String
-end
-
-function Base.showerror(io::IO, err::_CommandTimeoutError)
-    print(io,
-        "ThorAxe command timed out after $(err.seconds) seconds: $(err.command). ",
-        "See $(err.stdout_log) and $(err.stderr_log).")
-end
-
 const _REQUIRED_ENSEMBL_FILES = (
     "sequences.fasta",
     "exonstable.tsv",
@@ -182,43 +169,12 @@ function _open_logs(f::Function, stdout_path::AbstractString, stderr_path::Abstr
     end
 end
 
-function _normalize_timeout(timeout_seconds::Union{Nothing, Real})
-    timeout_seconds === nothing && return nothing
-    value = Float64(timeout_seconds)
-    value > 0 || error("ThorAxe timeout values must be positive.")
-    return value
-end
-
-function _wait_logged_command(process, timeout_seconds::Union{Nothing, Float64})
-    if timeout_seconds === nothing
-        wait(process)
-        return false
-    end
-
-    deadline = time() + timeout_seconds
-    # Poll so we can kill long external commands and still collect logs.
-    while process_running(process)
-        if time() >= deadline
-            kill(process)
-            wait(process)
-            return true
-        end
-        sleep(0.25)
-    end
-    wait(process)
-    return false
-end
-
 function _run_logged_command(command::Cmd,
         stdout_log::AbstractString,
-        stderr_log::AbstractString;
-        timeout_seconds::Union{Nothing, Real} = nothing)
-    timeout = _normalize_timeout(timeout_seconds)
+        stderr_log::AbstractString)
     _open_logs(stdout_log, stderr_log) do out_io, err_io
         process = run(pipeline(command; stdout = out_io, stderr = err_io), wait = false)
-        timed_out = _wait_logged_command(process, timeout)
-        timed_out && throw(_CommandTimeoutError(
-            string(command), timeout::Float64, String(stdout_log), String(stderr_log)))
+        wait(process)
         success(process) ||
             error("ThorAxe command failed: $(command). See $(stderr_log).")
     end
@@ -226,20 +182,10 @@ function _run_logged_command(command::Cmd,
 end
 
 function _thoraxe_runner(stdout_log::AbstractString,
-        stderr_log::AbstractString;
-        timeout_seconds::Union{Nothing, Real} = nothing)
-    # ThorAxe.jl builds the exact CLI command. The runner only controls logging,
-    # timeouts, and error messages around that command.
-    return command -> _run_logged_command(
-        command, stdout_log, stderr_log; timeout_seconds = timeout_seconds)
-end
-
-function _next_timeout(timeout_seconds::Union{Nothing, Real},
-        timeout_max_seconds::Union{Nothing, Real})
-    timeout_seconds === nothing && return nothing
-    current = _normalize_timeout(timeout_seconds)::Float64
-    timeout_max_seconds === nothing && return current
-    return min(2 * current, _normalize_timeout(timeout_max_seconds)::Float64)
+        stderr_log::AbstractString)
+    # ThorAxe.jl builds the exact CLI command. The runner only controls logging
+    # and error messages around that command.
+    return command -> _run_logged_command(command, stdout_log, stderr_log)
 end
 
 function _retry_wait_seconds(attempt::Integer)
@@ -577,10 +523,8 @@ function _run_transcript_query_once(gene_core::AbstractString,
         specieslist::Union{Nothing, AbstractString},
         stdout_log::AbstractString,
         stderr_log::AbstractString;
-        timeout_seconds::Union{Nothing, Real},
         orthology::AbstractString = "1:1",
-        runner::Function = _thoraxe_runner(stdout_log, stderr_log;
-            timeout_seconds = timeout_seconds))
+        runner::Function = _thoraxe_runner(stdout_log, stderr_log))
     _orthology_relationships(orthology)
     cd(workdir) do
         if species === nothing
@@ -634,47 +578,15 @@ function _transcript_query_attempt_action!(gene_core::AbstractString,
         tmp_gene_dir::AbstractString;
         attempt::Integer,
         attempts::Integer,
-        timeout_seconds::Union{Nothing, Real},
         orthology::AbstractString,
-        runner::Function = _thoraxe_runner(stdout_log, stderr_log;
-            timeout_seconds = timeout_seconds))
-    try
-        _run_transcript_query_once(
-            gene_core, query_workdir, species, active_specieslist,
-            stdout_log, stderr_log; timeout_seconds, orthology, runner)
-        _has_valid_ensembl_bundle(tmp_gene_dir) && return :done
-        attempt < attempts || return :failed
-        @warn "transcript_query produced an invalid bundle; retrying." gene=gene_core attempt
-        return :retry_without_specieslist
-    catch err
-        err isa _CommandTimeoutError || rethrow(err)
-        if _has_valid_ensembl_bundle(tmp_gene_dir)
-            @warn "transcript_query timed out but produced a usable Ensembl bundle." gene=gene_core attempt
-            return :done
-        end
-        attempt < attempts || throw(err)
-        return :timeout_retry
-    end
-end
-
-function _transcript_query_retry_state(action::Symbol,
-        active_specieslist::Union{Nothing, AbstractString},
-        current_timeout::Union{Nothing, Real},
-        timeout_seconds::Union{Nothing, Real},
-        timeout_max_seconds::Union{Nothing, Real},
-        allow_specieslist_timeout_fallback::Bool,
-        gene_core::AbstractString,
-        attempt::Integer)
-    action === :retry_without_specieslist && return nothing, current_timeout
-    if action === :timeout_retry && active_specieslist !== nothing &&
-       allow_specieslist_timeout_fallback
-        # A large species list can be the slow part, so retry once without it.
-        @warn "transcript_query timed out with a species list; retrying without it." gene=gene_core attempt
-        next_timeout = timeout_max_seconds === nothing ? timeout_seconds :
-                       timeout_max_seconds
-        return nothing, next_timeout
-    end
-    return active_specieslist, _next_timeout(current_timeout, timeout_max_seconds)
+        runner::Function = _thoraxe_runner(stdout_log, stderr_log))
+    _run_transcript_query_once(
+        gene_core, query_workdir, species, active_specieslist,
+        stdout_log, stderr_log; orthology, runner)
+    _has_valid_ensembl_bundle(tmp_gene_dir) && return :done
+    attempt < attempts || return :failed
+    @warn "transcript_query produced an invalid bundle; retrying with the same specieslist." gene=gene_core attempt
+    return :retry
 end
 
 function _run_transcript_query_with_retries!(tmp_gene_dir::AbstractString,
@@ -682,32 +594,20 @@ function _run_transcript_query_with_retries!(tmp_gene_dir::AbstractString,
         query_workdir::AbstractString,
         species::Union{Nothing, AbstractString},
         initial_specieslist::Union{Nothing, AbstractString},
-        initial_timeout::Union{Nothing, Real},
         attempts::Integer,
         stdout_log::AbstractString,
         stderr_log::AbstractString;
-        timeout_seconds::Union{Nothing, Real},
-        timeout_max_seconds::Union{Nothing, Real},
         orthology::AbstractString,
-        allow_specieslist_timeout_fallback::Bool,
-        runner_factory::Function = (timeout -> _thoraxe_runner(
-            stdout_log, stderr_log; timeout_seconds = timeout)),
+        runner_factory::Function = (() -> _thoraxe_runner(stdout_log, stderr_log)),
         sleep_fn::Function = sleep)
-    active_specieslist = initial_specieslist
-    current_timeout = initial_timeout
     for attempt in 1:attempts
         isdir(tmp_gene_dir) && rm(tmp_gene_dir; recursive = true, force = true)
         action = _transcript_query_attempt_action!(
-            gene_core, query_workdir, species, active_specieslist,
+            gene_core, query_workdir, species, initial_specieslist,
             stdout_log, stderr_log, tmp_gene_dir;
-            attempt, attempts, timeout_seconds = current_timeout, orthology,
-            runner = runner_factory(current_timeout))
+            attempt, attempts, orthology, runner = runner_factory())
         action === :done && return nothing
         action === :failed && break
-        active_specieslist,
-        current_timeout = _transcript_query_retry_state(
-            action, active_specieslist, current_timeout, timeout_seconds,
-            timeout_max_seconds, allow_specieslist_timeout_fallback, gene_core, attempt)
         sleep_fn(_retry_wait_seconds(attempt))
     end
     return nothing
@@ -717,11 +617,8 @@ function _ensure_transcript_query(target::ResolvedTarget, workdir::AbstractStrin
         specieslist::Union{Nothing, AbstractString} = nothing,
         overwrite::Bool = false,
         cached_input_dir::Union{Nothing, AbstractString} = nothing,
-        timeout_seconds::Union{Nothing, Real} = 180,
-        timeout_max_seconds::Union{Nothing, Real} = 240,
         max_retries::Integer = 2,
         orthology::AbstractString = "1:1",
-        allow_specieslist_timeout_fallback::Bool = true,
         transcript_query_runner_factory::Union{Nothing, Function} = nothing,
         sleep_fn::Function = sleep)
     _orthology_relationships(orthology)
@@ -750,7 +647,7 @@ function _ensure_transcript_query(target::ResolvedTarget, workdir::AbstractStrin
     attempts = max(Int(max_retries), 1)
     active_specieslist = _normalized_specieslist(specieslist)
     runner_factory = if transcript_query_runner_factory === nothing
-        timeout -> _thoraxe_runner(stdout_log, stderr_log; timeout_seconds = timeout)
+        () -> _thoraxe_runner(stdout_log, stderr_log)
     else
         transcript_query_runner_factory
     end
@@ -759,16 +656,13 @@ function _ensure_transcript_query(target::ResolvedTarget, workdir::AbstractStrin
         tmp_gene_dir = joinpath(query_workdir, gene_core)
         _run_transcript_query_with_retries!(
             tmp_gene_dir, gene_core, query_workdir, species, active_specieslist,
-            timeout_seconds, attempts, stdout_log, stderr_log;
-            timeout_seconds,
-            timeout_max_seconds,
+            attempts, stdout_log, stderr_log;
             orthology,
-            allow_specieslist_timeout_fallback,
             runner_factory,
             sleep_fn)
 
         _has_valid_ensembl_bundle(tmp_gene_dir) ||
-            error("transcript_query did not create a valid Ensembl bundle at $(tmp_gene_dir). See $(stderr_log).")
+            error("transcript_query did not create a valid Ensembl bundle at $(tmp_gene_dir). See $(stderr_log). If failures involve the species set, try a smaller curated specieslist.")
         mv(tmp_gene_dir, input_dir; force = true)
         _write_transcript_query_metadata!(input_dir, metadata)
         return input_dir
@@ -1474,7 +1368,6 @@ function _run_thoraxe_pid_msa(target::ResolvedTarget,
         specieslist::Union{Nothing, AbstractString},
         sample_idx::Integer;
         overwrite::Bool = false,
-        timeout_seconds::Union{Nothing, Real} = nothing,
         keep_thoraxe_dir::Bool = false,
         thoraxe_fn::Function = ThorAxe.thoraxe)
     paths = _pid_sample_paths(workdir, pid, sample_idx)
@@ -1492,7 +1385,7 @@ function _run_thoraxe_pid_msa(target::ResolvedTarget,
     sample_label = "pid$(pid_label)_sample$(sample_idx)"
     stdout_log = joinpath(_thoraxe_logs_dir(workdir), "$(sample_label)_stdout.log")
     stderr_log = joinpath(_thoraxe_logs_dir(workdir), "$(sample_label)_stderr.log")
-    runner = _thoraxe_runner(stdout_log, stderr_log; timeout_seconds = timeout_seconds)
+    runner = _thoraxe_runner(stdout_log, stderr_log)
 
     if keep_thoraxe_dir
         return _run_kept_thoraxe_pid_msa!(target, input_dir, workdir, paths,
@@ -1520,13 +1413,12 @@ function _generate_pid_candidate(target::ResolvedTarget,
         pid::Real,
         specieslist::Union{Nothing, AbstractString};
         overwrite::Bool = false,
-        timeout_seconds::Union{Nothing, Real} = nothing,
         thoraxe_fn::Function = ThorAxe.thoraxe)
     paths = _pid_sample_paths(workdir, pid, 0)
     fasta_path, sto_path,
     thoraxe_dir = _run_thoraxe_pid_msa(
         target, input_dir, workdir, pid, specieslist, 0;
-        overwrite, timeout_seconds, keep_thoraxe_dir = true, thoraxe_fn)
+        overwrite, keep_thoraxe_dir = true, thoraxe_fn)
     msa,
     species = assemble_transcript_msa(thoraxe_dir,
         target.ensembl_gene_id, target.transcript_id)
@@ -1616,12 +1508,11 @@ function _score_pid_candidate(target::ResolvedTarget,
         sample_seed::UInt64,
         metadata,
         overwrite::Bool = false,
-        timeout_seconds::Union{Nothing, Real} = nothing,
         thoraxe_fn::Function = ThorAxe.thoraxe,
         identity_fn::Function = compute_identity_against_reference)
     candidate = merge(
         _generate_pid_candidate(target, input_dir, workdir, pid, specieslist;
-            overwrite, timeout_seconds, thoraxe_fn),
+            overwrite, thoraxe_fn),
         (; workdir))
     validation = _candidate_msa0_validation(target, candidate.msa, pid, workdir)
     if !validation.eligible
@@ -1651,7 +1542,7 @@ function _score_pid_candidate(target::ResolvedTarget,
         isfile(species_file) || continue
         _run_thoraxe_pid_msa(
             target, input_dir, workdir, pid, species_file, sample_idx;
-            overwrite, timeout_seconds, thoraxe_fn)
+            overwrite, thoraxe_fn)
         isfile(sample_paths.fasta_path) || continue
         identity = identity_fn(
             candidate.fasta_path, sample_paths.fasta_path;
@@ -2107,7 +1998,6 @@ function _score_pid_candidates(target::ResolvedTarget,
         pid_sample_fraction::Real,
         sample_seed::UInt64,
         overwrite::Bool,
-        timeout_seconds::Union{Nothing, Real},
         thoraxe_fn::Function = ThorAxe.thoraxe,
         identity_fn::Function = compute_identity_against_reference)
     score_rows = NamedTuple[]
@@ -2120,7 +2010,6 @@ function _score_pid_candidates(target::ResolvedTarget,
                 sample_seed,
                 metadata,
                 overwrite,
-                timeout_seconds,
                 thoraxe_fn,
                 identity_fn))
     end
@@ -2141,11 +2030,7 @@ function build_thoraxe_msa(target::ResolvedTarget, workdir::AbstractString;
         orthology::AbstractString = "1:1",
         specieslist_filter::Bool = true,
         biomart_datasets_filter::Bool = true,
-        transcript_query_timeout_seconds::Union{Nothing, Real} = 180,
-        transcript_query_timeout_max_seconds::Union{Nothing, Real} = 240,
         transcript_query_retries::Integer = 2,
-        allow_specieslist_timeout_fallback::Bool = true,
-        thoraxe_timeout_seconds::Union{Nothing, Real} = nothing,
         pid_sample_count::Integer = 45,
         pid_sample_fraction::Real = 0.8,
         pid_sample_seed::Union{Nothing, Integer} = nothing)
@@ -2160,11 +2045,8 @@ function build_thoraxe_msa(target::ResolvedTarget, workdir::AbstractString;
     input_dir = _ensure_transcript_query(target, workdir;
         specieslist = filters.effective_specieslist, overwrite,
         cached_input_dir = cached_thoraxe_input_dir,
-        timeout_seconds = transcript_query_timeout_seconds,
-        timeout_max_seconds = transcript_query_timeout_max_seconds,
         max_retries = transcript_query_retries,
-        orthology,
-        allow_specieslist_timeout_fallback)
+        orthology)
     summary_path = joinpath(_thoraxe_msa_dir(workdir), "candidate_summary.csv")
     metadata = _candidate_run_metadata(input_dir, target, pid_thresholds;
         sample_count = Int(pid_sample_count),
@@ -2191,8 +2073,7 @@ function build_thoraxe_msa(target::ResolvedTarget, workdir::AbstractString;
         pid_sample_count,
         pid_sample_fraction,
         sample_seed,
-        overwrite = overwrite || !summary_matches_metadata,
-        timeout_seconds = thoraxe_timeout_seconds)
+        overwrite = overwrite || !summary_matches_metadata)
     _summarize_candidate_scores(score_rows, summary_path)
     seeds = _select_scored_candidate_seeds(summary_path, pid_sample_count)
     _mark_selected_candidates!(summary_path, seeds)

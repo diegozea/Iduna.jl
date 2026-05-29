@@ -489,32 +489,5 @@ import JSON
             @test failed["exception"]["message"] == "thoraxe boom"
             @test isfile(joinpath(workdir, "target.json"))
         end
-
-        mktempdir() do tmp
-            workdir = joinpath(tmp, "timeout_failure")
-            stdout_log = joinpath(workdir, "logs", "thoraxe", "stdout.log")
-            stderr_log = joinpath(workdir, "logs", "thoraxe", "stderr.log")
-            timeout_failure = (args...;
-                kwargs...) -> throw(
-                Iduna.ThorAxeMSA._CommandTimeoutError(
-                "thoraxe --example", 12.0, stdout_log, stderr_log))
-            @test_throws Iduna.ThorAxeMSA._CommandTimeoutError Iduna.iduna(;
-                id = "P20963",
-                mmseqs_db = "db",
-                workdir,
-                _resolve_target = (args...; kwargs...) -> target,
-                _build_thoraxe_msa = timeout_failure)
-
-            failed = _read_result(workdir)
-            @test failed["status"] == "error"
-            @test failed["failed_stage"] == "thoraxe_msa"
-            @test failed["exception"]["type"] == "Iduna.ThorAxeMSA._CommandTimeoutError"
-            @test failed["exception"]["command"] == "thoraxe --example"
-            @test failed["exception"]["stdout_log"] ==
-                  joinpath("logs", "thoraxe", "stdout.log")
-            @test failed["exception"]["stderr_log"] ==
-                  joinpath("logs", "thoraxe", "stderr.log")
-            @test occursin("timed out after 12.0 seconds", failed["exception"]["message"])
-        end
     end
 end

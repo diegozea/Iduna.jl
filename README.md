@@ -68,10 +68,8 @@ ThorAxe still receives species names. Use `orthology="1:n"` or `"m:n"` to keep
 broader ortholog relationships, set `specieslist_filter=false` to skip the
 Ensembl step, or set `biomart_datasets_filter=false` to skip the BioMart
 dataset preflight.
-`transcript_query_timeout_seconds` bounds each Ensembl download attempt and
-Iduna can retry without the species list after a timeout. Set
-`thoraxe_timeout_seconds` when individual ThorAxe runs should also have a
-wall-clock limit.
+`transcript_query` runtime depends heavily on the number of species it has to
+download, so runs can be faster when you provide a small curated `specieslist`.
 
 If a complete ThorAxe `transcript_query` bundle is already available, pass it as
 `thoraxe_input_dir`; Iduna copies it into the work directory and still runs the
