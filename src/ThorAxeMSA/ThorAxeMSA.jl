@@ -598,14 +598,14 @@ function _run_transcript_query_with_retries!(tmp_gene_dir::AbstractString,
         stdout_log::AbstractString,
         stderr_log::AbstractString;
         orthology::AbstractString,
-        runner_factory::Function = (() -> _thoraxe_runner(stdout_log, stderr_log)),
+        runner::Function = _thoraxe_runner(stdout_log, stderr_log),
         sleep_fn::Function = sleep)
     for attempt in 1:attempts
         isdir(tmp_gene_dir) && rm(tmp_gene_dir; recursive = true, force = true)
         action = _transcript_query_attempt_action!(
             gene_core, query_workdir, species, initial_specieslist,
             stdout_log, stderr_log, tmp_gene_dir;
-            attempt, attempts, orthology, runner = runner_factory())
+            attempt, attempts, orthology, runner)
         action === :done && return nothing
         action === :failed && break
         sleep_fn(_retry_wait_seconds(attempt))
@@ -619,7 +619,7 @@ function _ensure_transcript_query(target::ResolvedTarget, workdir::AbstractStrin
         cached_input_dir::Union{Nothing, AbstractString} = nothing,
         max_retries::Integer = 2,
         orthology::AbstractString = "1:1",
-        transcript_query_runner_factory::Union{Nothing, Function} = nothing,
+        transcript_query_runner::Union{Nothing, Function} = nothing,
         sleep_fn::Function = sleep)
     _orthology_relationships(orthology)
     metadata = _expected_transcript_query_metadata(target;
@@ -646,10 +646,10 @@ function _ensure_transcript_query(target::ResolvedTarget, workdir::AbstractStrin
 
     attempts = max(Int(max_retries), 1)
     active_specieslist = _normalized_specieslist(specieslist)
-    runner_factory = if transcript_query_runner_factory === nothing
-        () -> _thoraxe_runner(stdout_log, stderr_log)
+    runner = if transcript_query_runner === nothing
+        _thoraxe_runner(stdout_log, stderr_log)
     else
-        transcript_query_runner_factory
+        transcript_query_runner
     end
     # Retry transcript_query because BioMart downloads often fail transiently.
     return mktempdir(workdir; prefix = "transcript_query_") do query_workdir
@@ -658,7 +658,7 @@ function _ensure_transcript_query(target::ResolvedTarget, workdir::AbstractStrin
             tmp_gene_dir, gene_core, query_workdir, species, active_specieslist,
             attempts, stdout_log, stderr_log;
             orthology,
-            runner_factory,
+            runner,
             sleep_fn)
 
         _has_valid_ensembl_bundle(tmp_gene_dir) ||

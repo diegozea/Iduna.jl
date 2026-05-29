@@ -569,7 +569,7 @@
         queried_workdir = joinpath(tmp, "queried_work")
         mkpath(queried_workdir)
         query_calls = Ref(0)
-        runner_factory = () -> command -> begin
+        query_runner = command -> begin
             query_calls[] += 1
             write_test_ensembl_bundle(joinpath(pwd(), "ENSG00000000001"))
             nothing
@@ -578,7 +578,7 @@
             target, queried_workdir;
             specieslist = "homo_sapiens",
             orthology = "1:1",
-            transcript_query_runner_factory = runner_factory,
+            transcript_query_runner = query_runner,
             sleep_fn = seconds -> nothing)
         @test rebuilt_input == Iduna.ThorAxeMSA._thoraxe_input_dir(queried_workdir)
         @test query_calls[] == 1
@@ -1237,7 +1237,7 @@ TableSet\tptroglodytes_gene_ensembl\tChimpanzee genes (Pan_tro_3.0)\t1
             retry_calls = Ref(0)
             retried_specieslists = String[]
             slept = Float64[]
-            retry_runner_factory = () -> command -> begin
+            retry_runner = command -> begin
                 retry_calls[] += 1
                 parts = command.exec
                 specieslist_index = findfirst(==("--specieslist"), parts)
@@ -1251,7 +1251,7 @@ TableSet\tptroglodytes_gene_ensembl\tChimpanzee genes (Pan_tro_3.0)\t1
                 tmp_gene_dir, gene_core, tmp, "homo_sapiens",
                 "homo_sapiens,mus_musculus", 2, stdout_log, stderr_log;
                 orthology = "1:1",
-                runner_factory = retry_runner_factory,
+                runner = retry_runner,
                 sleep_fn = seconds -> push!(slept, seconds))
             @test retry_calls[] == 2
             @test retried_specieslists ==
@@ -1264,7 +1264,7 @@ TableSet\tptroglodytes_gene_ensembl\tChimpanzee genes (Pan_tro_3.0)\t1
                 tmp_gene_dir, gene_core, tmp, "homo_sapiens",
                 "homo_sapiens,mus_musculus", 1, stdout_log, stderr_log;
                 orthology = "1:1",
-                runner_factory = () -> command -> (failed_calls[] += 1),
+                runner = command -> (failed_calls[] += 1),
                 sleep_fn = seconds -> error("failed attempts should not sleep"))
             @test failed_calls[] == 1
 
@@ -1282,7 +1282,7 @@ TableSet\tptroglodytes_gene_ensembl\tChimpanzee genes (Pan_tro_3.0)\t1
                     specieslist = "homo_sapiens,mus_musculus",
                     max_retries = 1,
                     orthology = "1:1",
-                    transcript_query_runner_factory = () -> command -> nothing,
+                    transcript_query_runner = command -> nothing,
                     sleep_fn = seconds -> nothing)
                 error("expected transcript_query failure")
             catch err
