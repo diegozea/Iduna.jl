@@ -271,6 +271,17 @@
         @test cached.n_hits == 3
         @test cached.n_new_hits == 2
 
+        overwrite_dir = joinpath(tmp, "expansion", gene_id, transcript_id, "pid_15.00")
+        overwrite_marker = joinpath(overwrite_dir, "old_output.txt")
+        mkpath(overwrite_dir)
+        write(overwrite_marker, "stale\n")
+        overwrite_cache = @test_logs (
+            :info, r"Clearing existing MSA expansion run directory") Iduna.MSAExpansion._prepare_expansion_cache!(
+            overwrite_dir, tmp, identity, outputs; overwrite = true)
+        @test overwrite_cache.reusable === false
+        @test isempty(overwrite_cache.cache_warnings)
+        @test !ispath(overwrite_dir)
+
         changed_mode_identity = Iduna.MSAExpansion._expansion_identity(
             target, seed, seed_sto, nothing, db;
             match_mode = 3,

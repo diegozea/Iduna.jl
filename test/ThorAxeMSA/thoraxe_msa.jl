@@ -792,6 +792,39 @@
             @test zero_sample_row.selection_mode == "all_candidates"
             @test zero_sample_row.n_samples == 0
 
+            invalid_uniprot = joinpath(tmp, "invalid_uniprot.fasta")
+            write(invalid_uniprot, ">P0\nA\n")
+            invalid_target = Iduna.ResolvedTarget(;
+                input_id = "P0",
+                input_kind = :uniprot,
+                uniprot_id = "P0",
+                ensembl_gene_id = "ENSG",
+                transcript_id = "ENST",
+                uniprot_sequence_path = invalid_uniprot)
+            invalid_pid = 52.5
+            write_fake_thoraxe_dir(
+                Iduna.ThorAxeMSA._pid_sample_thoraxe_dir(tmp, invalid_pid, 0))
+            invalid_metadata = Iduna.ThorAxeMSA._candidate_run_metadata(
+                scoring_input, invalid_target, [invalid_pid];
+                sample_count = 0,
+                sample_fraction = 1.0,
+                sample_seed = UInt64(13),
+                requested_sample_seed = 13,
+                effective_specieslist = nothing,
+                orthology = "1:1",
+                specieslist_filter = false,
+                biomart_datasets_filter = false)
+            invalid_row = @test_logs (:info, r"Skipping ineligible ThorAxe PID candidate") match_mode=:any Iduna.ThorAxeMSA._score_pid_candidate(
+                invalid_target, scoring_input, tmp, invalid_pid, 1, nothing;
+                sample_count = 0,
+                sample_fraction = 1.0,
+                sample_seed = UInt64(13),
+                metadata = invalid_metadata)
+            @test invalid_row.pid == invalid_pid
+            @test !invalid_row.eligible
+            @test invalid_row.msa0_status == "invalid_msa0"
+            @test occursin("indels", invalid_row.msa0_issue)
+
             sampled_pid = 53.0
             sampled_calls = Ref(0)
             sampled_thoraxe = (input_dir, run_root; identity, specieslist, phylosofs,
