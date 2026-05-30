@@ -77,9 +77,11 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
     failed_stage = "prepare_output_dir"
 
     try
+        @info "Preparing Iduna output directory." input_id=primary workdir output_dir overwrite
         root = Utils.prepare_output_dir(primary; workdir, output_dir, overwrite)
 
         failed_stage = "resolve_target"
+        @info "Resolving target identifiers." input_id=primary workdir=root
         target = _resolve_target(primary;
             workdir = root,
             uniprot_id = supplied_uniprot,
@@ -87,9 +89,11 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
             ensembl_protein_id,
             transcript_id = disambiguating_transcript,
             species)
+        @info "Writing target metadata." input_id=primary gene_id=target.ensembl_gene_id transcript_id=target.transcript_id
         Utils.write_json(joinpath(root, "target.json"), _target_summary(target, root))
 
         failed_stage = "thoraxe_msa"
+        @info "Building ThorAxe MSA." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id workdir=root
         thoraxe = _build_thoraxe_msa(target, root;
             pid_thresholds,
             specieslist,
@@ -106,18 +110,25 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
         expansions = Utils.ExpansionResult[]
         if !no_expansion
             failed_stage = "msa_expansion"
-            expansions = [_expand_msa(target, seed, root;
-                              mmseqs_db,
-                              overwrite,
-                              match_mode,
-                              match_ratio,
-                              hmmbuild_symfrac,
-                              centroids,
-                              threads)
-                          for seed in thoraxe.seeds]
+            n_seeds = length(thoraxe.seeds)
+            for (index, seed) in enumerate(thoraxe.seeds)
+                @info "Expanding MSA seed." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id pid=seed.pid seed_index=index n_seeds
+                push!(expansions,
+                    _expand_msa(target, seed, root;
+                        mmseqs_db,
+                        overwrite,
+                        match_mode,
+                        match_ratio,
+                        hmmbuild_symfrac,
+                        centroids,
+                        threads))
+            end
+        else
+            @info "Skipping MSA expansion." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id
         end
 
         failed_stage = "validation"
+        @info "Validating Iduna results." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id n_seeds=length(thoraxe.seeds)
         validations = [_validate_results(target, seed,
                            no_expansion ? nothing : expansions[index], root)
                        for (index, seed) in enumerate(thoraxe.seeds)]
@@ -135,7 +146,10 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
             status
         )
         result = Utils._relative_result_paths(result)
+        @info "Writing Iduna result artifact." input_id=primary status=result.status result_path=joinpath(
+            root, "result.json")
         Utils.write_json(joinpath(root, "result.json"), Utils.result_summary(result))
+        @info "Iduna pipeline completed." input_id=primary status=result.status workdir=root
         return result
     catch err
         if root !== nothing

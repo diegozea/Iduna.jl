@@ -382,6 +382,7 @@ end
 
 function _run_labeled(cmd::Cmd, label::AbstractString, logs_dir::AbstractString)
     mkpath(logs_dir)
+    @info "Running MSA expansion command." label logs_dir
     run_logged(cmd;
         stdout_path = joinpath(logs_dir, "$(label)_stdout.log"),
         stderr_path = joinpath(logs_dir, "$(label)_stderr.log"))
@@ -638,6 +639,7 @@ function _write_centroid_msa(transcript_id::AbstractString,
         archived,
         logs_dir::AbstractString)
     mkpath(centroid_dir)
+    @info "Writing centroid MSA." transcript_id centroid_dir
 
     # Keep working files in the MMseqs temp area; only final centroid files go here.
     mktempdir(tmp_dir; prefix = "centroid_msa_") do centroid_tmp
@@ -735,10 +737,14 @@ function _prepare_expansion_cache!(run_dir::AbstractString,
         overwrite::Bool)
     cache_warnings = String[]
     if overwrite && isdir(run_dir)
+        @info "Clearing existing MSA expansion run directory." run_dir
         safe_rm(run_dir, workdir)
     elseif !overwrite
         cache = _classify_step_state(run_dir, identity, outputs)
-        cache.reusable && return (; reusable = true, cache_warnings)
+        if cache.reusable
+            @info "Reusing cached MSA expansion." run_dir
+            return (; reusable = true, cache_warnings)
+        end
         if cache.warning !== nothing
             warning = String(cache.warning)
             push!(cache_warnings, warning)
@@ -772,6 +778,7 @@ function _cached_expansion_result(ctx, workdir::AbstractString)
 end
 
 function _prepare_expansion_dirs!(ctx, cache_warnings::Vector{String})
+    @info "Preparing MSA expansion directories." run_dir=ctx.run_dir db_dir=ctx.db_dir hmm_dir=ctx.hmm_dir logs_dir=ctx.logs_dir
     mkpath.((
         ctx.db_dir, ctx.seed_dir, ctx.hmm_dir, ctx.tmp_root, ctx.unpack_dir, ctx.logs_dir))
     foreach(warning -> _write_cache_warning(ctx.logs_dir, warning), cache_warnings)
@@ -782,6 +789,8 @@ end
 
 function _archive_expansion_seed(seed::SeedSelection, ctx)
     seed_label = "seed_pid$(format_pid(seed.pid))"
+    run_dir = hasproperty(ctx, :run_dir) ? ctx.run_dir : nothing
+    @info "Archiving MSA expansion seed." pid=seed.pid seed_label run_dir
     archived_seed_sto = joinpath(ctx.seed_dir, "$(seed_label).sto")
     cp(ctx.seed_stockholm, archived_seed_sto; force = true)
     archived_seed_fasta = nothing
@@ -926,19 +935,24 @@ function _run_expansion_workflow!(target::ResolvedTarget,
         centroids::Bool,
         threads::Union{Nothing, Integer})
     return mktempdir(ctx.tmp_root; prefix = "mmseqs_tmp_") do tmp_dir
+        @info "Running MMseqs expansion workflow." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id pid=archived.seed_pid tmp_dir threads
         # MMseqs finds candidate homologs; HMMER maps them back to seed columns.
         db_paths = _mmseqs_search(archived.sanitized_seed, mmseqs_db, ctx.db_dir,
             tmp_dir, ctx.logs_dir; match_mode, match_ratio, threads)
         hits_tsv = joinpath(ctx.run_dir, "mmseqs_hits_raw.tsv")
+        @info "Converting MMseqs hits." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id pid=archived.seed_pid hits_tsv
         _run_labeled(
             `$(MMseqs2_jll.mmseqs()) convertalis $(db_paths.profile_db) $(db_paths.seq_db) $(db_paths.realigned_result_db) $hits_tsv --format-output query,target,tseq`,
             "convertalis", ctx.logs_dir)
 
+        @info "Writing MSA expansion hits." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id pid=archived.seed_pid
         hits = _write_expansion_hits!(
             hits_tsv, ctx.run_dir, ctx.hmm_dir, archived.seed_set)
+        @info "Building seed HMM." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id pid=archived.seed_pid hmmbuild_symfrac
         hmm_paths = _build_seed_hmm!(
             ctx.seed_dir, archived.sanitized_seed, hmmbuild_symfrac, ctx.logs_dir)
         archived = _with_seed_match_s_exon_codes(archived, hmm_paths.annotated_seed)
+        @info "Aligning MSA expansion hits." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id pid=archived.seed_pid n_new_hits=length(hits.filtered_hits)
         aligned_sto = _align_expansion_hits!(ctx.hmm_dir,
             hmm_paths.annotated_seed,
             archived.sanitized_seed,
@@ -947,6 +961,7 @@ function _run_expansion_workflow!(target::ResolvedTarget,
             hits.filtered_hits,
             archived.seed_set,
             ctx.logs_dir)
+        @info "Writing expanded alignment outputs." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id pid=archived.seed_pid
         output_paths = _write_expansion_alignment_outputs!(
             target, ctx.unpack_dir, aligned_sto, archived.seed_names,
             hits.raw_hits_fasta, archived, archived.seed_pid)
@@ -995,6 +1010,7 @@ function expand_msa(target::ResolvedTarget,
         threads::Union{Nothing, Integer} = Threads.nthreads())
     0.0 <= hmmbuild_symfrac <= 1.0 ||
         error("hmmbuild_symfrac must be between 0.0 and 1.0.")
+    @info "Preparing MSA expansion." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id pid=seed.pid mmseqs_db centroids threads
     ensure_mmseqs_db(mmseqs_db)
 
     ctx = _expansion_context(target, seed, workdir, mmseqs_db;

@@ -144,6 +144,27 @@ import JSON
     @test_throws ErrorException Iduna._select_seed_index(
         result; pid = 80.0, index = nothing, label = "seed")
 
+    @testset "pipeline progress logging" begin
+        mktempdir() do tmp
+            logged = @test_logs (:info, r"Preparing Iduna output directory") (:info,
+                r"Resolving target identifiers") (:info, r"Building ThorAxe MSA") (:info,
+                r"Expanding MSA seed") (:info, r"Validating Iduna results") (:info,
+                r"Writing Iduna result artifact") (:info,
+                r"Iduna pipeline completed") match_mode=:any begin
+                Iduna.iduna(;
+                    id = "Q13148",
+                    mmseqs_db = "db",
+                    workdir = joinpath(tmp, "logged"),
+                    _resolve_target = (args...; kwargs...) -> target,
+                    _build_thoraxe_msa = (args...; kwargs...) -> thoraxe,
+                    _expand_msa = (args...; kwargs...) -> expansion,
+                    _validate_results = (args...; kwargs...) -> validation)
+            end
+            @test logged.input_id == "Q13148"
+            @test logged.status === :warn
+        end
+    end
+
     @testset "result pretty printing" begin
         expansion_text = repr("text/plain", expansion)
         @test startswith(expansion_text, "ExpansionResult(\n")

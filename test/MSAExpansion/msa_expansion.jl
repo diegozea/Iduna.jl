@@ -260,8 +260,8 @@
               "state file disappeared while reading"
         hits_fasta = outputs.hits_fasta
 
-        cached = Iduna.MSAExpansion.expand_msa(target, seed, tmp; mmseqs_db = db,
-            threads = 1)
+        cached = @test_logs (:info, r"Reusing cached MSA expansion") match_mode=:any Iduna.MSAExpansion.expand_msa(
+            target, seed, tmp; mmseqs_db = db, threads = 1)
         cached_with_new_threads = Iduna.MSAExpansion.expand_msa(
             target, seed, tmp; mmseqs_db = db, threads = 8)
         hits_msa = Iduna.MSAExpansion.read_file(hits_fasta, Iduna.MSAExpansion.FASTA)
@@ -270,6 +270,17 @@
         @test cached.n_hits == Iduna.MSAExpansion.nsequences(hits_msa)
         @test cached.n_hits == 3
         @test cached.n_new_hits == 2
+
+        overwrite_dir = joinpath(tmp, "expansion", gene_id, transcript_id, "pid_15.00")
+        overwrite_marker = joinpath(overwrite_dir, "old_output.txt")
+        mkpath(overwrite_dir)
+        write(overwrite_marker, "stale\n")
+        overwrite_cache = @test_logs (
+            :info, r"Clearing existing MSA expansion run directory") Iduna.MSAExpansion._prepare_expansion_cache!(
+            overwrite_dir, tmp, identity, outputs; overwrite = true)
+        @test overwrite_cache.reusable === false
+        @test isempty(overwrite_cache.cache_warnings)
+        @test !ispath(overwrite_dir)
 
         changed_mode_identity = Iduna.MSAExpansion._expansion_identity(
             target, seed, seed_sto, nothing, db;

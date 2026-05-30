@@ -628,12 +628,14 @@ function _ensure_transcript_query(target::ResolvedTarget, workdir::AbstractStrin
         orthology,
         source_kind = cached_input_dir === nothing ? "transcript_query" : "cached_input")
     if cached_input_dir !== nothing
+        @info "Preparing ThorAxe input from cached transcript_query bundle." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id source=cached_input_dir workdir
         return _ensure_cached_thoraxe_input(cached_input_dir, workdir; overwrite, metadata)
     end
 
     input_dir = _thoraxe_input_dir(workdir)
     if !overwrite && _has_valid_ensembl_bundle(input_dir) &&
        _has_matching_transcript_query_metadata(input_dir, metadata)
+        @info "Reusing ThorAxe transcript_query input." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id input_dir
         return input_dir
     end
 
@@ -647,6 +649,7 @@ function _ensure_transcript_query(target::ResolvedTarget, workdir::AbstractStrin
 
     attempts = max(Int(max_retries), 1)
     active_specieslist = _normalized_specieslist(specieslist)
+    @info "Running ThorAxe transcript_query." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id species specieslist=active_specieslist attempts
     runner = if transcript_query_runner === nothing
         thoraxe_runner_factory(stdout_log, stderr_log)
     else
@@ -1326,6 +1329,7 @@ function _ensure_pid_candidate_samples(workdir::AbstractString,
         gene_id::AbstractString,
         transcript_id::AbstractString)
     reference_idx = _reference_index(msa, gene_id, transcript_id)
+    @info "Preparing ThorAxe PID species samples." gene_id transcript_id pid sample_count sample_fraction
     for sample_idx in 1:sample_count
         paths = _pid_sample_paths(workdir, pid, sample_idx)
         rng = _sample_rng(sample_seed, sample_idx)
@@ -1377,6 +1381,7 @@ function _run_thoraxe_pid_msa(target::ResolvedTarget,
     if !overwrite && isfile(paths.fasta_path) && isfile(paths.stockholm_path) &&
        _seed_has_s_exon_annotations(paths.stockholm_path) &&
        (!keep_thoraxe_dir || (isfile(path_table) && _has_phylosofs_outputs(thoraxe_dir)))
+        @info "Reusing ThorAxe PID MSA." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id pid sample_idx fasta_path=paths.fasta_path stockholm_path=paths.stockholm_path
         _ensure_seed_blocks_tsv(paths, pid)
         return paths.fasta_path, paths.stockholm_path, thoraxe_dir
     end
@@ -1387,6 +1392,7 @@ function _run_thoraxe_pid_msa(target::ResolvedTarget,
     stdout_log = joinpath(_thoraxe_logs_dir(workdir), "$(sample_label)_stdout.log")
     stderr_log = joinpath(_thoraxe_logs_dir(workdir), "$(sample_label)_stderr.log")
     runner = _thoraxe_runner(stdout_log, stderr_log)
+    @info "Running ThorAxe PID MSA." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id pid sample_idx specieslist stdout_log stderr_log
 
     if keep_thoraxe_dir
         return _run_kept_thoraxe_pid_msa!(target, input_dir, workdir, paths,
@@ -1415,6 +1421,7 @@ function _generate_pid_candidate(target::ResolvedTarget,
         specieslist::Union{Nothing, AbstractString};
         overwrite::Bool = false,
         thoraxe_fn::Function = ThorAxe.thoraxe)
+    @info "Generating ThorAxe PID candidate." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id pid
     paths = _pid_sample_paths(workdir, pid, 0)
     fasta_path, sto_path,
     thoraxe_dir = _run_thoraxe_pid_msa(
@@ -1511,18 +1518,21 @@ function _score_pid_candidate(target::ResolvedTarget,
         overwrite::Bool = false,
         thoraxe_fn::Function = ThorAxe.thoraxe,
         identity_fn::Function = compute_identity_against_reference)
+    @info "Scoring ThorAxe PID candidate." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id pid pid_order sample_count
     candidate = merge(
         _generate_pid_candidate(target, input_dir, workdir, pid, specieslist;
             overwrite, thoraxe_fn),
         (; workdir))
     validation = _candidate_msa0_validation(target, candidate.msa, pid, workdir)
     if !validation.eligible
+        @info "Skipping ineligible ThorAxe PID candidate." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id pid issue=validation.issue
         return _candidate_summary_row(
             target, candidate, pid, pid_order, validation;
             sample_count, sample_fraction, sample_seed, metadata)
     end
 
     if sample_count == 0
+        @info "Keeping ThorAxe PID candidate without sample scoring." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id pid
         return _candidate_summary_row(
             target, candidate, pid, pid_order, validation;
             sample_count, sample_fraction, sample_seed, metadata)
@@ -1538,6 +1548,7 @@ function _score_pid_candidate(target::ResolvedTarget,
 
     score_rows = NamedTuple[]
     for sample_idx in 1:sample_count
+        @info "Scoring ThorAxe PID sample." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id pid sample_idx sample_count
         sample_paths = _pid_sample_paths(workdir, pid, sample_idx)
         species_file = sample_paths.species_file
         isfile(species_file) || continue
@@ -2002,6 +2013,7 @@ function _score_pid_candidates(target::ResolvedTarget,
         thoraxe_fn::Function = ThorAxe.thoraxe,
         identity_fn::Function = compute_identity_against_reference)
     score_rows = NamedTuple[]
+    @info "Scoring ThorAxe PID candidates." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id n_pids=length(pid_thresholds) pid_sample_count pid_sample_fraction
     for (pid_order, pid) in enumerate(Float64.(pid_thresholds))
         push!(score_rows,
             _score_pid_candidate(
@@ -2041,8 +2053,10 @@ function build_thoraxe_msa(target::ResolvedTarget, workdir::AbstractString;
     sample_seed = pid_sample_seed === nothing ? UInt64(rand(UInt32)) :
                   _normalize_pid_sample_seed(pid_sample_seed)
     # Species filters run only when transcript_query will create new input.
+    @info "Resolving ThorAxe species filters." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id specieslist specieslist_filter biomart_datasets_filter orthology
     filters = _resolve_thoraxe_species_filters(target, specieslist, orthology,
         cached_thoraxe_input_dir, specieslist_filter, biomart_datasets_filter)
+    @info "Preparing ThorAxe transcript_query input." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id effective_specieslist=filters.effective_specieslist cached_input=cached_thoraxe_input_dir
     input_dir = _ensure_transcript_query(target, workdir;
         specieslist = filters.effective_specieslist, overwrite,
         cached_input_dir = cached_thoraxe_input_dir,
@@ -2062,6 +2076,7 @@ function build_thoraxe_msa(target::ResolvedTarget, workdir::AbstractString;
                                _has_matching_candidate_summary(summary_path, metadata)
     cached = overwrite ? nothing : _cached_selected_seeds(summary_path, workdir, metadata)
     if cached !== nothing
+        @info "Reusing cached ThorAxe MSA candidates." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id n_seeds=length(cached.seeds) summary_path
         return _cached_thoraxe_msa_result(
             input_dir, summary_path, target, workdir, cached,
             filters.species_filter, filters.biomart_filter;
@@ -2076,6 +2091,7 @@ function build_thoraxe_msa(target::ResolvedTarget, workdir::AbstractString;
         sample_seed,
         overwrite = overwrite || !summary_matches_metadata)
     _summarize_candidate_scores(score_rows, summary_path)
+    @info "Selecting ThorAxe seed candidates." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id summary_path pid_sample_count
     seeds = _select_scored_candidate_seeds(summary_path, pid_sample_count)
     _mark_selected_candidates!(summary_path, seeds)
     warnings = _thoraxe_result_warnings(target, seeds, workdir, input_dir, summary_path,
