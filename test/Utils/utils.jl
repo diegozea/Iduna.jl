@@ -202,6 +202,8 @@
         stage_identity = (; input = "A", option = 1)
         stage_output = joinpath(workdir, "stage", "artifact.txt")
         stage_outputs = (; artifact = stage_output)
+        @test Iduna.Utils._stage_output_exists(nothing) === true
+        @test Iduna.Utils._stage_output_exists([stage_output]) === false
         missing_stage = Iduna.Utils._classify_stage_state(
             stage_dir, stage_identity, stage_outputs; stage_label = "example")
         @test missing_stage.status === :missing
@@ -209,6 +211,7 @@
 
         mkpath(dirname(stage_output))
         write(stage_output, "artifact")
+        @test Iduna.Utils._stage_output_exists([stage_output]) === true
         stale_stage = Iduna.Utils._classify_stage_state(
             stage_dir, stage_identity, stage_outputs; stage_label = "example")
         @test stale_stage.status === :stale
