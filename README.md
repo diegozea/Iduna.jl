@@ -23,8 +23,10 @@ expanded = load_expanded_msa(result)
 The package writes a stable work directory containing ThorAxe outputs, PID seed
 MSAs, expansion outputs, logs, and validation stats. `result.workdir` is
 absolute, while artifact paths under it are reported relative to `workdir`.
-Expansion runs record a `step_state.json` input identity, so cached outputs are
-reused only when the seed MSA and expansion options match the current run.
+Pipeline stages record `stage_state.json` manifests with input identities and
+required outputs. Rerunning with `overwrite=false` reuses completed matching
+stages, including `transcript_query` bundles, and rebuilds only missing, stale,
+failed, or incomplete stages.
 
 For seed selection, Iduna runs `transcript_query` once and builds one
 full-species candidate `msa_0` at each PID threshold. Each candidate is validated:
@@ -74,4 +76,6 @@ download, so runs can be faster when you provide a small curated `specieslist`.
 If a complete ThorAxe `transcript_query` bundle is already available, pass it as
 `thoraxe_input_dir`; Iduna copies it into the work directory and still runs the
 ThorAxe MSA stage. Unless `no_expansion=true`, it then continues with the
-MMseqs/HMMER expansion stages normally.
+MMseqs/HMMER expansion stages normally. Copied or previously generated
+`thoraxe_input/Ensembl` bundles are fingerprinted and reused on later reruns
+when the target, species list, orthology, and filter options match.

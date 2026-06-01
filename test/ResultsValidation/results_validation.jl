@@ -85,6 +85,20 @@
         @test indel_validation.status === :warn
         @test occursin("indels relative to the UniProt sequence",
             only(indel_validation.warnings))
+        indel_row = (;
+            aln_identical = false,
+            aln_insertions = 1,
+            aln_deletions = 0)
+        @test occursin("Seed query has indels",
+            only(Iduna.ResultsValidation._cached_alignment_warnings(indel_row, nothing)))
+        identical_row = (;
+            aln_identical = true,
+            aln_insertions = 0,
+            aln_deletions = 0)
+        @test isempty(
+            Iduna.ResultsValidation._cached_alignment_warnings(identical_row, nothing))
+        @test isempty(Iduna.ResultsValidation._alignment_warnings(nothing,
+            (; insertions = 0, deletions = 0, identical = true)))
 
         relative_seed = Iduna.SeedSelection(;
             pid = 10.0,
@@ -145,5 +159,48 @@
             transcript_target, seed, expansion, joinpath(tmp, "transcript"))
         @test transcript_validation.status === :ok
         @test isfile(transcript_validation.stats_path)
+        overwritten_transcript_validation = Iduna.ResultsValidation.validate_results(
+            transcript_target, seed, expansion, joinpath(tmp, "transcript");
+            overwrite = true)
+        @test overwritten_transcript_validation.status === :ok
+        cached_transcript_validation = Iduna.ResultsValidation.validate_results(
+            transcript_target, seed, expansion, joinpath(tmp, "transcript"))
+        @test cached_transcript_validation.status === :ok
+        skipped_expansion = Iduna.ExpansionResult(;
+            run_dir = expansion.run_dir,
+            seed_stockholm = expansion.seed_stockholm,
+            seed_fasta = expansion.seed_fasta,
+            hits_fasta = expansion.hits_fasta,
+            full_stockholm = expansion.full_stockholm,
+            match_stockholm = expansion.match_stockholm,
+            a3m_path = expansion.a3m_path,
+            s_exon_blocks_tsv = expansion.s_exon_blocks_tsv,
+            db_dir = expansion.db_dir,
+            hmm_dir = expansion.hmm_dir,
+            logs_dir = expansion.logs_dir,
+            n_hits = expansion.n_hits,
+            n_new_hits = expansion.n_new_hits,
+            status = :skipped,
+            workdir = expansion.workdir)
+        cached_after_expansion_reuse = Iduna.ResultsValidation.validate_results(
+            transcript_target, seed, skipped_expansion, joinpath(tmp, "transcript"))
+        @test cached_after_expansion_reuse.status === :ok
+        validation_state = Iduna.Utils._read_stage_state(
+            Iduna.ResultsValidation._validation_dir(joinpath(tmp, "transcript"), seed))
+        @test validation_state["action"] == "reuse"
+
+        missing_seed = Iduna.SeedSelection(;
+            pid = 20.0,
+            median_identity = 100.0,
+            mean_identity = 100.0,
+            stockholm_path = joinpath(tmp, "missing_seed.sto"),
+            summary_path = joinpath(tmp, "missing_summary.csv"))
+        failure_workdir = joinpath(tmp, "validation_failure")
+        @test_throws ErrorException Iduna.ResultsValidation.validate_results(
+            transcript_target, missing_seed, nothing, failure_workdir)
+        failed_state = Iduna.Utils._read_stage_state(
+            Iduna.ResultsValidation._validation_dir(failure_workdir, missing_seed))
+        @test failed_state["status"] == "failed"
+        @test failed_state["exception"]["type"] == "ErrorException"
     end
 end

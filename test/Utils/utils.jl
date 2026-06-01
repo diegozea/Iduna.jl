@@ -102,6 +102,13 @@
             sleep_seconds = 0,
             http_get = exhausted).status == 503
         @test attempts[] == 1
+
+        throws_unretryable = (url; kwargs...) -> error("network boom")
+        @test_throws ErrorException Iduna.Utils._http_get_with_retries(
+            "https://example.test/error", [];
+            retries = 2,
+            sleep_seconds = 0,
+            http_get = throws_unretryable)
     end
 
     identical = Iduna.Utils.protein_alignment_stats("ACDE", "ACDE")
@@ -159,6 +166,7 @@
         @test Iduna.Utils._relative_artifact_path(nothing, workdir) === nothing
         @test Iduna.Utils._resolve_artifact_path(relative_path, workdir) == inside_path
         @test Iduna.Utils._resolve_artifact_path(outside_path, workdir) == outside_path
+        @test Iduna.Utils._resolve_artifact_path(nothing, workdir) === nothing
 
         formatted = Iduna.Utils.format_fasta("seq", "acdefghijklmnopqrstuvwxyz"^3)
         @test startswith(formatted, ">seq\nACDEFGHIJKLMNOPQRSTUVWXYZ")
@@ -189,5 +197,78 @@
             workdir)
         @test realpath(chomp(read(cd_stdout, String))) == realpath(workdir)
         @test isempty(read(cd_stderr, String))
+
+        stage_dir = Iduna.Utils._pipeline_stage_dir(workdir, "example:stage")
+        stage_identity = (; input = "A", option = 1)
+        stage_output = joinpath(workdir, "stage", "artifact.txt")
+        stage_outputs = (; artifact = stage_output)
+        @test Iduna.Utils._stage_output_exists(nothing) === true
+        @test Iduna.Utils._stage_output_exists([stage_output]) === false
+        missing_stage = Iduna.Utils._classify_stage_state(
+            stage_dir, stage_identity, stage_outputs; stage_label = "example")
+        @test missing_stage.status === :missing
+        @test missing_stage.reusable === false
+
+        mkpath(dirname(stage_output))
+        write(stage_output, "artifact")
+        @test Iduna.Utils._stage_output_exists([stage_output]) === true
+        stale_stage = Iduna.Utils._classify_stage_state(
+            stage_dir, stage_identity, stage_outputs; stage_label = "example")
+        @test stale_stage.status === :stale
+        @test occursin("no stage_state.json", stale_stage.warning)
+
+        Iduna.Utils._write_stage_state(stage_dir;
+            stage = "example",
+            stage_key = "example:stage",
+            status = :running,
+            identity = stage_identity,
+            outputs = stage_outputs,
+            action = :run,
+            workdir)
+        running_stage = Iduna.Utils._classify_stage_state(
+            stage_dir, stage_identity, stage_outputs; stage_label = "example")
+        @test running_stage.status === :unfinished
+
+        Iduna.Utils._write_stage_state(stage_dir;
+            stage = "example",
+            stage_key = "example:stage",
+            status = :done,
+            identity = stage_identity,
+            outputs = stage_outputs,
+            action = :run,
+            workdir)
+        done_stage = Iduna.Utils._classify_stage_state(
+            stage_dir, stage_identity, stage_outputs; stage_label = "example")
+        @test done_stage.reusable === true
+        @test done_stage.status === :done
+        changed_stage = Iduna.Utils._classify_stage_state(
+            stage_dir, (; input = "B", option = 1), stage_outputs;
+            stage_label = "example")
+        @test changed_stage.status === :stale
+
+        summaries = Iduna.Utils.collect_stage_summaries(workdir)
+        summary_idx = findfirst(
+            summary -> summary.stage_key == "example:stage", summaries)
+        @test summary_idx !== nothing
+        @test summaries[summary_idx].action == "run"
+        @test summaries[summary_idx].outputs["artifact"] ==
+              joinpath("stage", "artifact.txt")
+        filtered_summaries = Iduna.Utils.collect_stage_summaries(workdir;
+            stage_keys = ["example:stage"])
+        @test length(filtered_summaries) == 1
+        @test only(filtered_summaries).stage_key == "example:stage"
+        @test isempty(Iduna.Utils.collect_stage_summaries(workdir;
+            stage_keys = ["missing:stage"]))
+        @test Iduna.Utils._stage_state_unreadable_message(nothing) ==
+              "state file disappeared while reading"
+        invalid_stage_dir = joinpath(workdir, "invalid-stage")
+        mkpath(invalid_stage_dir)
+        write(joinpath(invalid_stage_dir, "stage_state.json"), "{bad json")
+        unreadable_state = Iduna.Utils._read_stage_state(invalid_stage_dir)
+        @test unreadable_state isa NamedTuple
+        @test Iduna.Utils._stage_state_unreadable_message(unreadable_state) !== nothing
+        invalid_state = joinpath(workdir, "invalid_stage_state.json")
+        write(invalid_state, "{bad json")
+        @test Iduna.Utils._stage_summary_from_state_path(invalid_state, workdir) === nothing
     end
 end
