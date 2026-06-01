@@ -145,5 +145,30 @@
             transcript_target, seed, expansion, joinpath(tmp, "transcript"))
         @test transcript_validation.status === :ok
         @test isfile(transcript_validation.stats_path)
+        cached_transcript_validation = Iduna.ResultsValidation.validate_results(
+            transcript_target, seed, expansion, joinpath(tmp, "transcript"))
+        @test cached_transcript_validation.status === :ok
+        skipped_expansion = Iduna.ExpansionResult(;
+            run_dir = expansion.run_dir,
+            seed_stockholm = expansion.seed_stockholm,
+            seed_fasta = expansion.seed_fasta,
+            hits_fasta = expansion.hits_fasta,
+            full_stockholm = expansion.full_stockholm,
+            match_stockholm = expansion.match_stockholm,
+            a3m_path = expansion.a3m_path,
+            s_exon_blocks_tsv = expansion.s_exon_blocks_tsv,
+            db_dir = expansion.db_dir,
+            hmm_dir = expansion.hmm_dir,
+            logs_dir = expansion.logs_dir,
+            n_hits = expansion.n_hits,
+            n_new_hits = expansion.n_new_hits,
+            status = :skipped,
+            workdir = expansion.workdir)
+        cached_after_expansion_reuse = Iduna.ResultsValidation.validate_results(
+            transcript_target, seed, skipped_expansion, joinpath(tmp, "transcript"))
+        @test cached_after_expansion_reuse.status === :ok
+        validation_state = Iduna.Utils._read_stage_state(
+            Iduna.ResultsValidation._validation_dir(joinpath(tmp, "transcript"), seed))
+        @test validation_state["action"] == "reuse"
     end
 end

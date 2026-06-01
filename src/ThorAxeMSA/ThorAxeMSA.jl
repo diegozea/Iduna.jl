@@ -23,7 +23,8 @@ using ..Utils: DEFAULT_PID_THRESHOLDS, ResolvedTarget, SeedSelection, ThorAxeMSA
                resolve_sequence_name, safe_rm,
                has_s_exon_annotations, s_exon_blocks_path, set_s_exon_annotations!,
                strip_ensembl_version, write_fasta, write_json, write_s_exon_blocks_tsv,
-               write_text
+               write_text, _classify_stage_state, _pipeline_stage_dir,
+               _read_stage_state, _write_stage_state
 
 export assemble_transcript_msa,
        build_thoraxe_msa,
@@ -69,6 +70,91 @@ function _thoraxe_candidates_dir(workdir::AbstractString)
 end
 _thoraxe_logs_dir(workdir::AbstractString) = joinpath(workdir, "logs", "thoraxe")
 _thoraxe_pid_runs_dir(workdir::AbstractString) = joinpath(_thoraxe_msa_dir(workdir), "runs")
+function _thoraxe_input_stage_dir(workdir::AbstractString)
+    _pipeline_stage_dir(workdir, "thoraxe_input")
+end
+function _thoraxe_msa_stage_dir(workdir::AbstractString)
+    _pipeline_stage_dir(workdir, "thoraxe_msa")
+end
+
+function _thoraxe_input_outputs(input_dir::AbstractString)
+    ensembl_dir = joinpath(input_dir, "Ensembl")
+    outputs = Dict{String, Any}("ensembl_dir" => ensembl_dir)
+    for file in _REQUIRED_ENSEMBL_FILES
+        outputs[file] = joinpath(ensembl_dir, file)
+    end
+    outputs[_TRANSCRIPT_QUERY_METADATA_FILE] = _transcript_query_metadata_path(input_dir)
+    return outputs
+end
+
+function _thoraxe_input_identity(input_dir::AbstractString, expected)
+    return merge(expected, (; input_fingerprint = _bundle_fingerprint(input_dir)))
+end
+
+function _write_thoraxe_input_state(workdir::AbstractString,
+        input_dir::AbstractString,
+        status::Symbol,
+        identity;
+        action,
+        warnings::AbstractVector{<:AbstractString} = String[],
+        exception = nothing)
+    return _write_stage_state(_thoraxe_input_stage_dir(workdir);
+        stage = "thoraxe_input",
+        stage_key = "thoraxe_input",
+        status,
+        identity,
+        outputs = _thoraxe_input_outputs(input_dir),
+        action,
+        warnings,
+        exception,
+        workdir)
+end
+
+function _classify_thoraxe_input_stage(workdir::AbstractString,
+        input_dir::AbstractString,
+        identity;
+        overwrite::Bool)
+    overwrite && return (; reusable = false, status = :stale, warning = nothing)
+    return _classify_stage_state(_thoraxe_input_stage_dir(workdir), identity,
+        _thoraxe_input_outputs(input_dir); stage_label = "ThorAxe transcript_query input")
+end
+
+function _maybe_reuse_thoraxe_input(workdir::AbstractString,
+        input_dir::AbstractString,
+        identity,
+        expected,
+        cache;
+        overwrite::Bool,
+        manifest_message::AbstractString,
+        legacy_message::AbstractString)
+    overwrite && return nothing
+    if cache.reusable
+        @info manifest_message input_dir
+        _write_thoraxe_input_state(workdir, input_dir, :done, identity; action = :reuse)
+        return input_dir
+    end
+    if _has_valid_ensembl_bundle(input_dir) &&
+       _has_matching_transcript_query_metadata(input_dir, expected)
+        @info legacy_message input_dir
+        _write_thoraxe_input_state(workdir, input_dir, :done,
+            _thoraxe_input_identity(input_dir, expected); action = :reuse)
+        return input_dir
+    end
+    return nothing
+end
+
+function _warn_stage_cache(cache, path::AbstractString)
+    cache.warning === nothing || @warn String(cache.warning) path status=cache.status
+    return nothing
+end
+
+_stage_action(cache) = cache.status === :missing ? :run : :rebuild
+
+function _exception_summary(err)
+    return (;
+        type = string(typeof(err)),
+        message = sprint(showerror, err))
+end
 
 function _has_valid_ensembl_bundle(bundle_root::AbstractString)::Bool
     ensembl_dir = joinpath(bundle_root, "Ensembl")
@@ -553,19 +639,34 @@ function _ensure_cached_thoraxe_input(source_dir::AbstractString,
             source_path = source,
             source_fingerprint
         ))
-    if !overwrite && _has_valid_ensembl_bundle(dest) &&
-       _has_matching_transcript_query_metadata(dest, expected)
-        return dest
-    end
+    identity = _thoraxe_input_identity(dest, expected)
+    cache = _classify_thoraxe_input_stage(workdir, dest, identity; overwrite)
+    reused = _maybe_reuse_thoraxe_input(workdir, dest, identity, expected, cache;
+        overwrite,
+        manifest_message = "Reusing manifest-backed ThorAxe transcript_query input.",
+        legacy_message = "Adopting legacy ThorAxe transcript_query input.")
+    reused === nothing || return reused
 
-    if abspath(dest) != source
-        isdir(dest) && safe_rm(dest, workdir)
-        mkpath(dirname(dest))
-        cp(source, dest; force = true)
+    _warn_stage_cache(cache, dest)
+    action = _stage_action(cache)
+    try
+        _write_thoraxe_input_state(workdir, dest, :running, identity; action)
+        if abspath(dest) != source
+            isdir(dest) && safe_rm(dest, workdir)
+            mkpath(dirname(dest))
+            cp(source, dest; force = true)
+        end
+        _has_valid_ensembl_bundle(dest) ||
+            error("Copied ThorAxe input bundle at $(dest) is incomplete.")
+        _write_transcript_query_metadata!(dest, expected)
+        _write_thoraxe_input_state(workdir, dest, :done,
+            _thoraxe_input_identity(dest, expected); action)
+    catch err
+        _write_thoraxe_input_state(workdir, dest, :failed, identity;
+            action,
+            exception = _exception_summary(err))
+        rethrow()
     end
-    _has_valid_ensembl_bundle(dest) ||
-        error("Copied ThorAxe input bundle at $(dest) is incomplete.")
-    _write_transcript_query_metadata!(dest, expected)
     return dest
 end
 
@@ -613,6 +714,47 @@ function _run_transcript_query_with_retries!(tmp_gene_dir::AbstractString,
     return nothing
 end
 
+function _run_transcript_query_stage!(target::ResolvedTarget,
+        workdir::AbstractString,
+        input_dir::AbstractString,
+        metadata;
+        specieslist::Union{Nothing, AbstractString},
+        max_retries::Integer,
+        orthology::AbstractString,
+        transcript_query_runner::Union{Nothing, Function},
+        thoraxe_runner_factory::Function,
+        sleep_fn::Function,
+        action)
+    isdir(input_dir) && safe_rm(input_dir, workdir)
+    gene_core = strip_ensembl_version(target.ensembl_gene_id)
+    logs = _thoraxe_logs_dir(workdir)
+    stdout_log = joinpath(logs, "transcript_query_stdout.log")
+    stderr_log = joinpath(logs, "transcript_query_stderr.log")
+    species = _normalize_species_name(target.species)
+    attempts = max(Int(max_retries), 1)
+    active_specieslist = _normalized_specieslist(specieslist)
+    @info "Running ThorAxe transcript_query." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id species specieslist=active_specieslist attempts
+    runner = transcript_query_runner === nothing ?
+             thoraxe_runner_factory(stdout_log, stderr_log) : transcript_query_runner
+    return mktempdir(workdir; prefix = "transcript_query_") do query_workdir
+        tmp_gene_dir = joinpath(query_workdir, gene_core)
+        _run_transcript_query_with_retries!(
+            tmp_gene_dir, gene_core, query_workdir, species, active_specieslist,
+            attempts, stdout_log, stderr_log;
+            orthology,
+            runner,
+            sleep_fn)
+
+        _has_valid_ensembl_bundle(tmp_gene_dir) ||
+            error("transcript_query did not create a valid Ensembl bundle at $(tmp_gene_dir). See $(stderr_log). If failures involve the species set, try a smaller curated specieslist.")
+        mv(tmp_gene_dir, input_dir; force = true)
+        _write_transcript_query_metadata!(input_dir, metadata)
+        _write_thoraxe_input_state(workdir, input_dir, :done,
+            _thoraxe_input_identity(input_dir, metadata); action)
+        return input_dir
+    end
+end
+
 function _ensure_transcript_query(target::ResolvedTarget, workdir::AbstractString;
         specieslist::Union{Nothing, AbstractString} = nothing,
         overwrite::Bool = false,
@@ -633,43 +775,31 @@ function _ensure_transcript_query(target::ResolvedTarget, workdir::AbstractStrin
     end
 
     input_dir = _thoraxe_input_dir(workdir)
-    if !overwrite && _has_valid_ensembl_bundle(input_dir) &&
-       _has_matching_transcript_query_metadata(input_dir, metadata)
-        @info "Reusing ThorAxe transcript_query input." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id input_dir
-        return input_dir
-    end
+    identity = _thoraxe_input_identity(input_dir, metadata)
+    cache = _classify_thoraxe_input_stage(workdir, input_dir, identity; overwrite)
+    reused = _maybe_reuse_thoraxe_input(workdir, input_dir, identity, metadata, cache;
+        overwrite,
+        manifest_message = "Reusing manifest-backed ThorAxe transcript_query input.",
+        legacy_message = "Reusing ThorAxe transcript_query input.")
+    reused === nothing || return reused
 
-    isdir(input_dir) && safe_rm(input_dir, workdir)
-    gene_core = strip_ensembl_version(target.ensembl_gene_id)
-
-    logs = _thoraxe_logs_dir(workdir)
-    stdout_log = joinpath(logs, "transcript_query_stdout.log")
-    stderr_log = joinpath(logs, "transcript_query_stderr.log")
-    species = _normalize_species_name(target.species)
-
-    attempts = max(Int(max_retries), 1)
-    active_specieslist = _normalized_specieslist(specieslist)
-    @info "Running ThorAxe transcript_query." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id species specieslist=active_specieslist attempts
-    runner = if transcript_query_runner === nothing
-        thoraxe_runner_factory(stdout_log, stderr_log)
-    else
-        transcript_query_runner
-    end
-    # Retry transcript_query because BioMart downloads often fail transiently.
-    return mktempdir(workdir; prefix = "transcript_query_") do query_workdir
-        tmp_gene_dir = joinpath(query_workdir, gene_core)
-        _run_transcript_query_with_retries!(
-            tmp_gene_dir, gene_core, query_workdir, species, active_specieslist,
-            attempts, stdout_log, stderr_log;
+    _warn_stage_cache(cache, input_dir)
+    action = _stage_action(cache)
+    try
+        _write_thoraxe_input_state(workdir, input_dir, :running, identity; action)
+        return _run_transcript_query_stage!(target, workdir, input_dir, metadata;
+            specieslist,
+            max_retries,
             orthology,
-            runner,
-            sleep_fn)
-
-        _has_valid_ensembl_bundle(tmp_gene_dir) ||
-            error("transcript_query did not create a valid Ensembl bundle at $(tmp_gene_dir). See $(stderr_log). If failures involve the species set, try a smaller curated specieslist.")
-        mv(tmp_gene_dir, input_dir; force = true)
-        _write_transcript_query_metadata!(input_dir, metadata)
-        return input_dir
+            transcript_query_runner,
+            thoraxe_runner_factory,
+            sleep_fn,
+            action)
+    catch err
+        _write_thoraxe_input_state(workdir, input_dir, :failed, identity;
+            action,
+            exception = _exception_summary(err))
+        rethrow()
     end
 end
 
@@ -1656,6 +1786,154 @@ function _candidate_run_metadata(input_dir::AbstractString,
     )
 end
 
+function _thoraxe_input_identity_hash(workdir::AbstractString)
+    state = _read_stage_state(_thoraxe_input_stage_dir(workdir))
+    state isa AbstractDict || return nothing
+    value = get(state, "identity_hash", nothing)
+    return value === nothing ? nothing : String(value)
+end
+
+function _canonical_thoraxe_msa_metadata(metadata)
+    if metadata.requested_pid_sample_seed === nothing
+        return merge(metadata, (; pid_sample_seed = nothing))
+    end
+    return metadata
+end
+
+function _thoraxe_msa_identity(metadata, workdir::AbstractString)
+    return merge(_canonical_thoraxe_msa_metadata(metadata),
+        (; thoraxe_input_identity_hash = _thoraxe_input_identity_hash(workdir)))
+end
+
+function _thoraxe_msa_outputs(summary_path::AbstractString,
+        seeds::AbstractVector{SeedSelection},
+        workdir::AbstractString)
+    outputs = Dict{String, Any}("pid_summary" => summary_path)
+    outputs["seed_stockholms"] = [_resolve_artifact_path(seed.stockholm_path, workdir)
+                                  for seed in seeds]
+    outputs["seed_fastas"] = [_resolve_artifact_path(seed.fasta_path, workdir)
+                              for seed in seeds if seed.fasta_path !== nothing]
+    return outputs
+end
+
+function _write_thoraxe_msa_state(workdir::AbstractString,
+        summary_path::AbstractString,
+        seeds::AbstractVector{SeedSelection},
+        status::Symbol,
+        identity;
+        action,
+        warnings::AbstractVector{<:AbstractString} = String[],
+        exception = nothing)
+    return _write_stage_state(_thoraxe_msa_stage_dir(workdir);
+        stage = "thoraxe_msa",
+        stage_key = "thoraxe_msa",
+        status,
+        identity,
+        outputs = _thoraxe_msa_outputs(summary_path, seeds, workdir),
+        action,
+        warnings,
+        exception,
+        workdir)
+end
+
+function _thoraxe_msa_stage_cache(workdir::AbstractString,
+        summary_path::AbstractString,
+        metadata,
+        stage_identity;
+        overwrite::Bool)
+    cache = overwrite ? (; reusable = false, status = :stale, warning = nothing) :
+            _classify_stage_state(_thoraxe_msa_stage_dir(workdir), stage_identity,
+        (; pid_summary = summary_path); stage_label = "ThorAxe MSA")
+    has_manifest = isfile(joinpath(_thoraxe_msa_stage_dir(workdir), "stage_state.json"))
+    summary_matches = !overwrite && _has_matching_candidate_summary(summary_path, metadata)
+    return (; cache, has_manifest, summary_matches)
+end
+
+function _maybe_cached_thoraxe_msa(input_dir::AbstractString,
+        summary_path::AbstractString,
+        target::ResolvedTarget,
+        workdir::AbstractString,
+        metadata,
+        stage_identity,
+        stage_cache,
+        species_filter,
+        biomart_filter;
+        overwrite::Bool,
+        pid_sample_count::Integer,
+        pid_sample_fraction::Real)
+    can_try_cache = stage_cache.cache.reusable ||
+                    (!overwrite && stage_cache.summary_matches)
+    can_try_cache || return nothing
+    cached = _cached_selected_seeds(summary_path, workdir, metadata)
+    cached === nothing && return nothing
+    @info "Reusing cached ThorAxe MSA candidates." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id n_seeds=length(cached.seeds) summary_path adopted_legacy=(!stage_cache.cache.reusable&&!stage_cache.has_manifest)
+    result = _cached_thoraxe_msa_result(
+        input_dir, summary_path, target, workdir, cached,
+        species_filter, biomart_filter;
+        pid_sample_count,
+        pid_sample_fraction)
+    _write_thoraxe_msa_state(workdir, summary_path, result.seeds, :done,
+        stage_identity; action = :reuse, warnings = result.warnings)
+    return result
+end
+
+function _prepare_thoraxe_msa_stage!(workdir::AbstractString,
+        summary_path::AbstractString,
+        stage_identity,
+        stage_cache;
+        overwrite::Bool)
+    if stage_cache.cache.reusable
+        @warn "ThorAxe MSA manifest matched, but selected seed artifacts were incomplete; rebuilding." summary_path
+    elseif stage_cache.cache.warning !== nothing
+        @warn String(stage_cache.cache.warning) summary_path status=stage_cache.cache.status
+    end
+    action = _stage_action(stage_cache.cache)
+    if overwrite || (stage_cache.cache.status !== :missing && stage_cache.has_manifest)
+        isdir(_thoraxe_msa_dir(workdir)) && safe_rm(_thoraxe_msa_dir(workdir), workdir)
+    end
+    local_artifacts_are_current = !overwrite && !stage_cache.has_manifest &&
+                                  stage_cache.summary_matches
+    force_pid_rerun = overwrite || !local_artifacts_are_current
+    _write_thoraxe_msa_state(workdir, summary_path, SeedSelection[], :running,
+        stage_identity; action)
+    return (; action, local_artifacts_are_current, force_pid_rerun)
+end
+
+function _run_thoraxe_msa_stage!(target::ResolvedTarget,
+        input_dir::AbstractString,
+        workdir::AbstractString,
+        summary_path::AbstractString,
+        pid_thresholds::AbstractVector{<:Real},
+        effective_specieslist::Union{Nothing, AbstractString},
+        metadata,
+        stage_identity,
+        filters,
+        prepared;
+        pid_sample_count::Integer,
+        pid_sample_fraction::Real,
+        sample_seed::UInt64)
+    score_rows = _score_pid_candidates(target, input_dir, workdir, pid_thresholds,
+        effective_specieslist, metadata;
+        pid_sample_count,
+        pid_sample_fraction,
+        sample_seed,
+        overwrite = prepared.force_pid_rerun)
+    _summarize_candidate_scores(score_rows, summary_path)
+    @info "Selecting ThorAxe seed candidates." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id summary_path pid_sample_count
+    seeds = _select_scored_candidate_seeds(summary_path, pid_sample_count)
+    _mark_selected_candidates!(summary_path, seeds)
+    warnings = _thoraxe_result_warnings(target, seeds, workdir, input_dir, summary_path,
+        filters.species_filter, filters.biomart_filter)
+    artifacts = [_seed_artifacts(seed, workdir) for seed in seeds]
+    _write_thoraxe_msa_state(workdir, summary_path, seeds, :done,
+        stage_identity; action = prepared.action, warnings)
+    return _thoraxe_msa_result(
+        input_dir, summary_path, workdir, seeds, artifacts, warnings;
+        pid_sample_count,
+        pid_sample_fraction,
+        pid_sample_seed = sample_seed)
+end
+
 function _candidate_summary_matches(df::DataFrame, metadata)
     isempty(df) && return false
     required = (
@@ -2072,36 +2350,33 @@ function build_thoraxe_msa(target::ResolvedTarget, workdir::AbstractString;
         orthology,
         specieslist_filter,
         biomart_datasets_filter)
-    summary_matches_metadata = !overwrite &&
-                               _has_matching_candidate_summary(summary_path, metadata)
-    cached = overwrite ? nothing : _cached_selected_seeds(summary_path, workdir, metadata)
-    if cached !== nothing
-        @info "Reusing cached ThorAxe MSA candidates." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id n_seeds=length(cached.seeds) summary_path
-        return _cached_thoraxe_msa_result(
-            input_dir, summary_path, target, workdir, cached,
-            filters.species_filter, filters.biomart_filter;
-            pid_sample_count,
-            pid_sample_fraction)
-    end
+    stage_identity = _thoraxe_msa_identity(metadata, workdir)
+    stage_cache = _thoraxe_msa_stage_cache(workdir, summary_path, metadata,
+        stage_identity; overwrite)
+    cached_result = _maybe_cached_thoraxe_msa(input_dir, summary_path, target,
+        workdir, metadata, stage_identity, stage_cache, filters.species_filter,
+        filters.biomart_filter;
+        overwrite,
+        pid_sample_count,
+        pid_sample_fraction)
+    cached_result === nothing || return cached_result
 
-    score_rows = _score_pid_candidates(target, input_dir, workdir, pid_thresholds,
-        filters.effective_specieslist, metadata;
-        pid_sample_count,
-        pid_sample_fraction,
-        sample_seed,
-        overwrite = overwrite || !summary_matches_metadata)
-    _summarize_candidate_scores(score_rows, summary_path)
-    @info "Selecting ThorAxe seed candidates." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id summary_path pid_sample_count
-    seeds = _select_scored_candidate_seeds(summary_path, pid_sample_count)
-    _mark_selected_candidates!(summary_path, seeds)
-    warnings = _thoraxe_result_warnings(target, seeds, workdir, input_dir, summary_path,
-        filters.species_filter, filters.biomart_filter)
-    artifacts = [_seed_artifacts(seed, workdir) for seed in seeds]
-    return _thoraxe_msa_result(
-        input_dir, summary_path, workdir, seeds, artifacts, warnings;
-        pid_sample_count,
-        pid_sample_fraction,
-        pid_sample_seed = sample_seed)
+    prepared = _prepare_thoraxe_msa_stage!(workdir, summary_path, stage_identity,
+        stage_cache; overwrite)
+    try
+        return _run_thoraxe_msa_stage!(target, input_dir, workdir, summary_path,
+            pid_thresholds, filters.effective_specieslist, metadata, stage_identity,
+            filters, prepared;
+            pid_sample_count,
+            pid_sample_fraction,
+            sample_seed)
+    catch err
+        _write_thoraxe_msa_state(workdir, summary_path, SeedSelection[], :failed,
+            stage_identity;
+            action = prepared.action,
+            exception = _exception_summary(err))
+        rethrow()
+    end
 end
 
 end

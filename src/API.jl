@@ -1,4 +1,5 @@
 using Base.Threads
+import JSON
 
 """
     iduna(; id, mmseqs_db=nothing, no_expansion=false, kwargs...) -> IdunaResult
@@ -73,7 +74,8 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
     root = nothing
     target = nothing
     thoraxe = nothing
-    validations = nothing
+    expansions = Utils.ExpansionResult[]
+    validations = Utils.ValidationResult[]
     failed_stage = "prepare_output_dir"
 
     try
@@ -81,16 +83,14 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
         root = Utils.prepare_output_dir(primary; workdir, output_dir, overwrite)
 
         failed_stage = "resolve_target"
-        @info "Resolving target identifiers." input_id=primary workdir=root
-        target = _resolve_target(primary;
-            workdir = root,
-            uniprot_id = supplied_uniprot,
+        target = _resolve_target_stage(primary, root;
+            supplied_uniprot,
             ensembl_gene_id,
             ensembl_protein_id,
-            transcript_id = disambiguating_transcript,
-            species)
-        @info "Writing target metadata." input_id=primary gene_id=target.ensembl_gene_id transcript_id=target.transcript_id
-        Utils.write_json(joinpath(root, "target.json"), _target_summary(target, root))
+            disambiguating_transcript,
+            species,
+            overwrite,
+            resolver = _resolve_target)
 
         failed_stage = "thoraxe_msa"
         @info "Building ThorAxe MSA." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id workdir=root
@@ -107,7 +107,6 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
             pid_sample_fraction,
             pid_sample_seed)
 
-        expansions = Utils.ExpansionResult[]
         if !no_expansion
             failed_stage = "msa_expansion"
             n_seeds = length(thoraxe.seeds)
@@ -129,12 +128,33 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
 
         failed_stage = "validation"
         @info "Validating Iduna results." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id n_seeds=length(thoraxe.seeds)
-        validations = [_validate_results(target, seed,
-                           no_expansion ? nothing : expansions[index], root)
-                       for (index, seed) in enumerate(thoraxe.seeds)]
+        for (index, seed) in enumerate(thoraxe.seeds)
+            push!(validations,
+                _call_validate_results(_validate_results, target, seed,
+                    no_expansion ? nothing : expansions[index], root; overwrite))
+        end
         warnings = vcat(target.warnings, thoraxe.warnings,
             Iterators.flatten(validation.warnings for validation in validations)...)
         status = _pipeline_status(warnings)
+        current_stage_keys = _current_stage_keys(target, thoraxe, expansions, validations)
+        current_stages = Utils.collect_stage_summaries(root;
+            stage_keys = current_stage_keys)
+        result_identity = (; input_id = primary,
+            stage_hashes = [stage.identity_hash
+                            for stage in current_stages
+                            if stage.identity_hash !== nothing &&
+                               stage.stage_key != "result"])
+        Utils._write_stage_state(Utils._pipeline_stage_dir(root, "result");
+            stage = "result",
+            stage_key = "result",
+            status = :done,
+            identity = result_identity,
+            outputs = (; result_json = joinpath(root, "result.json")),
+            action = :run,
+            workdir = root)
+        stages = Utils.collect_stage_summaries(root;
+            stage_keys = _current_stage_keys(target, thoraxe, expansions, validations;
+                include_result = true))
         result = Utils.IdunaResult(;
             input_id = primary,
             workdir = root,
@@ -142,6 +162,7 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
             thoraxe_msa = thoraxe,
             expansions,
             validations,
+            stages,
             warnings,
             status
         )
@@ -154,7 +175,8 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
     catch err
         if root !== nothing
             _write_failure_result(
-                primary, root, failed_stage, err; target, thoraxe, validations)
+                primary, root, failed_stage, err; target, thoraxe, expansions,
+                validations)
         end
         rethrow()
     end
@@ -176,13 +198,82 @@ function _pipeline_status(warnings::AbstractVector{<:AbstractString})
     isempty(warnings) ? :ok : :warn
 end
 
+function _call_validate_results(validator::Function,
+        target,
+        seed,
+        expansion,
+        workdir;
+        overwrite::Bool)
+    if validator === ResultsValidation.validate_results
+        return validator(target, seed, expansion, workdir; overwrite)
+    end
+    return validator(target, seed, expansion, workdir)
+end
+
+function _pid_stage_key(prefix::AbstractString, pid::Real)
+    return "$(prefix):$(Utils.format_pid_dir(pid))"
+end
+
+function _expansion_stage_key(target, pid::Real)
+    return "expansion:$(target.ensembl_gene_id):$(target.transcript_id):$(Utils.format_pid_dir(pid))"
+end
+
+function _current_stage_count(count::Integer, total::Integer,
+        failed_stage::Union{Nothing, AbstractString},
+        stage_name::AbstractString)
+    return failed_stage == stage_name && count < total ? count + 1 : count
+end
+
+function _push_expansion_stage_keys!(keys::Vector{String},
+        target,
+        seeds,
+        count::Integer)
+    target === nothing && return keys
+    for seed in Iterators.take(seeds, min(count, length(seeds)))
+        push!(keys, _expansion_stage_key(target, seed.pid))
+    end
+    return keys
+end
+
+function _push_validation_stage_keys!(keys::Vector{String},
+        seeds,
+        count::Integer)
+    for seed in Iterators.take(seeds, min(count, length(seeds)))
+        push!(keys, _pid_stage_key("validation", seed.pid))
+    end
+    return keys
+end
+
+function _current_stage_keys(target,
+        thoraxe,
+        expansions::AbstractVector,
+        validations::AbstractVector;
+        include_result::Bool = false,
+        failed_stage::Union{Nothing, AbstractString} = nothing)
+    keys = String["target"]
+    if target !== nothing || thoraxe !== nothing
+        push!(keys, "thoraxe_input", "thoraxe_msa")
+    end
+    if thoraxe !== nothing
+        total = length(thoraxe.seeds)
+        n_expansion_keys = _current_stage_count(
+            length(expansions), total, failed_stage, "msa_expansion")
+        n_validation_keys = _current_stage_count(
+            length(validations), total, failed_stage, "validation")
+        _push_expansion_stage_keys!(keys, target, thoraxe.seeds, n_expansion_keys)
+        _push_validation_stage_keys!(keys, thoraxe.seeds, n_validation_keys)
+    end
+    include_result && push!(keys, "result")
+    return unique(keys)
+end
+
 function _write_failure_result(input_id::AbstractString, workdir::AbstractString,
         failed_stage::AbstractString, err; target = nothing, thoraxe = nothing,
-        validations = nothing)
+        expansions = Utils.ExpansionResult[], validations = Utils.ValidationResult[])
     try
         Utils.write_json(joinpath(workdir, "result.json"),
             _failure_result_summary(input_id, workdir, failed_stage, err;
-                target, thoraxe, validations))
+                target, thoraxe, expansions, validations))
     catch write_err
         @warn "Could not write failure result artifact." workdir exception=(write_err,
             catch_backtrace())
@@ -192,12 +283,15 @@ end
 
 function _failure_result_summary(input_id::AbstractString, workdir::AbstractString,
         failed_stage::AbstractString, err; target = nothing, thoraxe = nothing,
-        validations = nothing)
+        expansions = Utils.ExpansionResult[], validations = Utils.ValidationResult[])
+    stage_keys = _current_stage_keys(target, thoraxe, expansions, validations;
+        failed_stage)
     return (;
         input_id = String(input_id),
         workdir = String(workdir),
         status = "error",
         failed_stage = String(failed_stage),
+        stages = Utils.collect_stage_summaries(workdir; stage_keys),
         warnings = _partial_warnings(target, thoraxe, validations),
         target = target === nothing ? nothing : _target_summary(target, workdir),
         exception = _exception_summary(err, workdir)
@@ -268,6 +362,154 @@ function _normalize_primary_input(; id, uniprot_id, ensembl_transcript_id, trans
     supplied_uniprot = kind === :uniprot ? first_value :
                        (uniprot_id === nothing ? nothing : String(uniprot_id))
     return first_value, disambiguating_transcript, supplied_uniprot
+end
+
+function _target_identity(primary::AbstractString;
+        supplied_uniprot,
+        ensembl_gene_id,
+        ensembl_protein_id,
+        disambiguating_transcript,
+        species)
+    return (;
+        input_id = String(primary),
+        input_kind = String(Utils.id_kind(primary)),
+        uniprot_id = supplied_uniprot === nothing ? nothing : String(supplied_uniprot),
+        ensembl_gene_id = ensembl_gene_id === nothing ? nothing : String(ensembl_gene_id),
+        ensembl_protein_id = ensembl_protein_id === nothing ? nothing :
+                             String(ensembl_protein_id),
+        transcript_id = disambiguating_transcript === nothing ? nothing :
+                        String(disambiguating_transcript),
+        species = species === nothing ? nothing : String(species)
+    )
+end
+
+_target_stage_dir(workdir::AbstractString) = Utils._pipeline_stage_dir(workdir, "target")
+
+function _target_from_summary(data, workdir::AbstractString)
+    return Utils.ResolvedTarget(;
+        input_id = String(data["input_id"]),
+        input_kind = Symbol(String(data["input_kind"])),
+        uniprot_id = get(data, "uniprot_id", nothing),
+        ensembl_gene_id = String(data["ensembl_gene_id"]),
+        transcript_id = String(data["transcript_id"]),
+        ensembl_protein_id = get(data, "ensembl_protein_id", nothing),
+        species = get(data, "species", nothing),
+        uniprot_sequence_path = get(data, "uniprot_sequence_path", nothing),
+        ensembl_protein_sequence_path = get(data, "ensembl_protein_sequence_path", nothing),
+        sequence_validated = get(data, "sequence_validated", nothing),
+        mapping_confirmed = get(data, "mapping_confirmed", nothing),
+        workdir,
+        warnings = String.(get(data, "warnings", String[]))
+    )
+end
+
+function _target_artifacts_exist(target::Utils.ResolvedTarget, workdir::AbstractString)
+    for path in (target.uniprot_sequence_path, target.ensembl_protein_sequence_path)
+        path === nothing && continue
+        isfile(Utils._resolve_artifact_path(path, workdir)) || return false
+    end
+    return true
+end
+
+function _read_cached_target(workdir::AbstractString)
+    path = joinpath(workdir, "target.json")
+    isfile(path) || return nothing
+    try
+        target = _target_from_summary(JSON.parse(read(path, String)), workdir)
+        _target_artifacts_exist(target, workdir) || return nothing
+        return target
+    catch err
+        err isa InterruptException && rethrow()
+        return nothing
+    end
+end
+
+function _clear_target_outputs!(workdir::AbstractString)
+    target_json = joinpath(workdir, "target.json")
+    isfile(target_json) && rm(target_json; force = true)
+    sequences_dir = joinpath(workdir, "sequences")
+    isdir(sequences_dir) && Utils.safe_rm(sequences_dir, workdir)
+    return nothing
+end
+
+function _resolve_target_stage(primary::AbstractString, workdir::AbstractString;
+        supplied_uniprot,
+        ensembl_gene_id,
+        ensembl_protein_id,
+        disambiguating_transcript,
+        species,
+        overwrite::Bool,
+        resolver::Function)
+    identity = _target_identity(primary;
+        supplied_uniprot,
+        ensembl_gene_id,
+        ensembl_protein_id,
+        disambiguating_transcript,
+        species)
+    outputs = (; target_json = joinpath(workdir, "target.json"))
+    stage_dir = _target_stage_dir(workdir)
+    cache = overwrite ? (; reusable = false, status = :stale, warning = nothing) :
+            Utils._classify_stage_state(stage_dir, identity, outputs;
+        stage_label = "target")
+    cached_target = cache.reusable ? _read_cached_target(workdir) : nothing
+    if cached_target !== nothing
+        @info "Reusing cached target metadata." input_id=primary workdir
+        Utils._write_stage_state(stage_dir;
+            stage = "target",
+            stage_key = "target",
+            status = :done,
+            identity,
+            outputs,
+            action = :reuse,
+            workdir,
+            warnings = cached_target.warnings)
+        return cached_target
+    end
+
+    cache.warning === nothing || @warn String(cache.warning) workdir status=cache.status
+    action = cache.status === :missing ? :run : :rebuild
+    (overwrite || cache.status !== :missing) && _clear_target_outputs!(workdir)
+    Utils._write_stage_state(stage_dir;
+        stage = "target",
+        stage_key = "target",
+        status = :running,
+        identity,
+        outputs,
+        action,
+        workdir)
+    try
+        @info "Resolving target identifiers." input_id=primary workdir
+        target = resolver(primary;
+            workdir,
+            uniprot_id = supplied_uniprot,
+            ensembl_gene_id,
+            ensembl_protein_id,
+            transcript_id = disambiguating_transcript,
+            species)
+        @info "Writing target metadata." input_id=primary gene_id=target.ensembl_gene_id transcript_id=target.transcript_id
+        Utils.write_json(outputs.target_json, _target_summary(target, workdir))
+        Utils._write_stage_state(stage_dir;
+            stage = "target",
+            stage_key = "target",
+            status = :done,
+            identity,
+            outputs,
+            action,
+            workdir,
+            warnings = target.warnings)
+        return target
+    catch err
+        Utils._write_stage_state(stage_dir;
+            stage = "target",
+            stage_key = "target",
+            status = :failed,
+            identity,
+            outputs,
+            action,
+            workdir,
+            exception = _exception_summary(err, workdir))
+        rethrow()
+    end
 end
 
 _summary_path(path, workdir::Nothing) = path

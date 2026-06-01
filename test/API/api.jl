@@ -165,6 +165,78 @@ import JSON
         end
     end
 
+    @testset "result stage identity is stable across reruns" begin
+        mktempdir() do tmp
+            workdir = joinpath(tmp, "stable_result")
+            for _ in 1:2
+                Iduna.iduna(;
+                    id = "Q13148",
+                    mmseqs_db = "db",
+                    workdir,
+                    _resolve_target = (args...; kwargs...) -> target,
+                    _build_thoraxe_msa = (args...; kwargs...) -> thoraxe,
+                    _expand_msa = (args...; kwargs...) -> expansion,
+                    _validate_results = (args...; kwargs...) -> validation)
+            end
+            state_path = joinpath(workdir, ".iduna", "stages", "result",
+                "stage_state.json")
+            rerun_hash = JSON.parse(read(state_path, String))["identity_hash"]
+            Iduna.iduna(;
+                id = "Q13148",
+                mmseqs_db = "db",
+                workdir,
+                _resolve_target = (args...; kwargs...) -> target,
+                _build_thoraxe_msa = (args...; kwargs...) -> thoraxe,
+                _expand_msa = (args...; kwargs...) -> expansion,
+                _validate_results = (args...; kwargs...) -> validation)
+            @test JSON.parse(read(state_path, String))["identity_hash"] == rerun_hash
+        end
+    end
+
+    @testset "cached target stage preserves warnings" begin
+        mktempdir() do tmp
+            target_warning = "sequence and mapping warning"
+            warned_target = Iduna.ResolvedTarget(;
+                input_id = target.input_id,
+                input_kind = target.input_kind,
+                uniprot_id = target.uniprot_id,
+                ensembl_gene_id = target.ensembl_gene_id,
+                transcript_id = target.transcript_id,
+                ensembl_protein_id = target.ensembl_protein_id,
+                warnings = [target_warning])
+            resolver_calls = Ref(0)
+            workdir = joinpath(tmp, "target_warnings")
+            run_kwargs = (;
+                id = "Q13148",
+                mmseqs_db = "db",
+                workdir,
+                _resolve_target = (args...; kwargs...) -> begin
+                    resolver_calls[] += 1
+                    warned_target
+                end,
+                _build_thoraxe_msa = (args...; kwargs...) -> thoraxe,
+                _expand_msa = (args...; kwargs...) -> expansion,
+                _validate_results = (args...; kwargs...) -> validation)
+
+            Iduna.iduna(; run_kwargs...)
+            rerun = Iduna.iduna(; run_kwargs...)
+
+            @test resolver_calls[] == 1
+            target_stage_path = joinpath(
+                workdir, ".iduna", "stages", "target", "stage_state.json")
+            target_state = JSON.parse(read(target_stage_path, String))
+            @test target_state["action"] == "reuse"
+            @test target_state["warnings"] == [target_warning]
+            target_stages = filter(stage -> stage.stage_key == "target", rerun.stages)
+            @test length(target_stages) == 1
+            @test only(target_stages).warnings == [target_warning]
+            written = JSON.parse(read(joinpath(workdir, "result.json"), String))
+            written_target_stages = filter(
+                stage -> stage["stage_key"] == "target", written["stages"])
+            @test only(written_target_stages)["warnings"] == [target_warning]
+        end
+    end
+
     @testset "result pretty printing" begin
         expansion_text = repr("text/plain", expansion)
         @test startswith(expansion_text, "ExpansionResult(\n")
@@ -424,9 +496,33 @@ import JSON
         mktempdir() do tmp
             expand_called = Ref(false)
             validation_expansion = Ref{Any}(:unset)
+            workdir = joinpath(tmp, "no_expansion")
+            stale_expansion_dir = joinpath(workdir, "expansion", "old_gene",
+                "old_transcript", "pid_80.00")
+            stale_validation_dir = joinpath(workdir, "validation", "pid_80.00")
+            Iduna.Utils._write_stage_state(stale_expansion_dir;
+                stage = "msa_expansion",
+                stage_key = "expansion:pid_80.00",
+                status = :done,
+                identity = (; stale = "expansion"),
+                outputs = NamedTuple(),
+                action = :run,
+                workdir)
+            Iduna.Utils._write_stage_state(stale_validation_dir;
+                stage = "validation",
+                stage_key = "validation:pid_80.00",
+                status = :done,
+                identity = (; stale = "validation"),
+                outputs = NamedTuple(),
+                action = :run,
+                workdir)
+            stale_expansion_hash = JSON.parse(
+                read(joinpath(stale_expansion_dir, "stage_state.json"), String))["identity_hash"]
+            stale_validation_hash = JSON.parse(
+                read(joinpath(stale_validation_dir, "stage_state.json"), String))["identity_hash"]
             result = Iduna.iduna(;
                 id = "Q13148",
-                workdir = joinpath(tmp, "no_expansion"),
+                workdir,
                 no_expansion = true,
                 _resolve_target = (args...; kwargs...) -> target,
                 _build_thoraxe_msa = (args...; kwargs...) -> thoraxe,
@@ -437,6 +533,15 @@ import JSON
                 _validate_results = (target, seed, expansion_arg,
                     workdir) -> begin
                     validation_expansion[] = expansion_arg
+                    Iduna.Utils._write_stage_state(
+                        Iduna.ResultsValidation._validation_dir(workdir, seed);
+                        stage = "validation",
+                        stage_key = "validation:$(Iduna.Utils.format_pid_dir(seed.pid))",
+                        status = :done,
+                        identity = (; current = seed.pid),
+                        outputs = NamedTuple(),
+                        action = :run,
+                        workdir)
                     validation
                 end)
 
@@ -447,6 +552,18 @@ import JSON
             written = JSON.parse(
                 read(joinpath(result.workdir, "result.json"), String))
             @test isempty(written["expansions"])
+            stage_keys = [stage.stage_key for stage in result.stages]
+            @test "validation:pid_10.00" in stage_keys
+            @test !("expansion:pid_80.00" in stage_keys)
+            @test !("validation:pid_80.00" in stage_keys)
+            written_stage_keys = [stage["stage_key"] for stage in written["stages"]]
+            @test !("expansion:pid_80.00" in written_stage_keys)
+            @test !("validation:pid_80.00" in written_stage_keys)
+            result_state = JSON.parse(read(
+                joinpath(
+                    workdir, ".iduna", "stages", "result", "stage_state.json"), String))
+            @test !(stale_expansion_hash in result_state["identity"]["stage_hashes"])
+            @test !(stale_validation_hash in result_state["identity"]["stage_hashes"])
             @test_throws ErrorException Iduna.load_expanded_msa(result)
         end
 
@@ -467,6 +584,38 @@ import JSON
 
             @test expand_called[] === false
             @test isempty(result.expansions)
+        end
+    end
+
+    @testset "current stage summaries distinguish expansion target" begin
+        mktempdir() do tmp
+            current_key = "expansion:$(target.ensembl_gene_id):$(target.transcript_id):pid_10.00"
+            old_key = "expansion:OLDGENE:OLDTX:pid_10.00"
+            legacy_key = "expansion:pid_10.00"
+            for (key, dir) in (
+                current_key => joinpath(tmp, "expansion", target.ensembl_gene_id,
+                    target.transcript_id, "pid_10.00"),
+                old_key => joinpath(tmp, "expansion", "OLDGENE", "OLDTX", "pid_10.00"),
+                legacy_key => joinpath(tmp, "expansion", "LEGACY", "LEGACYTX",
+                    "pid_10.00"))
+                Iduna.Utils._write_stage_state(dir;
+                    stage = "msa_expansion",
+                    stage_key = key,
+                    status = :done,
+                    identity = (; key),
+                    outputs = NamedTuple(),
+                    action = :run,
+                    workdir = tmp)
+            end
+            keys = Iduna._current_stage_keys(target, thoraxe, [expansion], [validation])
+            @test current_key in keys
+            @test !(old_key in keys)
+            @test !(legacy_key in keys)
+            summaries = Iduna.Utils.collect_stage_summaries(tmp; stage_keys = keys)
+            expansion_summaries = filter(
+                summary -> summary.stage == "msa_expansion", summaries)
+            @test length(expansion_summaries) == 1
+            @test only(expansion_summaries).stage_key == current_key
         end
     end
 

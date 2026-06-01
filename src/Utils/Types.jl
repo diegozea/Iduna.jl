@@ -123,6 +123,7 @@ Base.@kwdef struct IdunaResult
     thoraxe_msa::ThorAxeMSAResult
     expansions::Vector{ExpansionResult}
     validations::Vector{ValidationResult}
+    stages::Vector{Any} = Any[]
     warnings::Vector{String} = String[]
     status::Symbol = :ok
 end

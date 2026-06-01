@@ -256,6 +256,7 @@
         state = Iduna.MSAExpansion._read_step_state(run_dir)
         @test state.status == "done"
         @test state.step == "msa_expansion"
+        @test state.stage_key == "expansion:$(gene_id):$(transcript_id):pid_10.00"
         @test Iduna.MSAExpansion._step_state_unreadable_message(nothing) ==
               "state file disappeared while reading"
         hits_fasta = outputs.hits_fasta
@@ -291,7 +292,7 @@
         changed_mode = Iduna.MSAExpansion._classify_step_state(
             run_dir, changed_mode_identity, outputs)
         @test changed_mode.reusable === false
-        @test changed_mode.status === :outdated
+        @test changed_mode.status === :stale
 
         changed_ratio_identity = Iduna.MSAExpansion._expansion_identity(
             target, seed, seed_sto, nothing, db;
@@ -302,7 +303,7 @@
         changed_ratio = Iduna.MSAExpansion._classify_step_state(
             run_dir, changed_ratio_identity, outputs)
         @test changed_ratio.reusable === false
-        @test changed_ratio.status === :outdated
+        @test changed_ratio.status === :stale
 
         changed_symfrac_identity = Iduna.MSAExpansion._expansion_identity(
             target, seed, seed_sto, nothing, db;
@@ -313,7 +314,7 @@
         changed_symfrac = Iduna.MSAExpansion._classify_step_state(
             run_dir, changed_symfrac_identity, outputs)
         @test changed_symfrac.reusable === false
-        @test changed_symfrac.status === :outdated
+        @test changed_symfrac.status === :stale
 
         write(seed_sto, "# STOCKHOLM 1.0\nseed ACDF\n//\n")
         changed_seed_identity = Iduna.MSAExpansion._expansion_identity(
@@ -325,7 +326,7 @@
         changed_seed = Iduna.MSAExpansion._classify_step_state(
             run_dir, changed_seed_identity, outputs)
         @test changed_seed.reusable === false
-        @test changed_seed.status === :outdated
+        @test changed_seed.status === :stale
         write(seed_sto, "# STOCKHOLM 1.0\nseed ACDE\n//\n")
 
         centroids_dir = joinpath(tmp, "expansion", gene_id, transcript_id, "pid_20.00")
@@ -409,8 +410,8 @@
         unreadable = Iduna.MSAExpansion._classify_step_state(
             unreadable_dir, identity, unreadable_outputs)
         @test unreadable.reusable === false
-        @test unreadable.status === :outdated
-        @test occursin("Could not read MSA expansion step_state.json", unreadable.warning)
+        @test unreadable.status === :stale
+        @test occursin("Could not read MSA expansion stage_state.json", unreadable.warning)
 
         legacy_dir = joinpath(tmp, "expansion", gene_id, transcript_id, "pid_40.00")
         legacy_outputs = write_outputs(
@@ -431,8 +432,8 @@
         legacy = Iduna.MSAExpansion._classify_step_state(
             legacy_dir, legacy_identity, legacy_outputs)
         @test legacy.reusable === false
-        @test legacy.status === :outdated
-        @test occursin("no step_state.json", legacy.warning)
+        @test legacy.status === :stale
+        @test occursin("no stage_state.json", legacy.warning)
 
         stale_failure_dir = joinpath(tmp, "expansion", gene_id, transcript_id, "pid_50.00")
         stale_failure_outputs = write_outputs(
@@ -448,11 +449,11 @@
             target, stale_failure_seed, tmp; mmseqs_db = db, threads = 1)
         stale_failure_state = Iduna.MSAExpansion._read_step_state(stale_failure_dir)
         @test stale_failure_state.status == "failed"
-        @test occursin("no step_state.json", stale_failure_state.warnings[1])
+        @test occursin("no stage_state.json", stale_failure_state.warnings[1])
         @test occursin("ProcessFailedException", stale_failure_state.exception.type)
         cache_warning = read(joinpath(stale_failure_dir, "logs", "cache_warning.log"),
             String)
-        @test occursin("no step_state.json", cache_warning)
+        @test occursin("no stage_state.json", cache_warning)
         @test !isfile(stale_failure_outputs.full_stockholm)
 
         success_seed_sto = joinpath(tmp, "success_seed.sto")

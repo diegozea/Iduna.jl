@@ -408,6 +408,24 @@
             (; pid_sample_seed = UInt64(99), requested_pid_sample_seed = nothing))
         @test Iduna.ThorAxeMSA._candidate_summary_matches(df, random_requested_seed)
         @test Iduna.ThorAxeMSA._has_matching_candidate_summary(summary, random_requested_seed)
+        @test Iduna.ThorAxeMSA._thoraxe_msa_identity(metadata, tmp) !=
+              Iduna.ThorAxeMSA._thoraxe_msa_identity(
+            merge(metadata,
+                (; pid_sample_seed = UInt64(99), requested_pid_sample_seed = 99)),
+            tmp)
+        @test Iduna.ThorAxeMSA._thoraxe_msa_identity(random_requested_seed, tmp) ==
+              Iduna.ThorAxeMSA._thoraxe_msa_identity(
+            merge(random_requested_seed, (; pid_sample_seed = UInt64(7))), tmp)
+        random_identity = Iduna.ThorAxeMSA._thoraxe_msa_identity(
+            random_requested_seed, tmp)
+        Iduna.ThorAxeMSA._write_thoraxe_msa_state(
+            tmp, summary, Iduna.SeedSelection[], :done, random_identity; action = :run)
+        random_stage_cache = Iduna.ThorAxeMSA._thoraxe_msa_stage_cache(
+            tmp, summary, random_requested_seed,
+            Iduna.ThorAxeMSA._thoraxe_msa_identity(
+                merge(random_requested_seed, (; pid_sample_seed = UInt64(7))), tmp);
+            overwrite = false)
+        @test random_stage_cache.cache.reusable === true
 
         no_species_metadata = merge(metadata, (; effective_specieslist = nothing))
         fasta = joinpath(tmp, "candidate_summary_candidate.fasta")
@@ -1545,6 +1563,27 @@ TableSet\tptroglodytes_gene_ensembl\tChimpanzee genes (Pan_tro_3.0)\t1
             @test length(scored_result.baseline_stockholms) == 2
             @test all(isfile, scored_result.baseline_stockholms)
             @test isfile(scored_result.pid_summary)
+        end
+    end
+
+    @testset "orphan ThorAxe candidates do not satisfy current stage identity" begin
+        mktempdir() do tmp
+            workdir = joinpath(tmp, "work")
+            paths = Iduna.ThorAxeMSA._pid_sample_paths(workdir, 10.0, 0)
+            mkpath(dirname(paths.fasta_path))
+            write(paths.fasta_path, ">stale\nAA\n")
+            write(paths.stockholm_path, "# STOCKHOLM 1.0\nstale AA\n//\n")
+            summary_path = joinpath(Iduna.ThorAxeMSA._thoraxe_msa_dir(workdir),
+                "candidate_summary.csv")
+            stage_identity = (; target = "current")
+            stage_cache = Iduna.ThorAxeMSA._thoraxe_msa_stage_cache(
+                workdir, summary_path, (;), stage_identity; overwrite = false)
+            @test stage_cache.cache.status === :missing
+            @test stage_cache.summary_matches === false
+            prepared = Iduna.ThorAxeMSA._prepare_thoraxe_msa_stage!(
+                workdir, summary_path, stage_identity, stage_cache; overwrite = false)
+            @test prepared.local_artifacts_are_current === false
+            @test prepared.force_pid_rerun === true
         end
     end
 end

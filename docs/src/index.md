@@ -97,8 +97,11 @@ candidate forward. In that mode `result.thoraxe_msa.seeds`,
 
 If the ThorAxe `transcript_query` bundle has already been created, pass it with
 `thoraxe_input_dir`. Iduna copies that bundle into `workdir/thoraxe_input` and
-continues with the same ThorAxe MSA and PID seed stages. Unless
-`no_expansion=true`, it also runs expansion and expanded-MSA validation.
+continues with the same ThorAxe MSA and PID seed stages. The copied bundle is
+fingerprinted in a `thoraxe_input` stage manifest and reused on later
+`overwrite=false` reruns when the target, species list, orthology, and filter
+options match. Unless `no_expansion=true`, Iduna also runs expansion and
+expanded-MSA validation.
 
 ```@index
 ```

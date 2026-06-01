@@ -9,7 +9,9 @@ using MIToS.MSA: A3M, AbstractMultipleSequenceAlignment, FASTA, Stockholm,
 
 using ..Utils: ExpansionResult, ResolvedTarget, SeedSelection, ValidationResult,
                _relative_artifact_path, _resolve_artifact_path, format_pid_dir,
-               protein_alignment_stats, resolve_sequence_name
+               protein_alignment_stats, resolve_sequence_name, safe_rm,
+               _classify_stage_state, _file_sha256, _read_stage_state,
+               _write_stage_state
 
 export alignment_stats,
        load_expanded_msa,
@@ -119,6 +121,124 @@ function _validation_input_paths(target::ResolvedTarget,
                    _resolve_artifact_path(target.uniprot_sequence_path,
         target.workdir === nothing ? workdir : target.workdir)
     return (; seed_path, expanded_path, uniprot_path)
+end
+
+function _validation_dir(workdir::AbstractString, seed::SeedSelection)
+    joinpath(workdir,
+        "validation", format_pid_dir(seed.pid))
+end
+
+function _validation_outputs(workdir::AbstractString,
+        seed::SeedSelection,
+        paths)
+    validation_dir = _validation_dir(workdir, seed)
+    return (;
+        stats_path = joinpath(validation_dir, "stats.csv"),
+        query_vs_uniprot_path = paths.uniprot_path === nothing ||
+                                !isfile(paths.uniprot_path) ? nothing :
+                                joinpath(validation_dir,
+            "query_vs_uniprot_alignment.txt"))
+end
+
+function _hash_existing(path::Union{Nothing, AbstractString})
+    path === nothing && return nothing
+    isfile(path) || return nothing
+    return _file_sha256(path)
+end
+
+function _validation_identity(target::ResolvedTarget,
+        seed::SeedSelection,
+        expansion::Union{Nothing, ExpansionResult},
+        paths)
+    return (;
+        target = (;
+            input_id = target.input_id,
+            input_kind = String(target.input_kind),
+            uniprot_id = target.uniprot_id,
+            ensembl_gene_id = target.ensembl_gene_id,
+            transcript_id = target.transcript_id,
+            ensembl_protein_id = target.ensembl_protein_id,
+            species = target.species),
+        seed = (;
+            pid = Float64(seed.pid),
+            stockholm_sha256 = _hash_existing(paths.seed_path)),
+        expansion = expansion === nothing ? nothing :
+                    (; match_stockholm_sha256 = _hash_existing(paths.expanded_path),),
+        uniprot_sequence_sha256 = _hash_existing(paths.uniprot_path)
+    )
+end
+
+function _write_validation_state(workdir::AbstractString,
+        seed::SeedSelection,
+        status::Symbol,
+        identity,
+        outputs;
+        action,
+        warnings::AbstractVector{<:AbstractString} = String[],
+        exception = nothing)
+    return _write_stage_state(_validation_dir(workdir, seed);
+        stage = "validation",
+        stage_key = "validation:$(format_pid_dir(seed.pid))",
+        status,
+        identity,
+        outputs,
+        warnings,
+        exception,
+        action,
+        workdir)
+end
+
+_nothing_if_missing(value) = value === missing ? nothing : value
+_maybe_int(value) = value === missing ? nothing : Int(value)
+_maybe_float(value) = value === missing ? nothing : Float64(value)
+_maybe_bool(value) = value === missing ? nothing : Bool(value)
+
+function _cached_validation_warnings(workdir::AbstractString, seed::SeedSelection)
+    state = _read_stage_state(_validation_dir(workdir, seed))
+    state isa AbstractDict || return String[]
+    return String.(get(state, "warnings", String[]))
+end
+
+function _cached_alignment_warnings(row, expansion::Union{Nothing, ExpansionResult})
+    identical = _maybe_bool(row.aln_identical)
+    identical === nothing && return String[]
+    insertions = something(_maybe_int(row.aln_insertions), 0)
+    deletions = something(_maybe_int(row.aln_deletions), 0)
+    label = expansion === nothing ? "Seed query" : "Expanded query"
+    if insertions != 0 || deletions != 0
+        return ["$(label) has indels relative to the UniProt sequence."]
+    elseif identical == false
+        return ["$(label) has substitutions relative to the UniProt sequence."]
+    end
+    return String[]
+end
+
+function _cached_validation_result(outputs, workdir::AbstractString, seed::SeedSelection,
+        expansion::Union{Nothing, ExpansionResult})
+    df = DataFrame(CSV.File(outputs.stats_path))
+    isempty(df) && error("Cached validation stats at $(outputs.stats_path) are empty.")
+    row = first(eachrow(df))
+    warnings = unique(vcat(
+        _cached_validation_warnings(workdir, seed),
+        _cached_alignment_warnings(row, expansion)))
+    return ValidationResult(;
+        stats_path = outputs.stats_path,
+        query_name = _nothing_if_missing(row.query_name),
+        query_vs_uniprot_path = outputs.query_vs_uniprot_path,
+        seed_nseq = _maybe_int(row.seed_nseq),
+        seed_ncol = _maybe_int(row.seed_ncol),
+        seed_clusters62 = _maybe_int(row.seed_clusters62),
+        seed_neff80 = _maybe_float(row.seed_neff80),
+        expanded_nseq = _maybe_int(row.expanded_nseq),
+        expanded_ncol = _maybe_int(row.expanded_ncol),
+        expanded_clusters62 = _maybe_int(row.expanded_clusters62),
+        expanded_neff80 = _maybe_float(row.expanded_neff80),
+        aln_identical = _maybe_bool(row.aln_identical),
+        aln_mismatches = _maybe_int(row.aln_mismatches),
+        aln_insertions = _maybe_int(row.aln_insertions),
+        aln_deletions = _maybe_int(row.aln_deletions),
+        warnings,
+        status = isempty(warnings) ? :ok : :warn)
 end
 
 function _validation_alignment_stats(paths, expansion::Union{Nothing, ExpansionResult})
@@ -257,14 +377,49 @@ end
 function validate_results(target::ResolvedTarget,
         seed::SeedSelection,
         expansion::Union{Nothing, ExpansionResult},
-        workdir::AbstractString)
+        workdir::AbstractString;
+        overwrite::Bool = false)
     paths = _validation_input_paths(target, seed, expansion, workdir)
-    stats = _validation_alignment_stats(paths, expansion)
-    comparison = _compare_final_query_to_uniprot(
-        target, seed, expansion, stats.final_stats, paths.uniprot_path, workdir)
-    warnings = comparison.warnings
-    stats_path = _write_validation_stats(target, seed, stats, comparison, paths, workdir)
-    return _validation_result(stats_path, stats, comparison, warnings)
+    outputs = _validation_outputs(workdir, seed, paths)
+    identity = _validation_identity(target, seed, expansion, paths)
+    cache = overwrite ? (; reusable = false, status = :stale, warning = nothing) :
+            _classify_stage_state(_validation_dir(workdir, seed), identity, outputs;
+        stage_label = "validation")
+    if cache.reusable
+        @info "Reusing cached validation." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id pid=seed.pid
+        cached = _cached_validation_result(outputs, workdir, seed, expansion)
+        _write_validation_state(workdir, seed, :done, identity, outputs;
+            action = :reuse,
+            warnings = cached.warnings)
+        return cached
+    end
+
+    cache.warning === nothing ||
+        @warn String(cache.warning) validation_dir=_validation_dir(workdir, seed) status=cache.status
+    action = cache.status === :missing ? :run : :rebuild
+    if overwrite || cache.status !== :missing
+        dir = _validation_dir(workdir, seed)
+        isdir(dir) && safe_rm(dir, workdir)
+    end
+    _write_validation_state(workdir, seed, :running, identity, outputs; action)
+    try
+        stats = _validation_alignment_stats(paths, expansion)
+        comparison = _compare_final_query_to_uniprot(
+            target, seed, expansion, stats.final_stats, paths.uniprot_path, workdir)
+        warnings = comparison.warnings
+        stats_path = _write_validation_stats(
+            target, seed, stats, comparison, paths, workdir)
+        result = _validation_result(stats_path, stats, comparison, warnings)
+        _write_validation_state(workdir, seed, :done, identity, outputs; action, warnings)
+        return result
+    catch err
+        _write_validation_state(workdir, seed, :failed, identity, outputs;
+            action,
+            exception = (;
+                type = string(typeof(err)),
+                message = sprint(showerror, err)))
+        rethrow()
+    end
 end
 
 end

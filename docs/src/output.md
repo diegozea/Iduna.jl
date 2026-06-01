@@ -7,6 +7,16 @@ around it. By default, `workdir` is a directory named after the input ID.
 <workdir>/
   target.json
   result.json
+  .iduna/
+    stages/
+      target/
+        stage_state.json
+      thoraxe_input/
+        stage_state.json
+      thoraxe_msa/
+        stage_state.json
+      result/
+        stage_state.json
   logs/
     thoraxe/
   sequences/
@@ -34,7 +44,7 @@ around it. By default, `workdir` is a directory named after the input ID.
   expansion/  # absent when no_expansion=true / --no-expansion
     <gene>/<transcript>/
       pid_10.00/
-        step_state.json
+        stage_state.json
         seeds/
         dbs/
         hmm/
@@ -43,6 +53,7 @@ around it. By default, `workdir` is a directory named after the input ID.
         centroid_msa/  # optional, written only with centroids=true / --centroids
   validation/
     pid_10.00/
+      stage_state.json
       stats.csv
       query_vs_uniprot_alignment.txt
 ```
@@ -60,7 +71,15 @@ details.
 
 When `thoraxe_input_dir` is supplied, that source bundle is treated as read-only
 and copied into `thoraxe_input/`; the copied layout is then preserved like a
-fresh `transcript_query` result.
+fresh `transcript_query` result. Iduna fingerprints the required Ensembl bundle
+files and records a `thoraxe_input` stage manifest, so later reruns reuse the
+copied or previously generated `transcript_query` result when the target,
+species list, orthology, and filter options still match.
+
+Each `stage_state.json` records the stage name, stage key, status, action,
+identity hash, declared outputs, warnings, and exception summary when a stage
+fails. `result.json` includes a compact `"stages"` list copied from these
+manifests, making reruns auditable without using it as the source of truth.
 
 `thoraxe_msa/runs/` keeps the raw ThorAxe output for each PID candidate and its
 PID-specific species samples. `thoraxe_msa/candidates/` stores each PID's
@@ -183,7 +202,9 @@ Some details are important when reading these annotations:
 - A `0_` s-exon with no protein sequence adds no MSA columns, so it does not
   appear as a block in `*_s_exon_blocks.tsv`.
 
-Each expansion PID directory also has `step_state.json`, which records the
+Each expansion PID directory also has `stage_state.json`, which records the
 input identity used for safe cache reuse. If the seed MSA, expansion parameters,
-or centroid request change, Iduna treats the cached expansion as outdated,
-warns, and rebuilds that PID directory.
+or centroid request change, Iduna treats the cached expansion as stale, warns,
+and rebuilds that PID directory. Validation directories use the same manifest
+format and are reused when the seed, expansion, target, and UniProt comparison
+inputs are unchanged.

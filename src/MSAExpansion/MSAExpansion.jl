@@ -1,9 +1,7 @@
 module MSAExpansion
 
 import HMMER_jll
-import JSON
 import MMseqs2_jll
-import SHA
 
 using Dates: UTC, now
 using MIToS.MSA: A3M, AbstractMultipleSequenceAlignment, FASTA, Stockholm,
@@ -13,7 +11,8 @@ using MIToS.MSA: A3M, AbstractMultipleSequenceAlignment, FASTA, Stockholm,
 using ..Utils: ExpansionResult, ResolvedTarget, SeedSelection, _resolve_artifact_path,
                ensure_mmseqs_db, format_pid, format_pid_dir, run_logged, safe_rm,
                s_exon_code_map, s_exon_codes, set_s_exon_annotations!, write_fasta,
-               write_json, write_s_exon_blocks_tsv
+               write_s_exon_blocks_tsv, _classify_stage_state, _file_sha256,
+               _read_stage_state, _stage_state_path, _write_stage_state
 
 export expand_msa,
        normalize_stockholm_annotations!,
@@ -21,8 +20,7 @@ export expand_msa,
 
 _normalize_id(s::AbstractString) = String(split(String(s))[1])
 
-const _STEP_STATE_SCHEMA_VERSION = 1
-const _STEP_STATE_FILE = "step_state.json"
+const _STEP_STATE_FILE = "stage_state.json"
 
 function _expansion_root(workdir::AbstractString)
     joinpath(workdir, "expansion")
@@ -57,21 +55,12 @@ function _expansion_output_paths(run_dir::AbstractString,
         ))
 end
 
-_step_state_path(run_dir::AbstractString) = joinpath(run_dir, _STEP_STATE_FILE)
+_step_state_path(run_dir::AbstractString) = _stage_state_path(run_dir)
 
-function _outputs_exist(outputs::NamedTuple)
-    all(pairs(outputs)) do (name, path)
-        endswith(String(name), "s_exon_blocks_tsv") ||
-            (path isa AbstractString && isfile(path))
-    end
-end
-
-function _relative_output_paths(outputs::NamedTuple, run_dir::AbstractString)
-    return Dict(String(name) => relpath(path, run_dir) for (name, path) in pairs(outputs))
-end
-
-function _file_sha256(path::AbstractString)
-    return bytes2hex(open(SHA.sha256, path))
+function _required_expansion_outputs(outputs::NamedTuple)
+    return Dict(String(name) => path
+    for (name, path) in pairs(outputs)
+    if !endswith(String(name), "s_exon_blocks_tsv"))
 end
 
 function _expansion_identity(target::ResolvedTarget,
@@ -109,10 +98,6 @@ function _expansion_identity(target::ResolvedTarget,
     )
 end
 
-function _identity_hash(identity)
-    return bytes2hex(SHA.sha256(JSON.json(identity)))
-end
-
 function _exception_summary(err)
     return (;
         type = string(typeof(err)),
@@ -120,40 +105,30 @@ function _exception_summary(err)
     )
 end
 
+function _expansion_stage_key(identity)
+    return "expansion:$(identity.target.ensembl_gene_id):$(identity.target.transcript_id):$(format_pid_dir(identity.seed.pid))"
+end
+
 function _write_step_state(run_dir::AbstractString,
         status::Symbol,
         identity,
         outputs::NamedTuple;
         warnings::AbstractVector{<:AbstractString} = String[],
-        exception = nothing)
-    mkpath(run_dir)
-    state_path = _step_state_path(run_dir)
-    state = (;
-        schema_version = _STEP_STATE_SCHEMA_VERSION,
-        step = "msa_expansion",
-        status = String(status),
+        exception = nothing,
+        action::Union{Nothing, Symbol, AbstractString} = nothing)
+    return _write_stage_state(run_dir;
+        stage = "msa_expansion",
+        stage_key = _expansion_stage_key(identity),
+        status,
         identity,
-        identity_hash = _identity_hash(identity),
-        outputs = _relative_output_paths(outputs, run_dir),
-        warnings = String.(warnings),
+        outputs,
+        warnings,
         exception,
-        updated_at = string(now(UTC))
-    )
-    tmp_path = string(state_path, ".tmp")
-    write_json(tmp_path, state)
-    mv(tmp_path, state_path; force = true)
-    return state_path
+        action,
+        extra = (; step = "msa_expansion"))
 end
 
-function _read_step_state(run_dir::AbstractString)
-    state_path = _step_state_path(run_dir)
-    isfile(state_path) || return nothing
-    try
-        return JSON.parse(read(state_path, String))
-    catch err
-        return (; unreadable = sprint(showerror, err))
-    end
-end
+_read_step_state(run_dir::AbstractString) = _read_stage_state(run_dir)
 
 function _step_state_unreadable_message(state)
     if state === nothing
@@ -165,53 +140,8 @@ function _step_state_unreadable_message(state)
 end
 
 function _classify_step_state(run_dir::AbstractString, identity, outputs::NamedTuple)
-    expected_hash = _identity_hash(identity)
-    outputs_ready = _outputs_exist(outputs)
-    state_path = _step_state_path(run_dir)
-    if !isfile(state_path)
-        if outputs_ready
-            return (;
-                reusable = false,
-                status = :outdated,
-                warning = "Existing MSA expansion outputs have no $(_STEP_STATE_FILE); rebuilding to verify run identity.")
-        elseif isdir(run_dir)
-            return (;
-                reusable = false,
-                status = :unfinished,
-                warning = "Previous MSA expansion directory has no $(_STEP_STATE_FILE) and incomplete outputs; rebuilding.")
-        end
-        return (; reusable = false, status = :missing, warning = nothing)
-    end
-
-    state = _read_step_state(run_dir)
-    unreadable = _step_state_unreadable_message(state)
-    if unreadable !== nothing
-        return (;
-            reusable = false,
-            status = :outdated,
-            warning = "Could not read MSA expansion $(_STEP_STATE_FILE): $(unreadable); rebuilding.")
-    end
-
-    status = Symbol(String(get(state, "status", "outdated")))
-    if status != :done
-        return (;
-            reusable = false,
-            status,
-            warning = "Previous MSA expansion status was $(status); rebuilding.")
-    end
-    if String(get(state, "identity_hash", "")) != expected_hash
-        return (;
-            reusable = false,
-            status = :outdated,
-            warning = "MSA expansion inputs changed; rebuilding outdated cached outputs.")
-    end
-    if !outputs_ready
-        return (;
-            reusable = false,
-            status = :unfinished,
-            warning = "MSA expansion outputs are incomplete despite a done $(_STEP_STATE_FILE); rebuilding.")
-    end
-    return (; reusable = true, status = :done, warning = nothing)
+    return _classify_stage_state(run_dir, identity, _required_expansion_outputs(outputs);
+        stage_label = "MSA expansion")
 end
 
 function _write_cache_warning(logs_dir::AbstractString, warning::AbstractString)
@@ -736,15 +666,19 @@ function _prepare_expansion_cache!(run_dir::AbstractString,
         outputs;
         overwrite::Bool)
     cache_warnings = String[]
+    action = :run
     if overwrite && isdir(run_dir)
         @info "Clearing existing MSA expansion run directory." run_dir
+        action = :rebuild
         safe_rm(run_dir, workdir)
     elseif !overwrite
         cache = _classify_step_state(run_dir, identity, outputs)
         if cache.reusable
             @info "Reusing cached MSA expansion." run_dir
-            return (; reusable = true, cache_warnings)
+            _write_step_state(run_dir, :done, identity, outputs; action = :reuse)
+            return (; reusable = true, cache_warnings, action = :reuse)
         end
+        action = cache.status === :missing ? :run : :rebuild
         if cache.warning !== nothing
             warning = String(cache.warning)
             push!(cache_warnings, warning)
@@ -752,7 +686,7 @@ function _prepare_expansion_cache!(run_dir::AbstractString,
             isdir(run_dir) && safe_rm(run_dir, workdir)
         end
     end
-    return (; reusable = false, cache_warnings)
+    return (; reusable = false, cache_warnings, action)
 end
 
 function _cached_expansion_result(ctx, workdir::AbstractString)
@@ -777,13 +711,14 @@ function _cached_expansion_result(ctx, workdir::AbstractString)
     )
 end
 
-function _prepare_expansion_dirs!(ctx, cache_warnings::Vector{String})
+function _prepare_expansion_dirs!(ctx, cache_warnings::Vector{String}, action)
     @info "Preparing MSA expansion directories." run_dir=ctx.run_dir db_dir=ctx.db_dir hmm_dir=ctx.hmm_dir logs_dir=ctx.logs_dir
     mkpath.((
         ctx.db_dir, ctx.seed_dir, ctx.hmm_dir, ctx.tmp_root, ctx.unpack_dir, ctx.logs_dir))
     foreach(warning -> _write_cache_warning(ctx.logs_dir, warning), cache_warnings)
     _write_step_state(ctx.run_dir, :unfinished, ctx.identity, ctx.outputs;
-        warnings = cache_warnings)
+        warnings = cache_warnings,
+        action)
     return nothing
 end
 
@@ -1019,20 +954,22 @@ function expand_msa(target::ResolvedTarget,
         overwrite)
     cache.reusable && return _cached_expansion_result(ctx, workdir)
 
-    _prepare_expansion_dirs!(ctx, cache.cache_warnings)
+    _prepare_expansion_dirs!(ctx, cache.cache_warnings, cache.action)
     archived = _archive_expansion_seed(seed, ctx)
 
     try
         run_outputs = _run_expansion_workflow!(target, ctx, archived, mmseqs_db;
             match_mode, match_ratio, hmmbuild_symfrac, centroids, threads)
         _write_step_state(ctx.run_dir, :done, ctx.identity, ctx.outputs;
-            warnings = cache.cache_warnings)
+            warnings = cache.cache_warnings,
+            action = cache.action)
         return _finished_expansion_result(ctx, archived, run_outputs, workdir)
     catch err
         err isa InterruptException && rethrow()
         _write_step_state(ctx.run_dir, :failed, ctx.identity, ctx.outputs;
             warnings = cache.cache_warnings,
-            exception = _exception_summary(err))
+            exception = _exception_summary(err),
+            action = cache.action)
         rethrow()
     end
 end
