@@ -577,6 +577,20 @@
             cached_input_dir = joinpath(tmp, "missing"),
             overwrite = true)
 
+        invalid_metadata_source = joinpath(tmp, "invalid_metadata_source")
+        write_test_ensembl_bundle(invalid_metadata_source)
+        mkpath(joinpath(invalid_metadata_source,
+            Iduna.ThorAxeMSA._TRANSCRIPT_QUERY_METADATA_FILE))
+        failed_copy_workdir = joinpath(tmp, "failed_copy_work")
+        @test_throws SystemError Iduna.ThorAxeMSA._ensure_transcript_query(
+            target, failed_copy_workdir;
+            cached_input_dir = invalid_metadata_source,
+            overwrite = true)
+        failed_input_state = Iduna.Utils._read_stage_state(
+            Iduna.ThorAxeMSA._thoraxe_input_stage_dir(failed_copy_workdir))
+        @test failed_input_state["status"] == "failed"
+        @test failed_input_state["exception"]["type"] == "SystemError"
+
         direct_workdir = joinpath(tmp, "direct_work")
         direct_input = Iduna.ThorAxeMSA._thoraxe_input_dir(direct_workdir)
         write_test_ensembl_bundle(direct_input)
@@ -1603,6 +1617,39 @@ TableSet\tptroglodytes_gene_ensembl\tChimpanzee genes (Pan_tro_3.0)\t1
                 workdir, summary_path, stage_identity, stage_cache; overwrite = false)
             @test prepared.force_pid_rerun === true
             @test !isfile(joinpath(msa_dir, "stale.txt"))
+        end
+    end
+
+    @testset "ThorAxe MSA stage failure records manifest" begin
+        mktempdir() do tmp
+            workdir = joinpath(tmp, "work")
+            target = Iduna.ResolvedTarget(;
+                input_id = "ENST00000000001.1",
+                input_kind = :ensembl_transcript,
+                ensembl_gene_id = "ENSG00000000001.1",
+                transcript_id = "ENST00000000001.1")
+            input_dir = joinpath(tmp, "input")
+            write_test_ensembl_bundle(input_dir)
+            summary_path = joinpath(Iduna.ThorAxeMSA._thoraxe_msa_dir(workdir),
+                "candidate_summary.csv")
+            stage_identity = (; target = target.ensembl_gene_id)
+            filters = (;
+                species_filter = (; warnings = String[]),
+                biomart_filter = (; warnings = String[]))
+            prepared = (; action = :run, force_pid_rerun = true)
+            failing_runner = (args...; kwargs...) -> error("stage boom")
+            @test_throws ErrorException Iduna.ThorAxeMSA._run_thoraxe_msa_stage_with_failure_state!(
+                failing_runner, target, input_dir, workdir, summary_path, [10.0],
+                nothing, (;), stage_identity, filters, prepared;
+                pid_sample_count = 0,
+                pid_sample_fraction = 0.8,
+                sample_seed = UInt64(1))
+            state = Iduna.Utils._read_stage_state(
+                Iduna.ThorAxeMSA._thoraxe_msa_stage_dir(workdir))
+            @test state["status"] == "failed"
+            @test state["action"] == "run"
+            @test state["exception"]["type"] == "ErrorException"
+            @test state["exception"]["message"] == "stage boom"
         end
     end
 end

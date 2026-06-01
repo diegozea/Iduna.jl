@@ -258,6 +258,12 @@
             stage_keys = ["missing:stage"]))
         @test Iduna.Utils._stage_state_unreadable_message(nothing) ==
               "state file disappeared while reading"
+        invalid_stage_dir = joinpath(workdir, "invalid-stage")
+        mkpath(invalid_stage_dir)
+        write(joinpath(invalid_stage_dir, "stage_state.json"), "{bad json")
+        unreadable_state = Iduna.Utils._read_stage_state(invalid_stage_dir)
+        @test unreadable_state isa NamedTuple
+        @test Iduna.Utils._stage_state_unreadable_message(unreadable_state) !== nothing
         invalid_state = joinpath(workdir, "invalid_stage_state.json")
         write(invalid_state, "{bad json")
         @test Iduna.Utils._stage_summary_from_state_path(invalid_state, workdir) === nothing

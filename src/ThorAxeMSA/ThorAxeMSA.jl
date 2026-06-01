@@ -1934,6 +1934,35 @@ function _run_thoraxe_msa_stage!(target::ResolvedTarget,
         pid_sample_seed = sample_seed)
 end
 
+function _run_thoraxe_msa_stage_with_failure_state!(stage_runner::Function,
+        target::ResolvedTarget,
+        input_dir::AbstractString,
+        workdir::AbstractString,
+        summary_path::AbstractString,
+        pid_thresholds::AbstractVector{<:Real},
+        effective_specieslist::Union{Nothing, AbstractString},
+        metadata,
+        stage_identity,
+        filters,
+        prepared;
+        pid_sample_count::Integer,
+        pid_sample_fraction::Real,
+        sample_seed::UInt64)
+    try
+        return stage_runner(target, input_dir, workdir, summary_path, pid_thresholds,
+            effective_specieslist, metadata, stage_identity, filters, prepared;
+            pid_sample_count,
+            pid_sample_fraction,
+            sample_seed)
+    catch err
+        _write_thoraxe_msa_state(workdir, summary_path, SeedSelection[], :failed,
+            stage_identity;
+            action = prepared.action,
+            exception = _exception_summary(err))
+        rethrow()
+    end
+end
+
 function _candidate_summary_matches(df::DataFrame, metadata)
     isempty(df) && return false
     required = (
@@ -2363,20 +2392,12 @@ function build_thoraxe_msa(target::ResolvedTarget, workdir::AbstractString;
 
     prepared = _prepare_thoraxe_msa_stage!(workdir, summary_path, stage_identity,
         stage_cache; overwrite)
-    try
-        return _run_thoraxe_msa_stage!(target, input_dir, workdir, summary_path,
-            pid_thresholds, filters.effective_specieslist, metadata, stage_identity,
-            filters, prepared;
-            pid_sample_count,
-            pid_sample_fraction,
-            sample_seed)
-    catch err
-        _write_thoraxe_msa_state(workdir, summary_path, SeedSelection[], :failed,
-            stage_identity;
-            action = prepared.action,
-            exception = _exception_summary(err))
-        rethrow()
-    end
+    return _run_thoraxe_msa_stage_with_failure_state!(_run_thoraxe_msa_stage!,
+        target, input_dir, workdir, summary_path, pid_thresholds,
+        filters.effective_specieslist, metadata, stage_identity, filters, prepared;
+        pid_sample_count,
+        pid_sample_fraction,
+        sample_seed)
 end
 
 end
