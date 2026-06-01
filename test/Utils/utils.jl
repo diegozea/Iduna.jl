@@ -102,6 +102,13 @@
             sleep_seconds = 0,
             http_get = exhausted).status == 503
         @test attempts[] == 1
+
+        throws_unretryable = (url; kwargs...) -> error("network boom")
+        @test_throws ErrorException Iduna.Utils._http_get_with_retries(
+            "https://example.test/error", [];
+            retries = 2,
+            sleep_seconds = 0,
+            http_get = throws_unretryable)
     end
 
     identical = Iduna.Utils.protein_alignment_stats("ACDE", "ACDE")
@@ -159,6 +166,7 @@
         @test Iduna.Utils._relative_artifact_path(nothing, workdir) === nothing
         @test Iduna.Utils._resolve_artifact_path(relative_path, workdir) == inside_path
         @test Iduna.Utils._resolve_artifact_path(outside_path, workdir) == outside_path
+        @test Iduna.Utils._resolve_artifact_path(nothing, workdir) === nothing
 
         formatted = Iduna.Utils.format_fasta("seq", "acdefghijklmnopqrstuvwxyz"^3)
         @test startswith(formatted, ">seq\nACDEFGHIJKLMNOPQRSTUVWXYZ")
@@ -248,5 +256,10 @@
         @test only(filtered_summaries).stage_key == "example:stage"
         @test isempty(Iduna.Utils.collect_stage_summaries(workdir;
             stage_keys = ["missing:stage"]))
+        @test Iduna.Utils._stage_state_unreadable_message(nothing) ==
+              "state file disappeared while reading"
+        invalid_state = joinpath(workdir, "invalid_stage_state.json")
+        write(invalid_state, "{bad json")
+        @test Iduna.Utils._stage_summary_from_state_path(invalid_state, workdir) === nothing
     end
 end

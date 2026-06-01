@@ -144,6 +144,57 @@ import JSON
     @test_throws ErrorException Iduna._select_seed_index(
         result; pid = 80.0, index = nothing, label = "seed")
 
+    @testset "target and validation stage helpers" begin
+        mktempdir() do tmp
+            sto = joinpath(tmp, "seed.sto")
+            write(sto, "# STOCKHOLM 1.0\nseq1 ACDE\n//\n")
+            seed = Iduna.SeedSelection(;
+                pid = 10.0,
+                median_identity = 1.0,
+                mean_identity = 1.0,
+                stockholm_path = sto,
+                summary_path = joinpath(tmp, "summary.csv"))
+            validation_target = Iduna.ResolvedTarget(;
+                input_id = "seq1",
+                input_kind = :ensembl_transcript,
+                ensembl_gene_id = "seq1",
+                transcript_id = "seq1")
+            called = Iduna._call_validate_results(
+                Iduna.ResultsValidation.validate_results,
+                validation_target, seed, nothing, tmp; overwrite = false)
+            @test called.status === :ok
+
+            unreadable_workdir = joinpath(tmp, "unreadable")
+            mkpath(unreadable_workdir)
+            write(joinpath(unreadable_workdir, "target.json"), "{bad json")
+            @test Iduna._read_cached_target(unreadable_workdir) === nothing
+
+            stale_workdir = joinpath(tmp, "stale")
+            stale_target = Iduna.ResolvedTarget(;
+                input_id = "Q13148",
+                input_kind = :uniprot,
+                uniprot_id = "Q13148",
+                ensembl_gene_id = "ENSG00000120948.20",
+                transcript_id = "ENST00000240185.8",
+                uniprot_sequence_path = "missing.fasta")
+            Iduna.Utils.write_json(joinpath(stale_workdir, "target.json"),
+                Iduna._target_summary(stale_target, stale_workdir))
+            @test Iduna._read_cached_target(stale_workdir) === nothing
+
+            cleanup_workdir = joinpath(tmp, "cleanup")
+            mkpath(joinpath(cleanup_workdir, "sequences"))
+            write(joinpath(cleanup_workdir, "target.json"), "{}")
+            Iduna._clear_target_outputs!(cleanup_workdir)
+            @test !isfile(joinpath(cleanup_workdir, "target.json"))
+            @test !isdir(joinpath(cleanup_workdir, "sequences"))
+
+            blocked_workdir = joinpath(tmp, "blocked")
+            write(blocked_workdir, "not a directory")
+            @test_logs (:warn, r"Could not write failure result artifact") Iduna._write_failure_result(
+                "Q13148", blocked_workdir, "result", ErrorException("boom"))
+        end
+    end
+
     @testset "pipeline progress logging" begin
         mktempdir() do tmp
             logged = @test_logs (:info, r"Preparing Iduna output directory") (:info,

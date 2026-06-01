@@ -1586,4 +1586,23 @@ TableSet\tptroglodytes_gene_ensembl\tChimpanzee genes (Pan_tro_3.0)\t1
             @test prepared.force_pid_rerun === true
         end
     end
+
+    @testset "stale ThorAxe manifest cleanup removes old MSA dir" begin
+        mktempdir() do tmp
+            workdir = joinpath(tmp, "work")
+            msa_dir = Iduna.ThorAxeMSA._thoraxe_msa_dir(workdir)
+            mkpath(msa_dir)
+            write(joinpath(msa_dir, "stale.txt"), "stale")
+            summary_path = joinpath(msa_dir, "candidate_summary.csv")
+            stage_identity = (; target = "current")
+            stage_cache = (;
+                cache = (; reusable = true, status = :done, warning = nothing),
+                has_manifest = true,
+                summary_matches = false)
+            prepared = @test_logs (:warn, r"manifest matched") Iduna.ThorAxeMSA._prepare_thoraxe_msa_stage!(
+                workdir, summary_path, stage_identity, stage_cache; overwrite = false)
+            @test prepared.force_pid_rerun === true
+            @test !isfile(joinpath(msa_dir, "stale.txt"))
+        end
+    end
 end
