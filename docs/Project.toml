@@ -1,3 +1,6 @@
 [deps]
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 Iduna = "a1090517-0d21-41a4-b698-8a258aa9b9e4"
+
+[compat]
+Iduna = "0.6.0"
