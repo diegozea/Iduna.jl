@@ -807,43 +807,63 @@ end
 function _load_result_expansions(summary, target::Utils.ResolvedTarget,
         thoraxe::Utils.ThorAxeMSAResult, workdir::AbstractString)
     expansion_data = _result_vector(summary, "expansions")
-    expansions = Union{Nothing, Utils.ExpansionResult}[]
-    if isempty(expansion_data)
-        failed_stage = get(summary, "failed_stage", nothing)
-        if failed_stage !== nothing && String(failed_stage) == "msa_expansion" &&
-           !isempty(thoraxe.seeds)
-            @warn "Expansion failed before producing summaries; preserving empty expansion slots." workdir n_seeds=length(
-                thoraxe.seeds)
-            append!(expansions, fill(nothing, length(thoraxe.seeds)))
-        end
-        return expansions
-    end
-    for index in eachindex(thoraxe.seeds)
-        data = index <= length(expansion_data) ? expansion_data[index] : nothing
-        if data === nothing
-            @warn "Expansion summary is missing for a selected ThorAxe seed." workdir index
-            push!(expansions, nothing)
-            continue
-        elseif !(data isa AbstractDict)
-            @warn "Skipping partial expansion summary that cannot be matched to a ThorAxe seed." workdir index
-            push!(expansions, nothing)
-            continue
-        end
-        try
-            push!(expansions,
-                _load_result_expansion(data, target, thoraxe.seeds[index], workdir))
-        catch err
-            err isa InterruptException && rethrow()
-            @warn "Could not reconstruct expansion result; preserving empty expansion slot." workdir index exception=(
-                err, catch_backtrace())
-            push!(expansions, nothing)
-        end
-    end
-    if length(expansion_data) > length(thoraxe.seeds)
-        @warn "Ignoring expansion summaries that do not match selected ThorAxe seeds." workdir n_extra=(
-            length(expansion_data) - length(thoraxe.seeds))
-    end
+    isempty(expansion_data) &&
+        return _empty_result_expansions(summary, thoraxe, workdir)
+    expansions = Union{Nothing, Utils.ExpansionResult}[_load_result_expansion_slot(
+                                                           expansion_data, target,
+                                                           seed, workdir, index)
+                                                       for (index, seed) in
+                                                           pairs(thoraxe.seeds)]
+    _warn_extra_expansion_summaries(expansion_data, thoraxe.seeds, workdir)
     return expansions
+end
+
+function _empty_result_expansions(summary, thoraxe::Utils.ThorAxeMSAResult,
+        workdir::AbstractString)
+    failed_stage = get(summary, "failed_stage", nothing)
+    expansions = Union{Nothing, Utils.ExpansionResult}[]
+    failed_stage === nothing && return expansions
+    String(failed_stage) == "msa_expansion" || return expansions
+    isempty(thoraxe.seeds) && return expansions
+    @warn "Expansion failed before producing summaries; preserving empty expansion slots." workdir n_seeds=length(
+        thoraxe.seeds)
+    append!(expansions, fill(nothing, length(thoraxe.seeds)))
+    return expansions
+end
+
+function _load_result_expansion_slot(expansion_data::AbstractVector,
+        target::Utils.ResolvedTarget, seed::Utils.SeedSelection,
+        workdir::AbstractString, index::Integer)::Union{Nothing, Utils.ExpansionResult}
+    data = index <= length(expansion_data) ? expansion_data[index] : nothing
+    data === nothing && return _missing_result_expansion_slot(workdir, index)
+    data isa AbstractDict ||
+        return _malformed_result_expansion_slot(workdir, index)
+    try
+        return _load_result_expansion(data, target, seed, workdir)
+    catch err
+        err isa InterruptException && rethrow()
+        @warn "Could not reconstruct expansion result; preserving empty expansion slot." workdir index exception=(
+            err, catch_backtrace())
+        return nothing
+    end
+end
+
+function _missing_result_expansion_slot(workdir::AbstractString, index::Integer)
+    @warn "Expansion summary is missing for a selected ThorAxe seed." workdir index
+    return nothing
+end
+
+function _malformed_result_expansion_slot(workdir::AbstractString, index::Integer)
+    @warn "Skipping partial expansion summary that cannot be matched to a ThorAxe seed." workdir index
+    return nothing
+end
+
+function _warn_extra_expansion_summaries(expansion_data::AbstractVector,
+        seeds::AbstractVector{Utils.SeedSelection}, workdir::AbstractString)
+    length(expansion_data) <= length(seeds) && return nothing
+    @warn "Ignoring expansion summaries that do not match selected ThorAxe seeds." workdir n_extra=(
+        length(expansion_data) - length(seeds))
+    return nothing
 end
 
 function _validation_outputs_from_summary(data, seed::Utils.SeedSelection,
