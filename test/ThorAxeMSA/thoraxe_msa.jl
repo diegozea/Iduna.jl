@@ -1161,7 +1161,7 @@ TableSet\tptroglodytes_gene_ensembl\tChimpanzee genes (Pan_tro_3.0)\t1
 
     @testset "BioMart datasets dated cache" begin
         response(status::Integer,
-            body::AbstractString = "") = Iduna.ThorAxeMSA.HTTP.Response(status, Vector{UInt8}(body))
+            body::AbstractString = "") = Iduna.Utils.HTTP.Response(status; body)
 
         @test isdir(Iduna.ThorAxeMSA._biomart_cache_dir())
 
@@ -1277,7 +1277,7 @@ TableSet\tptroglodytes_gene_ensembl\tChimpanzee genes (Pan_tro_3.0)\t1
 
     @testset "Ensembl homology download retries" begin
         response(status::Integer,
-            body::AbstractString = "") = Iduna.ThorAxeMSA.HTTP.Response(status, Vector{UInt8}(body))
+            body::AbstractString = "") = Iduna.Utils.HTTP.Response(status; body)
 
         attempts = Ref(0)
         data = Iduna.ThorAxeMSA._fetch_ensembl_homology_data(

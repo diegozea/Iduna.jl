@@ -39,18 +39,23 @@
         end
     end
 
-    plain = Iduna.Utils.HTTP.Response(200, Vector{UInt8}("plain body"))
+    plain = Iduna.Utils.HTTP.Response(200; body = "plain body")
     @test Iduna.Utils.decode_body(plain) == "plain body"
     gzip_body = UInt8[
     31, 139, 8, 0, 0, 0, 0, 0, 0, 3, 75, 175, 202, 44, 40, 72, 77, 81, 72,
     202, 79, 169, 4, 0, 196, 225, 85, 59, 12, 0, 0, 0
 ]
-    gzipped = Iduna.Utils.HTTP.Response(200, gzip_body)
+    gzipped = Iduna.Utils.HTTP.Response(
+        200;
+        headers = ["Content-Encoding" => "gzip"],
+        body = gzip_body)
     @test Iduna.Utils.decode_body(gzipped) == "gzipped body"
 
     @testset "HTTP download retries" begin
         response(status::Integer,
-            body::AbstractString = "") = Iduna.Utils.HTTP.Response(status, Vector{UInt8}(body))
+            body::AbstractString = "") = Iduna.Utils.HTTP.Response(status; body)
+
+        @test_throws ArgumentError Iduna.Utils._http_get_request("not a url")
 
         attempts = Ref(0)
         transient_then_success = (url; headers, retry,

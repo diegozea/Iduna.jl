@@ -3,6 +3,7 @@ module Utils
 using BioAlignments: AffineGapScoreModel, BLOSUM62, GlobalAlignment, alignment,
                      count_deletions, count_insertions, count_mismatches, pairalign
 using BioSequences: LongAA
+import CodecZlib
 using Dates: UTC, now
 import HTTP
 import JSON
@@ -67,12 +68,14 @@ end
 _is_transient_http_status(status::Integer)::Bool = status in _TRANSIENT_HTTP_STATUSES
 _is_retryable_http_exception(_state, err)::Bool = err isa _RetryableHTTPStatus
 
+_http_get_request(url::AbstractString; kwargs...) = HTTP.request("GET", url; kwargs...)
+
 function _http_get_with_retries(url::AbstractString,
         headers;
         retries::Integer = 4,
         sleep_seconds::Real = 1.5,
         max_delay::Real = 30.0,
-        http_get::Function = HTTP.get)
+        http_get::Function = _http_get_request)
     attempts = max(Int(retries), 1)
     try
         # Return the final HTTP response so callers decide what status means success.
@@ -168,10 +171,15 @@ end
 format_pid(pid::Real) = @sprintf("%.1f", Float64(pid))
 format_pid_dir(pid::Real) = "pid_$(@sprintf("%.2f", Float64(pid)))"
 
+function _body_bytes(body)::Vector{UInt8}
+    body isa AbstractVector{UInt8} && return Vector{UInt8}(body)
+    return Vector{UInt8}(codeunits(String(body)))
+end
+
 function decode_body(resp::HTTP.Response)::String
-    body = resp.body
+    body = _body_bytes(resp.body)
     if length(body) >= 2 && body[1] == 0x1f && body[2] == 0x8b
-        return String(HTTP.decode(resp))
+        return String(transcode(CodecZlib.GzipDecompressor, body))
     end
     return String(body)
 end
