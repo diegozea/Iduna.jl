@@ -282,12 +282,22 @@ function _write_failure_result(input_id::AbstractString, workdir::AbstractString
     return nothing
 end
 
+function _failure_expansions(failed_stage::AbstractString, thoraxe,
+        expansions::AbstractVector)
+    padded = Union{Nothing, Utils.ExpansionResult}[expansions...]
+    if String(failed_stage) == "msa_expansion" && thoraxe !== nothing
+        append!(padded, fill(nothing, max(0, length(thoraxe.seeds) - length(padded))))
+    end
+    return padded
+end
+
 function _failure_result_summary(input_id::AbstractString, workdir::AbstractString,
         failed_stage::AbstractString, err; target = nothing, thoraxe = nothing,
         expansions = Union{Nothing, Utils.ExpansionResult}[],
         validations = Utils.ValidationResult[])
     stage_keys = _current_stage_keys(target, thoraxe, expansions, validations;
         failed_stage)
+    expansions = _failure_expansions(failed_stage, thoraxe, expansions)
     warnings = _partial_warnings(target, thoraxe, validations)
     if target !== nothing && thoraxe !== nothing
         partial = Utils.IdunaResult(;
@@ -614,6 +624,14 @@ function _path_or_default(path, _default::AbstractString, workdir::AbstractStrin
     return Utils._resolve_artifact_path(String(path), workdir)
 end
 
+function _nullable_path_or_default(data::AbstractDict, key::AbstractString,
+        default::AbstractString, workdir::AbstractString)
+    haskey(data, key) || return default
+    value = data[key]
+    value === nothing && return nothing
+    return _path_or_default(value, default, workdir)
+end
+
 _maybe_int_result(value) = value === nothing ? nothing : Int(value)
 _maybe_float_result(value) = value === nothing ? nothing : Float64(value)
 _maybe_bool_result(value) = value === nothing ? nothing : Bool(value)
@@ -763,7 +781,7 @@ function _load_result_expansion(data, target::Utils.ResolvedTarget,
         run_dir,
         seed_stockholm = _path_or_default(get(data, "seed_stockholm", nothing),
             joinpath(run_dir, "seeds", "$(seed_label).sto"), workdir),
-        seed_fasta = _path_or_default(get(data, "seed_fasta", nothing),
+        seed_fasta = _nullable_path_or_default(data, "seed_fasta",
             joinpath(run_dir, "seeds", "$(seed_label).fasta"), workdir),
         hits_fasta,
         full_stockholm = _path_or_default(get(data, "full_stockholm", nothing),
@@ -772,7 +790,7 @@ function _load_result_expansion(data, target::Utils.ResolvedTarget,
             outputs.match_stockholm, workdir),
         a3m_path = _path_or_default(get(data, "a3m_path", nothing),
             outputs.a3m_path, workdir),
-        s_exon_blocks_tsv = _path_or_default(get(data, "s_exon_blocks_tsv", nothing),
+        s_exon_blocks_tsv = _nullable_path_or_default(data, "s_exon_blocks_tsv",
             outputs.s_exon_blocks_tsv, workdir),
         db_dir = _path_or_default(get(data, "db_dir", nothing),
             joinpath(run_dir, "dbs"), workdir),

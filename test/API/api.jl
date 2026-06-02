@@ -407,19 +407,22 @@ import JSON
 
         mktempdir() do tmp
             workdir = joinpath(tmp, "failed_after_thoraxe")
-            fixture = _write_load_result_fixture(workdir; expansion = false,
-                validation = false)
+            fixture = _write_load_result_fixture(workdir; validation = false,
+                pids = [10.0, 80.0])
             summary = Iduna._failure_result_summary(
                 "Q13148", workdir, "msa_expansion", ErrorException("boom");
                 target = fixture.target,
                 thoraxe = fixture.thoraxe,
-                expansions = Union{Nothing, Iduna.ExpansionResult}[nothing])
+                expansions = Union{Nothing, Iduna.ExpansionResult}[fixture.expansions[1]])
             @test !(:workdir in propertynames(summary))
             @test summary.failed_stage == "msa_expansion"
             @test summary.thoraxe_msa.seeds[1].stockholm_path ==
                   joinpath("thoraxe_msa", "candidates", "pid_10.00",
                 "candidate_msa_full.sto")
-            @test summary.expansions[1] === nothing
+            @test length(summary.expansions) == 2
+            @test summary.expansions[1].match_stockholm ==
+                  relpath(fixture.expansions[1].match_stockholm, workdir)
+            @test summary.expansions[2] === nothing
         end
 
         mktempdir() do tmp
@@ -484,6 +487,8 @@ import JSON
             data = JSON.parse(read(joinpath(workdir, "result.json"), String))
             delete!(data["expansions"][1], "run_dir")
             delete!(data["expansions"][1], "match_stockholm")
+            delete!(data["expansions"][1], "seed_fasta")
+            delete!(data["expansions"][1], "s_exon_blocks_tsv")
             delete!(data["expansions"][1], "n_hits")
             delete!(data["expansions"][1], "n_new_hits")
             Iduna.Utils.write_json(joinpath(workdir, "result.json"), data)
@@ -492,7 +497,25 @@ import JSON
                 fixture.target.ensembl_gene_id,
                 fixture.target.transcript_id,
                 Iduna.Utils.format_pid_dir(fixture.seed.pid))
+            @test loaded.expansions[1].seed_fasta == joinpath(
+                loaded.expansions[1].run_dir, "seeds",
+                "seed_pid$(Iduna.Utils.format_pid(fixture.seed.pid)).fasta")
+            @test loaded.expansions[1].s_exon_blocks_tsv == joinpath(
+                loaded.expansions[1].run_dir, "expanded_msa",
+                "$(fixture.target.transcript_id)_s_exon_blocks.tsv")
             @test loaded.expansions[1].n_hits == 0
+        end
+
+        mktempdir() do tmp
+            workdir = joinpath(tmp, "explicit_null_expansion_paths")
+            _write_load_result_fixture(workdir)
+            data = JSON.parse(read(joinpath(workdir, "result.json"), String))
+            data["expansions"][1]["seed_fasta"] = nothing
+            data["expansions"][1]["s_exon_blocks_tsv"] = nothing
+            Iduna.Utils.write_json(joinpath(workdir, "result.json"), data)
+            loaded = Iduna.load_result(workdir)
+            @test loaded.expansions[1].seed_fasta === nothing
+            @test loaded.expansions[1].s_exon_blocks_tsv === nothing
         end
 
         mktempdir() do tmp
@@ -1194,6 +1217,55 @@ import JSON
             @test failed["exception"]["type"] == "ErrorException"
             @test failed["exception"]["message"] == "thoraxe boom"
             @test isfile(joinpath(workdir, "target.json"))
+        end
+
+        mktempdir() do tmp
+            workdir = joinpath(tmp, "expansion_failure")
+            seed1 = Iduna.SeedSelection(;
+                pid = 10.0,
+                median_identity = missing,
+                mean_identity = missing,
+                stockholm_path = "seed10.sto",
+                summary_path = "candidate_summary.csv")
+            seed2 = Iduna.SeedSelection(;
+                pid = 80.0,
+                median_identity = missing,
+                mean_identity = missing,
+                stockholm_path = "seed80.sto",
+                summary_path = "candidate_summary.csv")
+            multi_thoraxe = Iduna.ThorAxeMSAResult(;
+                input_dir = "thoraxe_input",
+                thoraxe_dirs = ["thoraxe10", "thoraxe80"],
+                msa_dir = "thoraxe_msa",
+                baseline_fastas = ["seed10.fasta", "seed80.fasta"],
+                baseline_stockholms = ["seed10.sto", "seed80.sto"],
+                sequence_fastas = ["seed10_sequences.fasta", "seed80_sequences.fasta"],
+                species_files = ["seed10_species.txt", "seed80_species.txt"],
+                pid_summary = "candidate_summary.csv",
+                seeds = [seed1, seed2],
+                logs_dir = "logs/thoraxe",
+                pid_sample_count = 0)
+            expansion_failure = (target, seed, workdir;
+                kwargs...) -> begin
+                seed.pid == 80.0 && error("expansion boom")
+                return expansion
+            end
+            @test_throws ErrorException Iduna.iduna(;
+                id = "P20963",
+                mmseqs_db = "db",
+                workdir,
+                pid_sample_count = 0,
+                _resolve_target = (args...; kwargs...) -> target,
+                _build_thoraxe_msa = (args...; kwargs...) -> multi_thoraxe,
+                _expand_msa = expansion_failure)
+
+            failed = _read_result(workdir)
+            @test failed["status"] == "error"
+            @test failed["failed_stage"] == "msa_expansion"
+            @test length(failed["thoraxe_msa"]["seeds"]) == 2
+            @test length(failed["expansions"]) == 2
+            @test failed["expansions"][1]["match_stockholm"] == expansion.match_stockholm
+            @test failed["expansions"][2] === nothing
         end
     end
 end
