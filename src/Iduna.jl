@@ -13,6 +13,7 @@ export IDMapping,
        ValidationResult,
        iduna,
        load_expanded_msa,
+       load_result,
        load_seed_msa
 
 include("Utils/Utils.jl")

@@ -15,7 +15,7 @@ Format with JuliaFormatter. Use `CamelCase` for types/modules, `snake_case` for 
 
 ## Tests
 
-Group related tests into `test/*.jl` and include them from `test/runtests.jl`. Keep Aqua checks passing.
+Group related tests into `test/*.jl` and include them from `test/runtests.jl`. Keep Aqua checks passing. Every new or changed source behavior must be covered by tests. Do not create a PR that decreases test coverage or leaves newly added executable source lines uncovered; before handoff, run relevant tests and a coverage check for source changes.
 
 ## Agent Notes
 

@@ -18,7 +18,8 @@ using Statistics: mean, median
 using StatsBase: sample
 
 using ..Utils: DEFAULT_PID_THRESHOLDS, ResolvedTarget, SeedSelection, ThorAxeMSAResult,
-               _http_get_with_retries, _resolve_artifact_path, decode_body,
+               _http_get_with_retries, _relative_artifact_path, _resolve_artifact_path,
+               decode_body,
                fasta_sequence, format_pid, format_pid_dir, protein_alignment_stats,
                resolve_sequence_name, safe_rm,
                has_s_exon_annotations, s_exon_blocks_path, set_s_exon_annotations!,
@@ -1591,6 +1592,11 @@ end
 
 _candidate_summary_optional(value) = value === nothing ? missing : value
 
+function _candidate_summary_path(path, workdir::AbstractString)
+    (path === nothing || ismissing(path)) && return missing
+    return _relative_artifact_path(String(path), workdir)
+end
+
 function _candidate_summary_row(target::ResolvedTarget,
         candidate,
         pid::Real,
@@ -1627,11 +1633,12 @@ function _candidate_summary_row(target::ResolvedTarget,
         transcript_query_fingerprint = _candidate_summary_optional(
             metadata.transcript_query_fingerprint),
         selection_mode = metadata.selection_mode,
-        fasta_path = candidate.fasta_path,
-        stockholm_path = candidate.stockholm_path,
-        sequence_fasta = candidate.sequence_fasta,
-        species_file = candidate.species_file,
-        scores_path = _pid_scores_path(candidate.workdir, pid)
+        fasta_path = _candidate_summary_path(candidate.fasta_path, candidate.workdir),
+        stockholm_path = _candidate_summary_path(candidate.stockholm_path, candidate.workdir),
+        sequence_fasta = _candidate_summary_path(candidate.sequence_fasta, candidate.workdir),
+        species_file = _candidate_summary_path(candidate.species_file, candidate.workdir),
+        scores_path = _candidate_summary_path(_pid_scores_path(candidate.workdir, pid),
+            candidate.workdir)
     )
 end
 
@@ -2013,6 +2020,7 @@ function _row_seed(row, summary_path::AbstractString)
     median_identity = ismissing(row.median_identity) ? missing :
                       Float64(row.median_identity)
     mean_identity = ismissing(row.mean_identity) ? missing : Float64(row.mean_identity)
+    workdir = abspath(_candidate_summary_workdir(summary_path))
     return SeedSelection(;
         pid = Float64(row.pid),
         median_identity,
@@ -2020,7 +2028,8 @@ function _row_seed(row, summary_path::AbstractString)
         stockholm_path = String(row.stockholm_path),
         fasta_path = row.fasta_path === missing ? nothing : String(row.fasta_path),
         s_exon_blocks_tsv = s_exon_blocks_path(String(row.stockholm_path)),
-        summary_path
+        summary_path,
+        workdir
     )
 end
 
@@ -2051,14 +2060,29 @@ function select_best_seed(summary_path::AbstractString)
     return _row_seed(row, summary_path)
 end
 
+function _candidate_summary_workdir(summary_path::AbstractString)
+    summary_dir = dirname(summary_path)
+    return basename(summary_dir) == "thoraxe_msa" ? dirname(summary_dir) : summary_dir
+end
+
+function _same_candidate_path(row_path, seed_path, workdir::AbstractString)
+    row_path === missing && return false
+    row_string = String(row_path)
+    seed_string = String(seed_path)
+    row_string == seed_string && return true
+    return _resolve_artifact_path(row_string, workdir) ==
+           _resolve_artifact_path(seed_string, workdir)
+end
+
 function _mark_selected_candidates!(summary_path::AbstractString,
         seeds::AbstractVector{SeedSelection})
     df = _candidate_summary_dataframe(summary_path)
     df.selected = falses(nrow(df))
+    workdir = _candidate_summary_workdir(summary_path)
     for seed in seeds
         selected_idx = findfirst(eachrow(df)) do row
             Float64(row.pid) == seed.pid &&
-                String(row.stockholm_path) == seed.stockholm_path
+                _same_candidate_path(row.stockholm_path, seed.stockholm_path, workdir)
         end
         selected_idx === nothing ||
             (df.selected[selected_idx] = true)

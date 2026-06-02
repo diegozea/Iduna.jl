@@ -128,10 +128,21 @@ import JSON
         warnings = thoraxe.warnings,
         status = :warn)
     summary = Iduna.Utils.result_summary(result)
+    @test !(:workdir in propertynames(summary))
     @test summary.status == "warn"
     @test summary.thoraxe_msa.status == "warn"
     @test summary.thoraxe_msa.warnings == thoraxe.warnings
+    @test summary.thoraxe_msa.seeds[1].stockholm_path == "seed.sto"
     @test summary.expansions[1].match_stockholm == "match.sto"
+    missing_expansion_result = Iduna.IdunaResult(;
+        input_id = "Q13148",
+        workdir = "workdir",
+        target,
+        thoraxe_msa = thoraxe,
+        expansions = Union{Nothing, Iduna.ExpansionResult}[nothing],
+        validations = Iduna.ValidationResult[],
+        status = :error)
+    @test Iduna.Utils.result_summary(missing_expansion_result).expansions[1] === nothing
     validation_warning = Iduna.ValidationResult(;
         stats_path = "warning_stats.csv",
         warnings = ["validation warning"])
@@ -143,6 +154,492 @@ import JSON
         result; pid = nothing, index = 2, label = "seed")
     @test_throws ErrorException Iduna._select_seed_index(
         result; pid = 80.0, index = nothing, label = "seed")
+
+    function _write_load_result_fixture(workdir;
+            expansion::Bool = true,
+            validation::Bool = true,
+            pids = [10.0])
+        gene = "ENSG00000120948.20"
+        transcript = "ENST00000240185.8"
+        fixture_target = Iduna.ResolvedTarget(;
+            input_id = "Q13148",
+            input_kind = :uniprot,
+            uniprot_id = "Q13148",
+            ensembl_gene_id = gene,
+            transcript_id = transcript,
+            ensembl_protein_id = "ENSP00000240185",
+            uniprot_sequence_path = joinpath(
+                workdir, "sequences", "uniprot", "Q13148.fasta"))
+        mkpath(dirname(fixture_target.uniprot_sequence_path))
+        write(fixture_target.uniprot_sequence_path, ">Q13148\nAC\n")
+        Iduna.Utils.write_json(joinpath(workdir, "target.json"),
+            Iduna._target_summary(fixture_target, workdir))
+
+        summary_path = joinpath(workdir, "thoraxe_msa", "candidate_summary.csv")
+        mkpath(dirname(summary_path))
+        summary_rows = String[]
+        fixture_seeds = Iduna.SeedSelection[]
+        for pid in pids
+            pid_dir = Iduna.Utils.format_pid_dir(pid)
+            seed_sto = joinpath(workdir, "thoraxe_msa", "candidates", pid_dir,
+                "candidate_msa_full.sto")
+            seed_fasta = joinpath(workdir, "thoraxe_msa", "candidates", pid_dir,
+                "candidate_msa_full.fasta")
+            seed_blocks = joinpath(workdir, "thoraxe_msa", "candidates", pid_dir,
+                "candidate_msa_full_s_exon_blocks.tsv")
+            sequence_fasta = joinpath(workdir, "thoraxe_msa", "candidates", pid_dir,
+                "sequences", "candidate_sequences_full.fasta")
+            species_file = joinpath(workdir, "thoraxe_msa", "candidates", pid_dir,
+                "species", "candidate_species_full.txt")
+            mkpath(dirname(seed_sto))
+            mkpath(dirname(sequence_fasta))
+            mkpath(dirname(species_file))
+            write(seed_sto, "# STOCKHOLM 1.0\nseed AC\n//\n")
+            write(seed_fasta, ">seed\nAC\n")
+            write(seed_blocks,
+                "alignment\tpid\tcode\ts_exon_id\tstart_col\tend_col\tn_columns\n")
+            write(sequence_fasta, ">seed\nAC\n")
+            write(species_file, "homo_sapiens\n")
+            push!(summary_rows,
+                "$(pid),true,1.0,1.0,$(relpath(seed_sto, workdir)),$(relpath(seed_fasta, workdir)),$(relpath(sequence_fasta, workdir)),$(relpath(species_file, workdir))")
+            push!(fixture_seeds,
+                Iduna.SeedSelection(;
+                    pid = Float64(pid),
+                    median_identity = 1.0,
+                    mean_identity = 1.0,
+                    stockholm_path = seed_sto,
+                    fasta_path = seed_fasta,
+                    s_exon_blocks_tsv = seed_blocks,
+                    summary_path))
+        end
+        write(summary_path,
+            "pid,selected,median_identity,mean_identity,stockholm_path,fasta_path,sequence_fasta,species_file\n" *
+            join(summary_rows, "\n") * "\n")
+        fixture_thoraxe = Iduna.ThorAxeMSAResult(;
+            input_dir = joinpath(workdir, "thoraxe_input"),
+            thoraxe_dirs = [joinpath(workdir, "thoraxe_msa", "runs",
+                                Iduna.Utils.format_pid_dir(seed.pid), "full", "thoraxe")
+                            for seed in fixture_seeds],
+            msa_dir = joinpath(workdir, "thoraxe_msa"),
+            baseline_fastas = [seed.fasta_path for seed in fixture_seeds],
+            baseline_stockholms = [seed.stockholm_path for seed in fixture_seeds],
+            sequence_fastas = [joinpath(workdir, "thoraxe_msa", "candidates",
+                                   Iduna.Utils.format_pid_dir(seed.pid), "sequences",
+                                   "candidate_sequences_full.fasta")
+                               for seed in fixture_seeds],
+            species_files = [joinpath(workdir, "thoraxe_msa", "candidates",
+                                 Iduna.Utils.format_pid_dir(seed.pid), "species",
+                                 "candidate_species_full.txt")
+                             for seed in fixture_seeds],
+            pid_summary = summary_path,
+            seeds = fixture_seeds,
+            logs_dir = joinpath(workdir, "logs", "thoraxe"),
+            pid_sample_count = 1,
+            pid_sample_fraction = 1.0,
+            pid_sample_seed = UInt64(7))
+
+        fixture_expansions = Union{Nothing, Iduna.ExpansionResult}[]
+        if expansion
+            for seed in fixture_seeds
+                pid_dir = Iduna.Utils.format_pid_dir(seed.pid)
+                run_dir = joinpath(workdir, "expansion", gene, transcript, pid_dir)
+                expanded_dir = joinpath(run_dir, "expanded_msa")
+                mkpath(expanded_dir)
+                match_sto = joinpath(expanded_dir, "$(transcript)_matchonly.sto")
+                full_sto = joinpath(expanded_dir, "$(transcript)_full.sto")
+                hits_fasta = joinpath(expanded_dir, "$(transcript)_hits_raw.fasta")
+                write(match_sto, "# STOCKHOLM 1.0\nseed AC\n//\n")
+                write(full_sto, "# STOCKHOLM 1.0\nseed AC\n//\n")
+                write(hits_fasta, "")
+                push!(fixture_expansions,
+                    Iduna.ExpansionResult(;
+                        run_dir,
+                        seed_stockholm = joinpath(
+                            run_dir, "seeds", "seed_pid$(Iduna.Utils.format_pid(seed.pid)).sto"),
+                        seed_fasta = joinpath(
+                            run_dir, "seeds", "seed_pid$(Iduna.Utils.format_pid(seed.pid)).fasta"),
+                        hits_fasta,
+                        full_stockholm = full_sto,
+                        match_stockholm = match_sto,
+                        a3m_path = joinpath(expanded_dir, "$(transcript)_expanded.a3m"),
+                        s_exon_blocks_tsv = joinpath(
+                            expanded_dir, "$(transcript)_s_exon_blocks.tsv"),
+                        db_dir = joinpath(run_dir, "dbs"),
+                        hmm_dir = joinpath(run_dir, "hmm"),
+                        logs_dir = joinpath(run_dir, "logs"),
+                        n_hits = 0,
+                        n_new_hits = 0))
+            end
+        end
+
+        fixture_validations = Iduna.ValidationResult[]
+        if validation
+            for seed in fixture_seeds
+                pid_dir = Iduna.Utils.format_pid_dir(seed.pid)
+                stats_path = joinpath(workdir, "validation", pid_dir, "stats.csv")
+                mkpath(dirname(stats_path))
+                write(stats_path,
+                    "query_name,seed_nseq,seed_ncol,seed_clusters62,seed_neff80,expanded_nseq,expanded_ncol,expanded_clusters62,expanded_neff80,aln_identical,aln_mismatches,aln_insertions,aln_deletions\nseed,1,2,1,1.0,1,2,1,1.0,true,0,0,0\n")
+                push!(fixture_validations, Iduna.ValidationResult(; stats_path))
+            end
+        end
+
+        fixture_result = Iduna.IdunaResult(;
+            input_id = "Q13148",
+            workdir,
+            target = fixture_target,
+            thoraxe_msa = fixture_thoraxe,
+            expansions = fixture_expansions,
+            validations = fixture_validations,
+            status = :ok)
+        Iduna.Utils.write_json(joinpath(workdir, "result.json"),
+            Iduna.Utils.result_summary(fixture_result))
+        stage_state = joinpath(workdir, ".iduna", "stages", "result",
+            "stage_state.json")
+        mkpath(dirname(stage_state))
+        write(stage_state, "{\"stage\":\"result\"}")
+        stats_path = validation ? fixture_validations[1].stats_path : nothing
+        return (;
+            target = fixture_target,
+            thoraxe = fixture_thoraxe,
+            seed = first(fixture_seeds),
+            seeds = fixture_seeds,
+            expansions = fixture_expansions,
+            summary_path,
+            stats_path,
+            result_json = joinpath(workdir, "result.json"),
+            target_json = joinpath(workdir, "target.json"),
+            stage_state)
+    end
+
+    @testset "load_result reconstructs current schema read-only" begin
+        mktempdir() do tmp
+            workdir = joinpath(tmp, "successful")
+            fixture = _write_load_result_fixture(workdir)
+            before = read.(
+                (
+                    fixture.result_json,
+                    fixture.target_json,
+                    fixture.summary_path,
+                    fixture.stats_path,
+                    fixture.stage_state),
+                String)
+
+            loaded = Iduna.load_result(workdir)
+            @test loaded isa Iduna.IdunaResult
+            @test loaded.workdir == abspath(workdir)
+            @test loaded.status === :ok
+            @test loaded.target.ensembl_gene_id == fixture.target.ensembl_gene_id
+            @test loaded.thoraxe_msa.seeds[1].pid == 10.0
+            @test loaded.thoraxe_msa.pid_sample_seed == UInt64(7)
+            @test loaded.expansions[1].n_hits == 0
+            @test loaded.validations[1].query_name == "seed"
+            @test Iduna.ResultsValidation.nsequences(Iduna.load_seed_msa(loaded)) == 1
+            @test Iduna.ResultsValidation.nsequences(Iduna.load_expanded_msa(loaded)) == 1
+            @test before == read.(
+                (
+                    fixture.result_json,
+                    fixture.target_json,
+                    fixture.summary_path,
+                    fixture.stats_path,
+                    fixture.stage_state),
+                String)
+        end
+
+        mktempdir() do tmp
+            workdir = joinpath(tmp, "no_expansion")
+            _write_load_result_fixture(workdir; expansion = false)
+            loaded = Iduna.load_result(workdir)
+            @test isempty(loaded.expansions)
+            @test Iduna.ResultsValidation.nsequences(Iduna.load_seed_msa(loaded)) == 1
+            @test_throws ErrorException Iduna.load_expanded_msa(loaded)
+        end
+
+        mktempdir() do tmp
+            workdir = joinpath(tmp, "stage_summary")
+            fixture = _write_load_result_fixture(workdir)
+            data = JSON.parse(read(fixture.result_json, String))
+            data["stages"] = Any[Dict(
+                "stage" => "target",
+                "stage_key" => "target",
+                "status" => "done")]
+            Iduna.Utils.write_json(fixture.result_json, data)
+
+            loaded = Iduna.load_result(workdir)
+            @test length(loaded.stages) == 1
+            @test loaded.stages[1]["stage_key"] == "target"
+        end
+
+        mktempdir() do tmp
+            original = joinpath(tmp, "original")
+            moved = joinpath(tmp, "moved")
+            _write_load_result_fixture(original)
+            cp(original, moved)
+            loaded = Iduna.load_result(moved)
+            @test loaded.workdir == abspath(moved)
+            @test loaded.thoraxe_msa.seeds[1].stockholm_path == joinpath(
+                "thoraxe_msa", "candidates", "pid_10.00", "candidate_msa_full.sto")
+            @test Iduna.ResultsValidation.nsequences(Iduna.load_seed_msa(loaded)) == 1
+            @test Iduna.ResultsValidation.nsequences(Iduna.load_expanded_msa(loaded)) == 1
+        end
+    end
+
+    @testset "load_result warns for partial objects" begin
+        mktempdir() do tmp
+            workdir = joinpath(tmp, "failed_after_target")
+            fixture = _write_load_result_fixture(workdir)
+            rm(fixture.target_json; force = true)
+            rm(joinpath(workdir, "thoraxe_msa"); recursive = true, force = true)
+            Iduna.Utils.write_json(joinpath(workdir, "result.json"),
+                Iduna._failure_result_summary(
+                    "Q13148", workdir, "thoraxe_msa", ErrorException("boom");
+                    target = fixture.target))
+
+            loaded = @test_logs (:warn, r"Loading partial IdunaResult") (:warn,
+                r"Loading target metadata") (:warn,
+                r"no ThorAxe MSA summary") match_mode=:any Iduna.load_result(workdir)
+            @test loaded.status === :error
+            @test loaded.target.transcript_id == fixture.target.transcript_id
+            @test isempty(loaded.thoraxe_msa.seeds)
+            @test isempty(loaded.expansions)
+            @test isempty(loaded.validations)
+        end
+
+        mktempdir() do tmp
+            workdir = joinpath(tmp, "failed_after_thoraxe")
+            fixture = _write_load_result_fixture(workdir; validation = false,
+                pids = [10.0, 80.0])
+            summary = Iduna._failure_result_summary(
+                "Q13148", workdir, "msa_expansion", ErrorException("boom");
+                target = fixture.target,
+                thoraxe = fixture.thoraxe,
+                expansions = Union{Nothing, Iduna.ExpansionResult}[fixture.expansions[1]])
+            @test !(:workdir in propertynames(summary))
+            @test summary.failed_stage == "msa_expansion"
+            @test summary.thoraxe_msa.seeds[1].stockholm_path ==
+                  joinpath("thoraxe_msa", "candidates", "pid_10.00",
+                "candidate_msa_full.sto")
+            @test length(summary.expansions) == 2
+            @test summary.expansions[1].match_stockholm ==
+                  relpath(fixture.expansions[1].match_stockholm, workdir)
+            @test summary.expansions[2] === nothing
+        end
+
+        mktempdir() do tmp
+            workdir = joinpath(tmp, "bad_target_json")
+            fixture = _write_load_result_fixture(workdir; expansion = false,
+                validation = false)
+            write(fixture.target_json, "{bad json")
+            loaded = @test_logs (:warn, r"Could not read target.json") (:warn,
+                r"Loading target metadata") match_mode=:any Iduna.load_result(workdir)
+            @test loaded.target.input_id == "Q13148"
+            @test loaded.target.uniprot_sequence_path ==
+                  joinpath("sequences", "uniprot", "Q13148.fasta")
+        end
+
+        mktempdir() do tmp
+            workdir = joinpath(tmp, "bad_target_summary")
+            mkpath(workdir)
+            Iduna.Utils.write_json(joinpath(workdir, "result.json"),
+                Dict("input_id" => "Q13148", "status" => "error", "target" => Dict()))
+            @test_logs (:warn, r"Loading partial IdunaResult") (:warn,
+                r"Loading target metadata") (:warn,
+                r"Could not reconstruct target metadata") match_mode=:any begin
+                @test_throws ErrorException Iduna.load_result(workdir)
+            end
+        end
+
+        mktempdir() do tmp
+            @test_throws ErrorException Iduna.load_result(joinpath(tmp, "missing"))
+            workdir = joinpath(tmp, "array_result")
+            mkpath(workdir)
+            write(joinpath(workdir, "result.json"), "[]")
+            @test_throws ErrorException Iduna.load_result(workdir)
+        end
+    end
+
+    @testset "load_result current schema partial summaries" begin
+        mktempdir() do tmp
+            workdir = joinpath(tmp, "unsupported_seed_schema")
+            _write_load_result_fixture(workdir; expansion = false, validation = false)
+            data = JSON.parse(read(joinpath(workdir, "result.json"), String))
+            delete!(data["thoraxe_msa"], "seeds")
+            Iduna.Utils.write_json(joinpath(workdir, "result.json"), data)
+            @test_throws ErrorException Iduna.load_result(workdir)
+        end
+
+        mktempdir() do tmp
+            workdir = joinpath(tmp, "bad_expansion")
+            _write_load_result_fixture(workdir)
+            data = JSON.parse(read(joinpath(workdir, "result.json"), String))
+            data["expansions"][1]["n_hits"] = "bad"
+            Iduna.Utils.write_json(joinpath(workdir, "result.json"), data)
+            loaded = @test_logs (:warn, r"Could not reconstruct expansion") match_mode=:any Iduna.load_result(
+                workdir)
+            @test length(loaded.expansions) == 1
+            @test loaded.expansions[1] === nothing
+            @test_throws ErrorException Iduna.load_expanded_msa(loaded)
+        end
+
+        mktempdir() do tmp
+            workdir = joinpath(tmp, "default_expansion_paths")
+            fixture = _write_load_result_fixture(workdir)
+            data = JSON.parse(read(joinpath(workdir, "result.json"), String))
+            delete!(data["expansions"][1], "run_dir")
+            delete!(data["expansions"][1], "match_stockholm")
+            delete!(data["expansions"][1], "seed_fasta")
+            delete!(data["expansions"][1], "s_exon_blocks_tsv")
+            delete!(data["expansions"][1], "n_hits")
+            delete!(data["expansions"][1], "n_new_hits")
+            Iduna.Utils.write_json(joinpath(workdir, "result.json"), data)
+            loaded = Iduna.load_result(workdir)
+            @test loaded.expansions[1].run_dir == joinpath("expansion",
+                fixture.target.ensembl_gene_id,
+                fixture.target.transcript_id,
+                Iduna.Utils.format_pid_dir(fixture.seed.pid))
+            @test loaded.expansions[1].seed_fasta == joinpath(
+                loaded.expansions[1].run_dir, "seeds",
+                "seed_pid$(Iduna.Utils.format_pid(fixture.seed.pid)).fasta")
+            @test loaded.expansions[1].s_exon_blocks_tsv == joinpath(
+                loaded.expansions[1].run_dir, "expanded_msa",
+                "$(fixture.target.transcript_id)_s_exon_blocks.tsv")
+            @test loaded.expansions[1].n_hits == 0
+        end
+
+        mktempdir() do tmp
+            workdir = joinpath(tmp, "explicit_null_expansion_paths")
+            _write_load_result_fixture(workdir)
+            data = JSON.parse(read(joinpath(workdir, "result.json"), String))
+            data["expansions"][1]["seed_fasta"] = nothing
+            data["expansions"][1]["s_exon_blocks_tsv"] = nothing
+            Iduna.Utils.write_json(joinpath(workdir, "result.json"), data)
+            loaded = Iduna.load_result(workdir)
+            @test loaded.expansions[1].seed_fasta === nothing
+            @test loaded.expansions[1].s_exon_blocks_tsv === nothing
+        end
+
+        mktempdir() do tmp
+            workdir = joinpath(tmp, "match_path_expansion_run_dir")
+            fixture = _write_load_result_fixture(workdir)
+            data = JSON.parse(read(joinpath(workdir, "result.json"), String))
+            delete!(data["expansions"][1], "run_dir")
+            Iduna.Utils.write_json(joinpath(workdir, "result.json"), data)
+            loaded = Iduna.load_result(workdir)
+            @test loaded.expansions[1].run_dir == relpath(
+                dirname(dirname(fixture.expansions[1].match_stockholm)), workdir)
+        end
+
+        mktempdir() do tmp
+            workdir = joinpath(tmp, "partial_multi_seed_expansion")
+            _write_load_result_fixture(workdir; validation = false, pids = [10.0, 80.0])
+            data = JSON.parse(read(joinpath(workdir, "result.json"), String))
+            data["expansions"][1]["n_hits"] = "bad"
+            Iduna.Utils.write_json(joinpath(workdir, "result.json"), data)
+            loaded = @test_logs (:warn, r"Could not reconstruct expansion") match_mode=:any Iduna.load_result(
+                workdir)
+            @test length(loaded.expansions) == 2
+            @test loaded.expansions[1] === nothing
+            @test loaded.expansions[2] isa Iduna.ExpansionResult
+            @test_throws ErrorException Iduna.load_expanded_msa(loaded; index = 1)
+            @test Iduna.ResultsValidation.nsequences(
+                Iduna.load_expanded_msa(loaded; index = 2)) == 1
+        end
+
+        mktempdir() do tmp
+            workdir = joinpath(tmp, "malformed_expansion_slots")
+            _write_load_result_fixture(workdir; validation = false,
+                pids = [10.0, 80.0, 90.0])
+            data = JSON.parse(read(joinpath(workdir, "result.json"), String))
+            data["expansions"][1] = nothing
+            data["expansions"][2] = "partial"
+            push!(data["expansions"], Dict("status" => "ok"))
+            Iduna.Utils.write_json(joinpath(workdir, "result.json"), data)
+
+            loaded = @test_logs (:warn, r"Expansion summary is missing") (:warn,
+                r"Skipping partial expansion summary") (:warn,
+                r"Ignoring expansion summaries") match_mode=:any Iduna.load_result(workdir)
+            @test length(loaded.expansions) == 3
+            @test loaded.expansions[1] === nothing
+            @test loaded.expansions[2] === nothing
+            @test loaded.expansions[3] isa Iduna.ExpansionResult
+        end
+
+        mktempdir() do tmp
+            workdir = joinpath(tmp, "failed_before_first_expansion")
+            _write_load_result_fixture(workdir; expansion = false, validation = false,
+                pids = [10.0, 80.0])
+            data = JSON.parse(read(joinpath(workdir, "result.json"), String))
+            data["status"] = "error"
+            data["failed_stage"] = "msa_expansion"
+            data["exception"] = Dict("type" => "ErrorException", "message" => "boom")
+            data["expansions"] = Any[]
+            Iduna.Utils.write_json(joinpath(workdir, "result.json"), data)
+
+            loaded = @test_logs (:warn, r"Loading partial IdunaResult") (:warn,
+                r"Expansion failed before producing summaries") match_mode=:any Iduna.load_result(
+                workdir)
+            @test length(loaded.expansions) == 2
+            @test all(expansion -> expansion === nothing, loaded.expansions)
+            err = try
+                Iduna.load_expanded_msa(loaded; index = 1)
+                nothing
+            catch err
+                err
+            end
+            @test err isa ErrorException
+            @test occursin("No expanded MSA is available at index 1",
+                sprint(showerror, err))
+        end
+
+        mktempdir() do tmp
+            workdir = joinpath(tmp, "missing_validation_stats")
+            fixture = _write_load_result_fixture(workdir; expansion = false)
+            rm(fixture.stats_path; force = true)
+            data = JSON.parse(read(joinpath(workdir, "result.json"), String))
+            merge!(data["validations"][1],
+                Dict("query_name" => "fallback_seed",
+                    "seed_ncol" => 2,
+                    "seed_clusters62" => 1,
+                    "seed_neff80" => 1.0,
+                    "expanded_ncol" => 2,
+                    "expanded_clusters62" => 1,
+                    "expanded_neff80" => 1.0,
+                    "aln_identical" => true,
+                    "aln_mismatches" => 0,
+                    "aln_insertions" => 0,
+                    "aln_deletions" => 0,
+                    "warnings" => ["partial validation"]))
+            Iduna.Utils.write_json(joinpath(workdir, "result.json"), data)
+            loaded = @test_logs (:warn, r"Validation stats are missing") match_mode=:any Iduna.load_result(
+                workdir)
+            @test loaded.validations[1].seed_ncol == 2
+            @test loaded.validations[1].query_name == "fallback_seed"
+            @test loaded.validations[1].warnings == ["partial validation"]
+        end
+
+        mktempdir() do tmp
+            workdir = joinpath(tmp, "invalid_validation_stats")
+            fixture = _write_load_result_fixture(workdir; expansion = false)
+            write(fixture.stats_path, "bad\n1\n")
+            data = JSON.parse(read(joinpath(workdir, "result.json"), String))
+            data["validations"][1]["seed_ncol"] = 2
+            Iduna.Utils.write_json(joinpath(workdir, "result.json"), data)
+            loaded = @test_logs (:warn, r"Could not read validation stats") match_mode=:any Iduna.load_result(
+                workdir)
+            @test loaded.validations[1].seed_ncol == 2
+        end
+
+        mktempdir() do tmp
+            workdir = joinpath(tmp, "malformed_validation_slots")
+            _write_load_result_fixture(workdir; expansion = false)
+            data = JSON.parse(read(joinpath(workdir, "result.json"), String))
+            data["validations"] = Any["partial", data["validations"][1]]
+            Iduna.Utils.write_json(joinpath(workdir, "result.json"), data)
+            loaded = @test_logs (:warn, r"Skipping partial validation summary") match_mode=:any Iduna.load_result(
+                workdir)
+            @test isempty(loaded.validations)
+        end
+    end
 
     @testset "target and validation stage helpers" begin
         mktempdir() do tmp
@@ -407,14 +904,25 @@ import JSON
             @test target_json["uniprot_sequence_path"] ==
                   joinpath("sequences", "uniprot", "Q13148.fasta")
             written = JSON.parse(read(joinpath(workdir, "result.json"), String))
+            @test !haskey(written, "workdir")
+            @test written["target"]["uniprot_sequence_path"] ==
+                  joinpath("sequences", "uniprot", "Q13148.fasta")
             @test written["thoraxe_msa"]["pid_summary"] ==
                   joinpath("thoraxe_msa", "candidate_summary.csv")
+            @test written["thoraxe_msa"]["seeds"][1]["stockholm_path"] ==
+                  result.thoraxe_msa.seeds[1].stockholm_path
+            @test written["thoraxe_msa"]["seeds"][1]["summary_path"] ==
+                  result.thoraxe_msa.seeds[1].summary_path
             @test written["expansions"][1]["match_stockholm"] ==
                   result.expansions[1].match_stockholm
             @test written["expansions"][1]["s_exon_blocks_tsv"] ==
                   result.expansions[1].s_exon_blocks_tsv
             @test written["validations"][1]["stats_path"] ==
                   joinpath("validation", "pid_10.00", "stats.csv")
+            result_state = JSON.parse(read(
+                joinpath(workdir, ".iduna", "stages", "result", "stage_state.json"),
+                String))
+            @test result_state["outputs"]["result_json"] == "result.json"
             @test Iduna.ResultsValidation.nsequences(Iduna.load_seed_msa(result)) == 1
             @test Iduna.ResultsValidation.nsequences(Iduna.load_expanded_msa(result)) == 1
         end
@@ -709,6 +1217,55 @@ import JSON
             @test failed["exception"]["type"] == "ErrorException"
             @test failed["exception"]["message"] == "thoraxe boom"
             @test isfile(joinpath(workdir, "target.json"))
+        end
+
+        mktempdir() do tmp
+            workdir = joinpath(tmp, "expansion_failure")
+            seed1 = Iduna.SeedSelection(;
+                pid = 10.0,
+                median_identity = missing,
+                mean_identity = missing,
+                stockholm_path = "seed10.sto",
+                summary_path = "candidate_summary.csv")
+            seed2 = Iduna.SeedSelection(;
+                pid = 80.0,
+                median_identity = missing,
+                mean_identity = missing,
+                stockholm_path = "seed80.sto",
+                summary_path = "candidate_summary.csv")
+            multi_thoraxe = Iduna.ThorAxeMSAResult(;
+                input_dir = "thoraxe_input",
+                thoraxe_dirs = ["thoraxe10", "thoraxe80"],
+                msa_dir = "thoraxe_msa",
+                baseline_fastas = ["seed10.fasta", "seed80.fasta"],
+                baseline_stockholms = ["seed10.sto", "seed80.sto"],
+                sequence_fastas = ["seed10_sequences.fasta", "seed80_sequences.fasta"],
+                species_files = ["seed10_species.txt", "seed80_species.txt"],
+                pid_summary = "candidate_summary.csv",
+                seeds = [seed1, seed2],
+                logs_dir = "logs/thoraxe",
+                pid_sample_count = 0)
+            expansion_failure = (target, seed, workdir;
+                kwargs...) -> begin
+                seed.pid == 80.0 && error("expansion boom")
+                return expansion
+            end
+            @test_throws ErrorException Iduna.iduna(;
+                id = "P20963",
+                mmseqs_db = "db",
+                workdir,
+                pid_sample_count = 0,
+                _resolve_target = (args...; kwargs...) -> target,
+                _build_thoraxe_msa = (args...; kwargs...) -> multi_thoraxe,
+                _expand_msa = expansion_failure)
+
+            failed = _read_result(workdir)
+            @test failed["status"] == "error"
+            @test failed["failed_stage"] == "msa_expansion"
+            @test length(failed["thoraxe_msa"]["seeds"]) == 2
+            @test length(failed["expansions"]) == 2
+            @test failed["expansions"][1]["match_stockholm"] == expansion.match_stockholm
+            @test failed["expansions"][2] === nothing
         end
     end
 end

@@ -1,5 +1,6 @@
 @testset "Namespace boundary" begin
     @test isdefined(Iduna, :iduna)
+    @test isdefined(Iduna, :load_result)
     @test isdefined(Iduna, :load_seed_msa)
     @test isdefined(Iduna, :load_expanded_msa)
     @test isdefined(Iduna, :_pipeline_status)

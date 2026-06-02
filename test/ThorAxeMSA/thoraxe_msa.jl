@@ -223,6 +223,7 @@
         seed = Iduna.ThorAxeMSA.select_best_seed(summary)
         @test seed.pid == 10.0
         @test seed.median_identity == 70.0
+        @test seed.workdir == abspath(tmp)
 
         write(summary,
             "pid,pid_order,eligible,median_identity,mean_identity,n_sequences_msa0,stockholm_path,fasta_path\n" *
@@ -257,6 +258,34 @@
             "pid,eligible,median_identity,mean_identity,stockholm_path,fasta_path\n" *
             "30.0,false,90.0,90.0,pid30.sto,pid30.fa\n")
         @test_throws ErrorException Iduna.ThorAxeMSA.select_best_seed(summary)
+    end
+
+    mktempdir() do tmp
+        workdir = joinpath(tmp, "iduna")
+        summary = joinpath(workdir, "thoraxe_msa", "candidate_summary.csv")
+        seed_rel = joinpath("thoraxe_msa", "candidates", "pid_10.00",
+            "candidate_msa_full.sto")
+        seed_fasta_rel = joinpath("thoraxe_msa", "candidates", "pid_10.00",
+            "candidate_msa_full.fasta")
+        seed_path = joinpath(workdir, seed_rel)
+        seed_fasta = joinpath(workdir, seed_fasta_rel)
+        mkpath(dirname(summary))
+        mkpath(dirname(seed_path))
+        write(seed_path, "# STOCKHOLM 1.0\nseed AC\n//\n")
+        write(seed_fasta, ">seed\nAC\n")
+        write(summary,
+            "pid,pid_order,eligible,median_identity,mean_identity,n_sequences_msa0,stockholm_path,fasta_path\n" *
+            "10.0,1,true,70.0,80.0,1,$(seed_rel),$(seed_fasta_rel)\n")
+
+        seed = Iduna.ThorAxeMSA.select_best_seed(summary)
+        @test seed.workdir == abspath(workdir)
+        @test seed.stockholm_path == seed_rel
+        outside = joinpath(tmp, "outside")
+        mkpath(outside)
+        cd(outside) do
+            @test Iduna.ResultsValidation.nsequences(
+                Iduna.ResultsValidation.load_seed_msa(seed)) == 1
+        end
     end
 
     mktempdir() do tmp
@@ -1460,6 +1489,15 @@ TableSet\tptroglodytes_gene_ensembl\tChimpanzee genes (Pan_tro_3.0)\t1
             summary_path = joinpath(Iduna.ThorAxeMSA._thoraxe_msa_dir(workdir),
                 "candidate_summary.csv")
             Iduna.ThorAxeMSA._summarize_candidate_scores([row], summary_path)
+            summary_df = Iduna.ThorAxeMSA._candidate_summary_dataframe(summary_path)
+            @test only(summary_df.stockholm_path) ==
+                  relpath(paths.stockholm_path, workdir)
+            @test only(summary_df.fasta_path) == relpath(paths.fasta_path, workdir)
+            @test only(summary_df.sequence_fasta) ==
+                  relpath(paths.sequence_fasta, workdir)
+            @test only(summary_df.species_file) == relpath(paths.species_file, workdir)
+            @test only(summary_df.scores_path) ==
+                  relpath(Iduna.ThorAxeMSA._pid_scores_path(workdir, 10.0), workdir)
             seed = Iduna.SeedSelection(;
                 pid = 10.0,
                 median_identity = missing,

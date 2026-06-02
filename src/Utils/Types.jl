@@ -114,14 +114,15 @@ end
 
 Top-level result returned by `Iduna.iduna`. It keeps the full pipeline status
 and links to the per-stage result objects. `expansions` is empty when the run
-was requested with `no_expansion=true`.
+was requested with `no_expansion=true`; otherwise it is indexed like
+`thoraxe_msa.seeds` and can contain `nothing` for missing expansion results.
 """
 Base.@kwdef struct IdunaResult
     input_id::String
     workdir::String
     target::ResolvedTarget
     thoraxe_msa::ThorAxeMSAResult
-    expansions::Vector{ExpansionResult}
+    expansions::Vector{Union{Nothing, ExpansionResult}}
     validations::Vector{ValidationResult}
     stages::Vector{Any} = Any[]
     warnings::Vector{String} = String[]
