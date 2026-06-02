@@ -13,6 +13,7 @@ CurrentModule = Iduna
 
 ```@docs
 iduna
+load_result
 load_seed_msa
 load_expanded_msa
 ```

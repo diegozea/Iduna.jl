@@ -74,7 +74,7 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
     root = nothing
     target = nothing
     thoraxe = nothing
-    expansions = Utils.ExpansionResult[]
+    expansions = Union{Nothing, Utils.ExpansionResult}[]
     validations = Utils.ValidationResult[]
     failed_stage = "prepare_output_dir"
 
@@ -269,7 +269,8 @@ end
 
 function _write_failure_result(input_id::AbstractString, workdir::AbstractString,
         failed_stage::AbstractString, err; target = nothing, thoraxe = nothing,
-        expansions = Utils.ExpansionResult[], validations = Utils.ValidationResult[])
+        expansions = Union{Nothing, Utils.ExpansionResult}[],
+        validations = Utils.ValidationResult[])
     try
         Utils.write_json(joinpath(workdir, "result.json"),
             _failure_result_summary(input_id, workdir, failed_stage, err;
@@ -283,16 +284,34 @@ end
 
 function _failure_result_summary(input_id::AbstractString, workdir::AbstractString,
         failed_stage::AbstractString, err; target = nothing, thoraxe = nothing,
-        expansions = Utils.ExpansionResult[], validations = Utils.ValidationResult[])
+        expansions = Union{Nothing, Utils.ExpansionResult}[],
+        validations = Utils.ValidationResult[])
     stage_keys = _current_stage_keys(target, thoraxe, expansions, validations;
         failed_stage)
+    warnings = _partial_warnings(target, thoraxe, validations)
+    if target !== nothing && thoraxe !== nothing
+        partial = Utils.IdunaResult(;
+            input_id = String(input_id),
+            workdir = String(workdir),
+            target,
+            thoraxe_msa = thoraxe,
+            expansions,
+            validations,
+            stages = Utils.collect_stage_summaries(workdir; stage_keys),
+            warnings,
+            status = :error)
+        summary = Utils.result_summary(partial)
+        return merge(summary,
+            (;
+                failed_stage = String(failed_stage),
+                exception = _exception_summary(err, workdir)))
+    end
     return (;
         input_id = String(input_id),
-        workdir = String(workdir),
         status = "error",
         failed_stage = String(failed_stage),
         stages = Utils.collect_stage_summaries(workdir; stage_keys),
-        warnings = _partial_warnings(target, thoraxe, validations),
+        warnings,
         target = target === nothing ? nothing : _target_summary(target, workdir),
         exception = _exception_summary(err, workdir)
     )
@@ -535,6 +554,346 @@ function _target_summary(target::Utils.ResolvedTarget,
 end
 
 """
+    load_result(workdir) -> IdunaResult
+
+Reconstruct an [`IdunaResult`](@ref) from an existing Iduna output directory
+without running pipeline stages or writing files. The loader expects the current
+move-safe result schema, where `result.json` contains structured ThorAxe seed
+records and artifact paths are relative to `workdir`.
+"""
+function load_result(workdir::AbstractString)
+    root = abspath(String(workdir))
+    summary = _load_result_summary(root)
+    status = _result_status(summary)
+    status === :error &&
+        @warn "Loading partial IdunaResult from a failed run." workdir=root failed_stage=get(
+            summary, "failed_stage", nothing)
+    target = _load_result_target(summary, root)
+    target === nothing &&
+        error("Cannot load IdunaResult from $(root): target metadata is unavailable.")
+    thoraxe = _load_result_thoraxe(summary, target, root, status)
+    expansions = _load_result_expansions(summary, target, thoraxe, root)
+    validations = _load_result_validations(summary, thoraxe, expansions, root)
+    result = Utils.IdunaResult(;
+        input_id = String(get(summary, "input_id", target.input_id)),
+        workdir = root,
+        target,
+        thoraxe_msa = thoraxe,
+        expansions,
+        validations,
+        stages = collect(Any, _result_vector(summary, "stages")),
+        warnings = String.(get(summary, "warnings", String[])),
+        status
+    )
+    return Utils._relative_result_paths(result)
+end
+
+function _load_result_summary(workdir::AbstractString)
+    path = joinpath(workdir, "result.json")
+    isfile(path) ||
+        error("Cannot load IdunaResult from $(workdir): result.json is missing.")
+    data = JSON.parse(read(path, String))
+    data isa AbstractDict ||
+        error("Cannot load IdunaResult from $(workdir): result.json is not an object.")
+    return data
+end
+
+_result_status(summary) = Symbol(String(get(summary, "status", "ok")))
+
+function _result_section(summary, key::AbstractString)
+    value = get(summary, key, nothing)
+    return value isa AbstractDict ? value : nothing
+end
+
+function _result_vector(summary, key::AbstractString)
+    get(summary, key, Any[]) isa AbstractVector ? get(summary, key, Any[]) : Any[]
+end
+
+_path_or_default(::Nothing, default::AbstractString, _workdir::AbstractString) = default
+function _path_or_default(path, _default::AbstractString, workdir::AbstractString)
+    return Utils._resolve_artifact_path(String(path), workdir)
+end
+
+_maybe_int_result(value) = value === nothing ? nothing : Int(value)
+_maybe_float_result(value) = value === nothing ? nothing : Float64(value)
+_maybe_bool_result(value) = value === nothing ? nothing : Bool(value)
+_maybe_string_result(value) = value === nothing ? nothing : String(value)
+_missing_or_float_result(value) = value === nothing ? missing : Float64(value)
+
+function _target_from_result_summary(summary, data, workdir::AbstractString)
+    input_id = String(get(data, "input_id", get(summary, "input_id", "")))
+    input_kind = haskey(data, "input_kind") ? Symbol(String(data["input_kind"])) :
+                 Utils.id_kind(input_id)
+    return Utils.ResolvedTarget(;
+        input_id,
+        input_kind,
+        uniprot_id = get(data, "uniprot_id", nothing),
+        ensembl_gene_id = String(data["ensembl_gene_id"]),
+        transcript_id = String(data["transcript_id"]),
+        ensembl_protein_id = get(data, "ensembl_protein_id", nothing),
+        species = get(data, "species", nothing),
+        uniprot_sequence_path = get(data, "uniprot_sequence_path", nothing),
+        ensembl_protein_sequence_path = get(data, "ensembl_protein_sequence_path", nothing),
+        sequence_validated = get(data, "sequence_validated", nothing),
+        mapping_confirmed = get(data, "mapping_confirmed", nothing),
+        workdir,
+        warnings = String.(get(data, "warnings", String[]))
+    )
+end
+
+function _load_result_target(summary, workdir::AbstractString)
+    target_json = joinpath(workdir, "target.json")
+    if isfile(target_json)
+        try
+            return _target_from_summary(JSON.parse(read(target_json, String)), workdir)
+        catch err
+            err isa InterruptException && rethrow()
+            @warn "Could not read target.json; falling back to result.json target metadata." workdir target_json exception=(
+                err, catch_backtrace())
+        end
+    end
+    data = _result_section(summary, "target")
+    data === nothing && return nothing
+    @warn "Loading target metadata from result.json; sequence artifact paths may be incomplete." workdir
+    try
+        return _target_from_result_summary(summary, data, workdir)
+    catch err
+        err isa InterruptException && rethrow()
+        @warn "Could not reconstruct target metadata from result.json." workdir exception=(
+            err, catch_backtrace())
+        return nothing
+    end
+end
+
+function _load_result_seed_record(data, workdir::AbstractString)
+    data isa AbstractDict || error("ThorAxe seed record is not an object.")
+    return Utils.SeedSelection(;
+        pid = Float64(data["pid"]),
+        median_identity = _missing_or_float_result(get(data, "median_identity", nothing)),
+        mean_identity = _missing_or_float_result(get(data, "mean_identity", nothing)),
+        stockholm_path = String(data["stockholm_path"]),
+        fasta_path = get(data, "fasta_path", nothing) === nothing ? nothing :
+                     String(data["fasta_path"]),
+        s_exon_blocks_tsv = get(data, "s_exon_blocks_tsv", nothing) === nothing ?
+                            nothing : String(data["s_exon_blocks_tsv"]),
+        summary_path = String(data["summary_path"]),
+        used_fallback_dir = Bool(get(data, "used_fallback_dir", false)),
+        workdir = String(workdir))
+end
+
+function _load_result_seeds(data, _summary_path::AbstractString, workdir::AbstractString)
+    isempty(data) && return Utils.SeedSelection[]
+    seeds_data = get(data, "seeds", nothing)
+    seeds_data isa AbstractVector ||
+        error("Cannot load IdunaResult from $(workdir): result.json uses an unsupported ThorAxe seed schema.")
+    seeds = [_load_result_seed_record(seed_data, workdir) for seed_data in seeds_data]
+    isempty(seeds) &&
+        @warn "Loaded IdunaResult has no selected ThorAxe seeds." workdir
+    return seeds
+end
+
+function _load_result_thoraxe(summary, target::Utils.ResolvedTarget,
+        workdir::AbstractString, status::Symbol)
+    data = _result_section(summary, "thoraxe_msa")
+    if data === nothing
+        @warn "result.json has no ThorAxe MSA summary; returning a partial ThorAxe result." workdir
+        data = Dict{String, Any}()
+    end
+    summary_path = _path_or_default(get(data, "pid_summary", nothing),
+        joinpath(workdir, "thoraxe_msa", "candidate_summary.csv"), workdir)
+    seeds = _load_result_seeds(data, summary_path, workdir)
+    artifacts = [ThorAxeMSA._seed_artifacts(seed, workdir) for seed in seeds]
+    thoraxe_status = haskey(data, "status") ? Symbol(String(data["status"])) :
+                     (isempty(seeds) && status === :error ? :error : :ok)
+    return Utils.ThorAxeMSAResult(;
+        input_dir = joinpath(workdir, "thoraxe_input"),
+        thoraxe_dirs = [artifact.thoraxe_dir for artifact in artifacts],
+        msa_dir = joinpath(workdir, "thoraxe_msa"),
+        baseline_fastas = haskey(data, "baseline_fastas") ?
+                          [Utils._resolve_artifact_path(String(path), workdir)
+                           for path in data["baseline_fastas"]] :
+                          [String(artifact.seed_fasta) for artifact in artifacts],
+        baseline_stockholms = haskey(data, "baseline_stockholms") ?
+                              [Utils._resolve_artifact_path(String(path), workdir)
+                               for path in data["baseline_stockholms"]] :
+                              [artifact.seed_path for artifact in artifacts],
+        sequence_fastas = [artifact.sequence_fasta for artifact in artifacts],
+        species_files = [artifact.species_file for artifact in artifacts],
+        pid_summary = summary_path,
+        seeds,
+        logs_dir = joinpath(workdir, "logs", "thoraxe"),
+        pid_sample_count = Int(get(data, "pid_sample_count", 0)),
+        pid_sample_fraction = Float64(get(data, "pid_sample_fraction", 1.0)),
+        pid_sample_seed = UInt64(get(data, "pid_sample_seed", 0)),
+        warnings = String.(get(data, "warnings", String[])),
+        status = thoraxe_status)
+end
+
+function _expansion_run_dir_from_summary(data, target::Utils.ResolvedTarget,
+        seed::Utils.SeedSelection, workdir::AbstractString)
+    run_path = get(data, "run_dir", nothing)
+    run_path === nothing || return Utils._resolve_artifact_path(String(run_path), workdir)
+    match_path = get(data, "match_stockholm", nothing)
+    if match_path !== nothing
+        expanded_dir = dirname(Utils._resolve_artifact_path(String(match_path), workdir))
+        return dirname(expanded_dir)
+    end
+    return joinpath(workdir, "expansion", target.ensembl_gene_id,
+        target.transcript_id, Utils.format_pid_dir(seed.pid))
+end
+
+function _load_result_expansion(data, target::Utils.ResolvedTarget,
+        seed::Utils.SeedSelection, workdir::AbstractString)
+    run_dir = _expansion_run_dir_from_summary(data, target, seed, workdir)
+    outputs = MSAExpansion._expansion_output_paths(run_dir, target.transcript_id)
+    seed_label = "seed_pid$(Utils.format_pid(seed.pid))"
+    hits_fasta = _path_or_default(get(data, "hits_fasta", nothing),
+        outputs.hits_fasta, workdir)
+    seed_stockholm = Utils._resolve_artifact_path(seed.stockholm_path,
+        seed.workdir === nothing ? workdir : seed.workdir)
+    counts = if haskey(data, "n_hits") || !isfile(hits_fasta) || !isfile(seed_stockholm)
+        (;
+            n_hits = Int(get(data, "n_hits", 0)),
+            n_new_hits = Int(get(data, "n_new_hits", 0)))
+    else
+        MSAExpansion._cached_hit_counts(hits_fasta,
+            MSAExpansion._seed_id_set(seed_stockholm))
+    end
+    return Utils.ExpansionResult(;
+        run_dir,
+        seed_stockholm = _path_or_default(get(data, "seed_stockholm", nothing),
+            joinpath(run_dir, "seeds", "$(seed_label).sto"), workdir),
+        seed_fasta = _path_or_default(get(data, "seed_fasta", nothing),
+            joinpath(run_dir, "seeds", "$(seed_label).fasta"), workdir),
+        hits_fasta,
+        full_stockholm = _path_or_default(get(data, "full_stockholm", nothing),
+            outputs.full_stockholm, workdir),
+        match_stockholm = _path_or_default(get(data, "match_stockholm", nothing),
+            outputs.match_stockholm, workdir),
+        a3m_path = _path_or_default(get(data, "a3m_path", nothing),
+            outputs.a3m_path, workdir),
+        s_exon_blocks_tsv = _path_or_default(get(data, "s_exon_blocks_tsv", nothing),
+            outputs.s_exon_blocks_tsv, workdir),
+        db_dir = _path_or_default(get(data, "db_dir", nothing),
+            joinpath(run_dir, "dbs"), workdir),
+        hmm_dir = _path_or_default(get(data, "hmm_dir", nothing),
+            joinpath(run_dir, "hmm"), workdir),
+        logs_dir = _path_or_default(get(data, "logs_dir", nothing),
+            joinpath(run_dir, "logs"), workdir),
+        n_hits = counts.n_hits,
+        n_new_hits = counts.n_new_hits,
+        status = Symbol(String(get(data, "status", "ok"))),
+        workdir)
+end
+
+function _load_result_expansions(summary, target::Utils.ResolvedTarget,
+        thoraxe::Utils.ThorAxeMSAResult, workdir::AbstractString)
+    expansion_data = _result_vector(summary, "expansions")
+    expansions = Union{Nothing, Utils.ExpansionResult}[]
+    if isempty(expansion_data)
+        failed_stage = get(summary, "failed_stage", nothing)
+        if failed_stage !== nothing && String(failed_stage) == "msa_expansion" &&
+           !isempty(thoraxe.seeds)
+            @warn "Expansion failed before producing summaries; preserving empty expansion slots." workdir n_seeds=length(
+                thoraxe.seeds)
+            append!(expansions, fill(nothing, length(thoraxe.seeds)))
+        end
+        return expansions
+    end
+    for index in eachindex(thoraxe.seeds)
+        data = index <= length(expansion_data) ? expansion_data[index] : nothing
+        if data === nothing
+            @warn "Expansion summary is missing for a selected ThorAxe seed." workdir index
+            push!(expansions, nothing)
+            continue
+        elseif !(data isa AbstractDict)
+            @warn "Skipping partial expansion summary that cannot be matched to a ThorAxe seed." workdir index
+            push!(expansions, nothing)
+            continue
+        end
+        try
+            push!(expansions,
+                _load_result_expansion(data, target, thoraxe.seeds[index], workdir))
+        catch err
+            err isa InterruptException && rethrow()
+            @warn "Could not reconstruct expansion result; preserving empty expansion slot." workdir index exception=(
+                err, catch_backtrace())
+            push!(expansions, nothing)
+        end
+    end
+    if length(expansion_data) > length(thoraxe.seeds)
+        @warn "Ignoring expansion summaries that do not match selected ThorAxe seeds." workdir n_extra=(
+            length(expansion_data) - length(thoraxe.seeds))
+    end
+    return expansions
+end
+
+function _validation_outputs_from_summary(data, seed::Utils.SeedSelection,
+        workdir::AbstractString)
+    default_stats = joinpath(workdir, "validation", Utils.format_pid_dir(seed.pid),
+        "stats.csv")
+    stats_path = _path_or_default(get(data, "stats_path", nothing), default_stats, workdir)
+    query_path = joinpath(dirname(stats_path), "query_vs_uniprot_alignment.txt")
+    return (;
+        stats_path,
+        query_vs_uniprot_path = isfile(query_path) ? query_path : nothing)
+end
+
+function _validation_from_result_summary(data, outputs)
+    return Utils.ValidationResult(;
+        stats_path = outputs.stats_path,
+        query_name = _maybe_string_result(get(data, "query_name", nothing)),
+        query_vs_uniprot_path = outputs.query_vs_uniprot_path,
+        seed_nseq = _maybe_int_result(get(data, "seed_nseq", nothing)),
+        seed_ncol = _maybe_int_result(get(data, "seed_ncol", nothing)),
+        seed_clusters62 = _maybe_int_result(get(data, "seed_clusters62", nothing)),
+        seed_neff80 = _maybe_float_result(get(data, "seed_neff80", nothing)),
+        expanded_nseq = _maybe_int_result(get(data, "expanded_nseq", nothing)),
+        expanded_ncol = _maybe_int_result(get(data, "expanded_ncol", nothing)),
+        expanded_clusters62 = _maybe_int_result(
+            get(data, "expanded_clusters62", nothing)),
+        expanded_neff80 = _maybe_float_result(get(data, "expanded_neff80", nothing)),
+        aln_identical = _maybe_bool_result(get(data, "aln_identical", nothing)),
+        aln_mismatches = _maybe_int_result(get(data, "aln_mismatches", nothing)),
+        aln_insertions = _maybe_int_result(get(data, "aln_insertions", nothing)),
+        aln_deletions = _maybe_int_result(get(data, "aln_deletions", nothing)),
+        warnings = String.(get(data, "warnings", String[])),
+        status = Symbol(String(get(data, "status", "ok"))))
+end
+
+function _load_result_validations(summary, thoraxe::Utils.ThorAxeMSAResult,
+        expansions::Vector{Union{Nothing, Utils.ExpansionResult}},
+        workdir::AbstractString)
+    validation_data = _result_vector(summary, "validations")
+    validations = Utils.ValidationResult[]
+    for (index, data) in enumerate(validation_data)
+        if !(data isa AbstractDict) || index > length(thoraxe.seeds)
+            @warn "Skipping partial validation summary that cannot be matched to a ThorAxe seed." workdir index
+            continue
+        end
+        seed = thoraxe.seeds[index]
+        expansion = index <= length(expansions) ? expansions[index] : nothing
+        outputs = _validation_outputs_from_summary(data, seed, workdir)
+        if isfile(outputs.stats_path)
+            try
+                push!(validations,
+                    ResultsValidation._cached_validation_result(
+                        outputs, workdir, seed, expansion))
+                continue
+            catch err
+                err isa InterruptException && rethrow()
+                @warn "Could not read validation stats; falling back to result.json validation summary." workdir stats_path=outputs.stats_path exception=(
+                    err, catch_backtrace())
+            end
+        else
+            @warn "Validation stats are missing; using partial result.json validation summary." workdir stats_path=outputs.stats_path
+        end
+        push!(validations, _validation_from_result_summary(data, outputs))
+    end
+    return validations
+end
+
+"""
     load_seed_msa(result; keepinserts=true, pid=nothing, index=nothing)
 
 Load a selected ThorAxe seed MSA from an [`IdunaResult`](@ref) as a MIToS MSA.
@@ -563,6 +922,8 @@ function load_expanded_msa(result::Utils.IdunaResult; keepinserts::Bool = true,
     seed_index <= length(result.expansions) ||
         error("No expanded MSA is available at index $(seed_index).")
     expansion = result.expansions[seed_index]
+    expansion === nothing &&
+        error("No expanded MSA is available at index $(seed_index).")
     expansion_path = Utils._resolve_artifact_path(
         expansion.match_stockholm, result.workdir)
     ResultsValidation.load_msa(expansion_path; keepinserts)

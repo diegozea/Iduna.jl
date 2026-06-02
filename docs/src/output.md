@@ -101,14 +101,16 @@ result.thoraxe_msa.pid_sample_fraction
 result.thoraxe_msa.pid_sample_seed
 
 # Full expansion runs only:
-result.expansions[1].match_stockholm
-result.expansions[1].s_exon_blocks_tsv
-result.expansions[1].a3m_path
+expansion = result.expansions[1]
+expansion === nothing || expansion.match_stockholm
+expansion === nothing || expansion.s_exon_blocks_tsv
+expansion === nothing || expansion.a3m_path
 ```
 
-`result.workdir` is stored as an absolute path. Artifact paths inside
-`workdir` are stored relative to it, so use `joinpath(result.workdir, path)` to
-open them directly. Paths outside `workdir` remain unchanged.
+`result.workdir` is absolute in memory. Saved metadata, including
+`result.json`, `target.json`, `candidate_summary.csv`, and stage state files,
+stores paths inside `workdir` relative to that directory so the result folder can
+be moved or copied. Paths outside `workdir` remain unchanged.
 
 When `no_expansion=true` or `--no-expansion` is used, Iduna stops after the
 ThorAxe MSA stage. `isempty(result.expansions)`, `result.json` contains an empty
@@ -119,7 +121,8 @@ fields left missing.
 By default, Iduna selects one PID seed. Set `pid_sample_count=0` to skip seed
 selection and carry every eligible PID candidate forward, producing one
 validation directory and, unless `no_expansion=true`, one expansion directory
-per selected PID.
+per selected PID. `result.expansions` is seed-indexed and may contain `nothing`
+for a seed whose expansion is unavailable.
 
 `expanded_msa/` is the full MMseqs2 cluster-expanded MSA and remains the main
 Iduna result. When `centroids=true` or `--centroids` is used, Iduna also writes
@@ -147,7 +150,7 @@ seed_blocks = joinpath(
 
 expanded_blocks = joinpath(
     result.workdir,
-    result.expansions[1].s_exon_blocks_tsv,
+    something(result.expansions[1]).s_exon_blocks_tsv,
 )
 ```
 

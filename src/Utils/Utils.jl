@@ -690,6 +690,8 @@ function _relative_expansion_paths(expansion::ExpansionResult, workdir::Abstract
     )
 end
 
+_relative_expansion_paths(::Nothing, _workdir::AbstractString) = nothing
+
 function _relative_validation_paths(validation::ValidationResult, workdir::AbstractString)
     return ValidationResult(;
         stats_path = _relative_artifact_path(validation.stats_path, workdir),
@@ -778,25 +780,59 @@ function collect_stage_summaries(workdir::AbstractString; stage_keys = nothing)
     return summaries
 end
 
+function _seed_summary(seed::SeedSelection)
+    return (;
+        pid = seed.pid,
+        median_identity = seed.median_identity === missing ? nothing :
+                          seed.median_identity,
+        mean_identity = seed.mean_identity === missing ? nothing : seed.mean_identity,
+        stockholm_path = seed.stockholm_path,
+        fasta_path = seed.fasta_path,
+        s_exon_blocks_tsv = seed.s_exon_blocks_tsv,
+        summary_path = seed.summary_path,
+        used_fallback_dir = seed.used_fallback_dir
+    )
+end
+
 function _expansion_summary(expansion::ExpansionResult)
     return (;
+        run_dir = expansion.run_dir,
+        seed_stockholm = expansion.seed_stockholm,
+        seed_fasta = expansion.seed_fasta,
         match_stockholm = expansion.match_stockholm,
         full_stockholm = expansion.full_stockholm,
         a3m_path = expansion.a3m_path,
         s_exon_blocks_tsv = expansion.s_exon_blocks_tsv,
         hits_fasta = expansion.hits_fasta,
+        db_dir = expansion.db_dir,
+        hmm_dir = expansion.hmm_dir,
+        logs_dir = expansion.logs_dir,
         n_hits = expansion.n_hits,
         n_new_hits = expansion.n_new_hits,
         status = String(expansion.status)
     )
 end
 
+_expansion_summary(::Nothing) = nothing
+
 function _validation_summary(validation::ValidationResult)
     return (;
         stats_path = validation.stats_path,
+        query_name = validation.query_name,
+        query_vs_uniprot_path = validation.query_vs_uniprot_path,
         seed_nseq = validation.seed_nseq,
+        seed_ncol = validation.seed_ncol,
+        seed_clusters62 = validation.seed_clusters62,
+        seed_neff80 = validation.seed_neff80,
         expanded_nseq = validation.expanded_nseq,
+        expanded_ncol = validation.expanded_ncol,
+        expanded_clusters62 = validation.expanded_clusters62,
+        expanded_neff80 = validation.expanded_neff80,
         aln_identical = validation.aln_identical,
+        aln_mismatches = validation.aln_mismatches,
+        aln_insertions = validation.aln_insertions,
+        aln_deletions = validation.aln_deletions,
+        warnings = validation.warnings,
         status = String(validation.status)
     )
 end
@@ -805,7 +841,6 @@ function result_summary(result::IdunaResult)
     result = _relative_result_paths(result)
     return (;
         input_id = result.input_id,
-        workdir = result.workdir,
         status = String(result.status),
         warnings = result.warnings,
         stages = result.stages,
@@ -816,6 +851,8 @@ function result_summary(result::IdunaResult)
             transcript_id = result.target.transcript_id,
             ensembl_protein_id = result.target.ensembl_protein_id,
             species = result.target.species,
+            uniprot_sequence_path = result.target.uniprot_sequence_path,
+            ensembl_protein_sequence_path = result.target.ensembl_protein_sequence_path,
             sequence_validated = result.target.sequence_validated,
             mapping_confirmed = result.target.mapping_confirmed
         ),
@@ -823,6 +860,7 @@ function result_summary(result::IdunaResult)
             baseline_fastas = result.thoraxe_msa.baseline_fastas,
             baseline_stockholms = result.thoraxe_msa.baseline_stockholms,
             pid_summary = result.thoraxe_msa.pid_summary,
+            seeds = _seed_summary.(result.thoraxe_msa.seeds),
             selected_pids = [seed.pid for seed in result.thoraxe_msa.seeds],
             seed_stockholms = [seed.stockholm_path for seed in result.thoraxe_msa.seeds],
             s_exon_blocks_tsvs = [seed.s_exon_blocks_tsv

@@ -12,8 +12,8 @@ reproducible work directory.
 The package is file-first. External tools write logs and intermediate files
 under the chosen `workdir`, and the returned result stores paths plus the
 resolved identifiers, selected seed, expansion outputs, validation statistics,
-warnings, and status. `result.workdir` is absolute; artifact paths under it are
-reported relative to `workdir`.
+warnings, and status. `result.workdir` is absolute in memory; saved metadata
+uses relative paths for artifacts under `workdir`.
 
 ```julia
 using Iduna
@@ -92,8 +92,10 @@ non-reference species per sample, and records a random `pid_sample_seed` unless
 one is supplied.
 Set `pid_sample_count=0` to skip seed selection and carry every eligible PID
 candidate forward. In that mode `result.thoraxe_msa.seeds`,
-`result.expansions`, and `result.validations` can contain multiple entries; use
-`pid=` or `index=` with `load_seed_msa` and `load_expanded_msa` to select one.
+`result.expansions`, and `result.validations` can contain multiple entries.
+`result.expansions` is indexed like `result.thoraxe_msa.seeds` and can contain
+`nothing` for a missing expansion slot; use `pid=` or `index=` with
+`load_seed_msa` and `load_expanded_msa` to select one.
 
 If the ThorAxe `transcript_query` bundle has already been created, pass it with
 `thoraxe_input_dir`. Iduna copies that bundle into `workdir/thoraxe_input` and
