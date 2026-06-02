@@ -1113,6 +1113,42 @@
             @test invalid_row.msa0_status == "invalid_msa0"
             @test occursin("indels", invalid_row.msa0_issue)
 
+            invalid_two_step_pid = 52.75
+            invalid_two_step_metadata = Iduna.ThorAxeMSA._candidate_run_metadata(
+                scoring_input, invalid_target, [invalid_two_step_pid];
+                sample_count = 0,
+                sample_fraction = 1.0,
+                sample_seed = UInt64(14),
+                requested_sample_seed = 14,
+                sampling_strategy = :independent,
+                effective_specieslist = nothing,
+                orthology = "1:1",
+                specieslist_filter = false,
+                biomart_datasets_filter = false)
+            invalid_two_step_calls = Ref(0)
+            invalid_two_step_thoraxe = (input_dir, run_root; identity, specieslist,
+                phylosofs, runner) -> begin
+                invalid_two_step_calls[] += 1
+                write_fake_thoraxe_dir(joinpath(run_root, "thoraxe"))
+                nothing
+            end
+            invalid_two_step_rows = @test_logs (
+                :info, r"Skipping ineligible ThorAxe PID candidate") match_mode=:any Iduna.ThorAxeMSA._score_pid_candidates(
+                invalid_target, scoring_input, tmp, [invalid_two_step_pid], nothing,
+                invalid_two_step_metadata;
+                pid_sample_count = 0,
+                pid_sample_fraction = 1.0,
+                sample_seed = UInt64(14),
+                overwrite = true,
+                thoraxe_fn = invalid_two_step_thoraxe,
+                identity_fn = (args...; kwargs...) -> 0.0)
+            invalid_two_step_row = only(invalid_two_step_rows)
+            @test invalid_two_step_calls[] == 1
+            @test invalid_two_step_row.pid == invalid_two_step_pid
+            @test !invalid_two_step_row.eligible
+            @test invalid_two_step_row.msa0_status == "invalid_msa0"
+            @test occursin("indels", invalid_two_step_row.msa0_issue)
+
             sampled_pid = 53.0
             sampled_calls = Ref(0)
             sampled_thoraxe = (input_dir, run_root; identity, specieslist, phylosofs,
