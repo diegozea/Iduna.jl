@@ -333,6 +333,109 @@
     end
 
     mktempdir() do tmp
+        target_path = joinpath(tmp, "shared", "candidate_species_subset_001.txt")
+        mkpath(dirname(target_path))
+        write(target_path, "homo_sapiens\n")
+        link_path = joinpath(tmp, "pid", "species", "candidate_species_subset_001.txt")
+
+        Iduna.ThorAxeMSA._symlink_species_file(link_path, target_path)
+        @test islink(link_path)
+        @test read(link_path, String) == "homo_sapiens\n"
+        @test Iduna.ThorAxeMSA._symlink_species_file(link_path, target_path) ==
+              link_path
+        @test islink(link_path)
+
+        regular_path = joinpath(tmp, "pid", "species", "existing_species.txt")
+        mkpath(dirname(regular_path))
+        write(regular_path, "existing\n")
+        @test Iduna.ThorAxeMSA._symlink_species_file(regular_path, target_path) ==
+              regular_path
+        @test !islink(regular_path)
+        @test read(regular_path, String) == "existing\n"
+        Iduna.ThorAxeMSA._symlink_species_file(
+            regular_path, target_path; overwrite = true)
+        @test islink(regular_path)
+        @test read(regular_path, String) == "homo_sapiens\n"
+
+        existing_dir = joinpath(tmp, "pid", "species", "existing_dir")
+        mkpath(existing_dir)
+        @test Iduna.ThorAxeMSA._symlink_species_file(existing_dir, target_path) ==
+              existing_dir
+        @test isdir(existing_dir)
+
+        rng = Iduna.ThorAxeMSA._sample_rng(UInt64(7), 1)
+        @test Iduna.ThorAxeMSA._species_sample(
+            ["homo_sapiens"], "homo_sapiens", 0.5, rng) == ["homo_sapiens"]
+        @test_throws ErrorException Iduna.ThorAxeMSA._species_sample(
+            ["mus_musculus"], "homo_sapiens", 1.0, rng)
+    end
+
+    mktempdir() do tmp
+        target = Iduna.ResolvedTarget(;
+            input_id = "ENST",
+            input_kind = :ensembl_transcript,
+            ensembl_gene_id = "ENSG",
+            transcript_id = "ENST",
+            species = "homo_sapiens")
+        fasta = joinpath(tmp, "candidate.fasta")
+        write(fasta,
+            ">ENSG\nAAAA\n" *
+            ">ORTHO1\nBBBB\n")
+        msa = Iduna.ThorAxeMSA.read_file(fasta, Iduna.ThorAxeMSA.FASTA)
+        records_without_reference_overlap = [
+            (;
+                pid = 10.0,
+                candidate = (;
+                    msa,
+                    species = ["homo_sapiens", "mus_musculus"]),
+                validation = (; eligible = true)),
+            (;
+                pid = 20.0,
+                candidate = (;
+                    msa,
+                    species = ["mus_musculus", "danio_rerio"]),
+                validation = (; eligible = true))
+        ]
+
+        empty_common = Iduna.ThorAxeMSA._common_sampling_universe(
+            NamedTuple[], "ENSG", "ENST")
+        @test isempty(empty_common.species)
+        @test empty_common.reference_species === nothing
+        @test_throws ErrorException Iduna.ThorAxeMSA._common_sampling_universe(
+            records_without_reference_overlap, "ENSG", "ENST")
+
+        independent_workdir = joinpath(tmp, "independent")
+        Iduna.ThorAxeMSA._prepare_candidate_species_samples!(
+            target, joinpath(tmp, "input"), independent_workdir,
+            [first(records_without_reference_overlap)], nothing, :independent;
+            sample_count = 1,
+            sample_fraction = 1.0,
+            sample_seed = UInt64(7),
+            overwrite = true)
+        independent_species_file = Iduna.ThorAxeMSA._pid_sample_paths(
+            independent_workdir, 10.0, 1).species_file
+        @test isfile(independent_species_file)
+        @test !islink(independent_species_file)
+        @test split(chomp(read(independent_species_file, String)), '\n') ==
+              ["homo_sapiens", "mus_musculus"]
+
+        input_universe = Iduna.ThorAxeMSA._input_sampling_universe(
+            target, NamedTuple[], "homo_sapiens,mus_musculus")
+        @test input_universe.species == ["homo_sapiens", "mus_musculus"]
+        @test input_universe.reference_species == "homo_sapiens"
+        @test_throws ErrorException Iduna.ThorAxeMSA._input_sampling_universe(
+            target, NamedTuple[], "mus_musculus")
+        @test_throws ErrorException Iduna.ThorAxeMSA._shared_sampling_universe(
+            :independent, target, records_without_reference_overlap, nothing)
+
+        for sampling_strategy in (:independent, :common, :input)
+            @test Iduna.ThorAxeMSA._validate_sampling_strategy(sampling_strategy) ===
+                  sampling_strategy
+        end
+        @test_throws ErrorException Iduna.ThorAxeMSA._validate_sampling_strategy(:pid)
+    end
+
+    mktempdir() do tmp
         target = Iduna.ResolvedTarget(;
             input_id = "ENST",
             input_kind = :ensembl_transcript,
@@ -528,6 +631,15 @@
         df = Iduna.ThorAxeMSA._candidate_summary_dataframe(summary)
         @test Iduna.ThorAxeMSA._candidate_summary_matches(df, metadata)
         @test Iduna.ThorAxeMSA._has_matching_candidate_summary(summary, metadata)
+        @test Iduna.ThorAxeMSA._summary_sampling_strategy(df, :common) === :independent
+        @test Iduna.ThorAxeMSA._summary_sampling_strategy(
+            Iduna.ThorAxeMSA.DataFrame(pid = [10.0]), :common) === :common
+        @test Iduna.ThorAxeMSA._summary_sampling_strategy(
+            Iduna.ThorAxeMSA.DataFrame(sampling_strategy = String[]),
+            :common) === :common
+        @test Iduna.ThorAxeMSA._summary_sampling_strategy(
+            Iduna.ThorAxeMSA.DataFrame(sampling_strategy = [missing]),
+            :common) === :common
         changed_pids = merge(metadata, (; pid_thresholds_key = "80.0"))
         @test !Iduna.ThorAxeMSA._candidate_summary_matches(df, changed_pids)
         @test !Iduna.ThorAxeMSA._has_matching_candidate_summary(summary, changed_pids)
