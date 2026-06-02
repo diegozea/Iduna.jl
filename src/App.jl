@@ -130,6 +130,11 @@ function _app_arg_settings(;
         metavar = "n"
         arg_type = Int
 
+        "--sampling-strategy"
+        help = "Species sampling strategy for PID seed selection: common, independent, or input."
+        metavar = "strategy"
+        arg_type = String
+
         "--threads"
         help = "Threads for MMseqs2."
         metavar = "n"
@@ -144,6 +149,8 @@ function _postprocess_app_args(parsed::Dict{Symbol, Any})
         value === nothing && continue
         if key === :pid_thresholds
             kwargs[key] = _parse_pid_thresholds(value)
+        elseif key === :sampling_strategy
+            kwargs[key] = Symbol(lowercase(String(value)))
         else
             kwargs[key] = value
         end

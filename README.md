@@ -32,12 +32,15 @@ failed, or incomplete stages.
 For seed selection, Iduna runs `transcript_query` once and builds one
 full-species candidate `msa_0` at each PID threshold. Each candidate is validated:
 indels versus UniProt exclude that PID from selection, while substitutions are
-reported as warnings. Species samples are drawn from each PID's own candidate
-`msa_0`, run at that PID, and scored by HHsuite against the same candidate. The
-selected seed is the highest median identity, then highest mean identity, then
-the largest candidate `msa_0` species count, then the first PID in
-`pid_thresholds` order. The default is 45 samples, 80% of non-reference species
-per sample, and a random `pid_sample_seed` recorded in `result.json`.
+reported as warnings. By default, `sampling_strategy=:common` draws one shared
+set of species samples from the species common to all eligible candidates, runs
+each PID with those same sampled species lists, and scores by HHsuite against
+that PID's own full `msa_0`. Use `sampling_strategy=:independent` for PID-local
+sampling or `sampling_strategy=:input` to sample from the effective input species
+list. The selected seed is the highest median identity, then highest mean
+identity, then the largest candidate `msa_0` species count, then the first PID
+in `pid_thresholds` order. The default is 45 samples, 80% of non-reference
+species per sample, and a random `pid_sample_seed` recorded in `result.json`.
 
 To stop after the ThorAxe MSA stage, use `no_expansion=true` in Julia or
 `--no-expansion` in the app. In that mode `mmseqs_db` is not required,

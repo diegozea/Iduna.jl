@@ -58,6 +58,7 @@ const _BIOMART_TEXT_HEADERS = ["Accept" => "text/plain"]
 const _BIOMART_DATASETS_FILE = "ENSEMBL_MART_ENSEMBL_datasets.tsv"
 const _BIOMART_DATASETS_METADATA_FILE = "ENSEMBL_MART_ENSEMBL_datasets.json"
 const _TRANSCRIPT_QUERY_METADATA_FILE = "iduna_transcript_query.json"
+const _SAMPLING_STRATEGIES = Set([:independent, :common, :input])
 
 _normalize_species_name(species::Nothing) = nothing
 function _normalize_species_name(species::AbstractString)
@@ -71,6 +72,10 @@ function _thoraxe_candidates_dir(workdir::AbstractString)
 end
 _thoraxe_logs_dir(workdir::AbstractString) = joinpath(workdir, "logs", "thoraxe")
 _thoraxe_pid_runs_dir(workdir::AbstractString) = joinpath(_thoraxe_msa_dir(workdir), "runs")
+function _thoraxe_sample_species_dir(workdir::AbstractString)
+    joinpath(_thoraxe_msa_dir(workdir),
+        "samples", "species")
+end
 function _thoraxe_input_stage_dir(workdir::AbstractString)
     _pipeline_stage_dir(workdir, "thoraxe_input")
 end
@@ -1346,6 +1351,11 @@ function _pid_sample_paths(workdir::AbstractString, pid::Real, sample_idx::Integ
     )
 end
 
+function _shared_sample_species_file(workdir::AbstractString, sample_idx::Integer)
+    return joinpath(_thoraxe_sample_species_dir(workdir),
+        "candidate_$(_candidate_sample_label(sample_idx)).txt")
+end
+
 function _pid_scores_path(workdir::AbstractString, pid::Real)
     joinpath(_candidate_pid_dir(workdir, pid), "scores.csv")
 end
@@ -1372,6 +1382,27 @@ function _write_species_file(path::AbstractString,
         end
     end
     return path
+end
+
+function _symlink_species_file(link_path::AbstractString,
+        target_path::AbstractString;
+        overwrite::Bool = false)
+    if !overwrite && islink(link_path)
+        current = readlink(link_path)
+        current_path = isabspath(current) ? current : joinpath(dirname(link_path), current)
+        abspath(current_path) == abspath(target_path) && return link_path
+    end
+    if !overwrite && isfile(link_path)
+        return link_path
+    end
+    if !overwrite && ispath(link_path)
+        return link_path
+    end
+    mkpath(dirname(link_path))
+    ispath(link_path) && rm(link_path; force = true)
+    target = relpath(target_path, dirname(link_path))
+    symlink(target, link_path)
+    return link_path
 end
 
 function _write_candidate_sample_inputs(paths,
@@ -1447,6 +1478,108 @@ function _sample_indices(n_total::Integer, reference_idx::Integer,
     isempty(selectable) && return [reference_idx]
     n_keep = clamp(round(Int, Float64(fraction) * length(selectable)), 1, length(selectable))
     return vcat(reference_idx, sample(rng, selectable, n_keep; replace = false))
+end
+
+function _species_sample(species::AbstractVector{<:AbstractString},
+        reference_species::AbstractString,
+        fraction::Real,
+        rng::MersenneTwister)
+    normalized_species = _unique_nonempty_species(String.(species))
+    reference = String(reference_species)
+    reference in normalized_species ||
+        error("Reference species $(reference) is not present in the sampling universe.")
+    selectable = [item for item in normalized_species if item != reference]
+    isempty(selectable) && return [reference]
+    n_keep = clamp(round(Int, Float64(fraction) * length(selectable)), 1, length(selectable))
+    return vcat(reference, sample(rng, selectable, n_keep; replace = false))
+end
+
+function _reference_species(candidate, gene_id::AbstractString, transcript_id::AbstractString)
+    reference_idx = _reference_index(candidate.msa, gene_id, transcript_id)
+    reference_idx <= length(candidate.species) ||
+        error("Reference sequence index is outside the candidate species list.")
+    return String(candidate.species[reference_idx])
+end
+
+function _candidate_species_set(candidate)
+    return Set(_unique_nonempty_species(String.(candidate.species)))
+end
+
+function _common_sampling_universe(records::AbstractVector, gene_id::AbstractString,
+        transcript_id::AbstractString)
+    isempty(records) && return (species = String[], reference_species = nothing)
+    first_record = first(records)
+    ordered = _unique_nonempty_species(String.(first_record.candidate.species))
+    common = _candidate_species_set(first_record.candidate)
+    for record in Iterators.drop(records, 1)
+        intersect!(common, _candidate_species_set(record.candidate))
+    end
+    species = [item for item in ordered if item in common]
+    reference_species = _reference_species(first_record.candidate, gene_id, transcript_id)
+    reference_species in species ||
+        error("The eligible PID candidates share no reference species for common sampling.")
+    return (; species, reference_species)
+end
+
+function _input_sampling_universe(target::ResolvedTarget,
+        records::AbstractVector,
+        effective_specieslist::Union{Nothing, AbstractString})
+    species = _parse_specieslist(effective_specieslist)
+    species === nothing &&
+        error("sampling_strategy=:input requires a non-empty effective specieslist; pass specieslist or use sampling_strategy=:common.")
+    if !isempty(records)
+        reference_species = _reference_species(first(records).candidate,
+            target.ensembl_gene_id, target.transcript_id)
+    else
+        query_species = _normalize_species_name(target.species)
+        reference_species = query_species === nothing ? first(species) : query_species
+    end
+    reference_species in species ||
+        error("sampling_strategy=:input requires the reference species $(reference_species) to be present in the effective specieslist.")
+    return (; species, reference_species)
+end
+
+function _shared_sampling_universe(strategy::Symbol,
+        target::ResolvedTarget,
+        records::AbstractVector,
+        effective_specieslist::Union{Nothing, AbstractString})
+    if strategy === :common
+        return _common_sampling_universe(records, target.ensembl_gene_id,
+            target.transcript_id)
+    elseif strategy === :input
+        return _input_sampling_universe(target, records, effective_specieslist)
+    end
+    error("No shared sampling universe is defined for sampling_strategy=$(strategy).")
+end
+
+function _write_shared_species_samples(workdir::AbstractString,
+        species::AbstractVector{<:AbstractString},
+        reference_species::AbstractString;
+        sample_count::Integer,
+        sample_fraction::Real,
+        sample_seed::UInt64,
+        overwrite::Bool = false)
+    for sample_idx in 1:sample_count
+        rng = _sample_rng(sample_seed, sample_idx)
+        sampled_species = _species_sample(species, reference_species, sample_fraction, rng)
+        _write_species_file(_shared_sample_species_file(workdir, sample_idx),
+            sampled_species; overwrite)
+    end
+    return nothing
+end
+
+function _link_pid_candidate_samples(workdir::AbstractString,
+        pids::AbstractVector{<:Real};
+        sample_count::Integer,
+        overwrite::Bool = false)
+    for pid in pids
+        for sample_idx in 1:sample_count
+            paths = _pid_sample_paths(workdir, pid, sample_idx)
+            _symlink_species_file(paths.species_file,
+                _shared_sample_species_file(workdir, sample_idx); overwrite)
+        end
+    end
+    return nothing
 end
 
 function _ensure_pid_candidate_samples(workdir::AbstractString,
@@ -1625,6 +1758,7 @@ function _candidate_summary_row(target::ResolvedTarget,
         pid_sample_count = Int(sample_count),
         pid_sample_fraction = Float64(sample_fraction),
         pid_sample_seed = sample_seed,
+        sampling_strategy = String(metadata.sampling_strategy),
         pid_thresholds_key = metadata.pid_thresholds_key,
         effective_specieslist = _candidate_summary_optional(metadata.effective_specieslist),
         orthology = metadata.orthology,
@@ -1744,6 +1878,7 @@ const _CANDIDATE_SUMMARY_STRING_TYPES = Dict(
     :orthology => String,
     :transcript_query_fingerprint => String,
     :selection_mode => String,
+    :sampling_strategy => String,
     :msa0_status => String,
     :msa0_issue => String,
     :stockholm_path => String,
@@ -1772,6 +1907,7 @@ function _candidate_run_metadata(input_dir::AbstractString,
         sample_fraction::Real,
         sample_seed::UInt64,
         requested_sample_seed::Union{Nothing, Integer},
+        sampling_strategy::Symbol,
         effective_specieslist::Union{Nothing, AbstractString},
         orthology::AbstractString,
         specieslist_filter::Bool,
@@ -1784,6 +1920,7 @@ function _candidate_run_metadata(input_dir::AbstractString,
         pid_sample_fraction = Float64(sample_fraction),
         pid_sample_seed = sample_seed,
         requested_pid_sample_seed = requested_sample_seed,
+        sampling_strategy = sampling_strategy,
         effective_specieslist = _normalized_specieslist(effective_specieslist),
         orthology = String(orthology),
         specieslist_filter = Bool(specieslist_filter),
@@ -1918,7 +2055,8 @@ function _run_thoraxe_msa_stage!(target::ResolvedTarget,
         prepared;
         pid_sample_count::Integer,
         pid_sample_fraction::Real,
-        sample_seed::UInt64)
+        sample_seed::UInt64,
+        sampling_strategy::Symbol)
     score_rows = _score_pid_candidates(target, input_dir, workdir, pid_thresholds,
         effective_specieslist, metadata;
         pid_sample_count,
@@ -1938,7 +2076,8 @@ function _run_thoraxe_msa_stage!(target::ResolvedTarget,
         input_dir, summary_path, workdir, seeds, artifacts, warnings;
         pid_sample_count,
         pid_sample_fraction,
-        pid_sample_seed = sample_seed)
+        pid_sample_seed = sample_seed,
+        sampling_strategy)
 end
 
 function _run_thoraxe_msa_stage_with_failure_state!(stage_runner::Function,
@@ -1954,13 +2093,15 @@ function _run_thoraxe_msa_stage_with_failure_state!(stage_runner::Function,
         prepared;
         pid_sample_count::Integer,
         pid_sample_fraction::Real,
-        sample_seed::UInt64)
+        sample_seed::UInt64,
+        sampling_strategy::Symbol)
     try
         return stage_runner(target, input_dir, workdir, summary_path, pid_thresholds,
             effective_specieslist, metadata, stage_identity, filters, prepared;
             pid_sample_count,
             pid_sample_fraction,
-            sample_seed)
+            sample_seed,
+            sampling_strategy)
     catch err
         _write_thoraxe_msa_state(workdir, summary_path, SeedSelection[], :failed,
             stage_identity;
@@ -1980,6 +2121,7 @@ function _candidate_summary_matches(df::DataFrame, metadata)
         :pid_sample_count,
         :pid_sample_fraction,
         :pid_sample_seed,
+        :sampling_strategy,
         :effective_specieslist,
         :orthology,
         :specieslist_filter,
@@ -2003,6 +2145,7 @@ function _candidate_summary_matches(df::DataFrame, metadata)
             Float64(row.pid_sample_fraction) == metadata.pid_sample_fraction,
             metadata.requested_pid_sample_seed === nothing ||
             UInt64(row.pid_sample_seed) == metadata.pid_sample_seed,
+            string(row.sampling_strategy) == String(metadata.sampling_strategy),
             _metadata_value_matches(row.effective_specieslist,
                 metadata.effective_specieslist),
             string(row.orthology) == metadata.orthology,
@@ -2124,12 +2267,26 @@ function _validate_pid_sampling_options(sample_count::Integer, sample_fraction::
     return nothing
 end
 
+function _validate_sampling_strategy(sampling_strategy::Symbol)
+    sampling_strategy in _SAMPLING_STRATEGIES ||
+        error("sampling_strategy must be one of :independent, :common, or :input.")
+    return sampling_strategy
+end
+
 function _summary_seed_value(df::DataFrame, fallback::UInt64)
     :pid_sample_seed in propertynames(df) || return fallback
     isempty(df) && return fallback
     value = df.pid_sample_seed[1]
     value === missing && return fallback
     return UInt64(value)
+end
+
+function _summary_sampling_strategy(df::DataFrame, fallback::Symbol)
+    :sampling_strategy in propertynames(df) || return fallback
+    isempty(df) && return fallback
+    value = df.sampling_strategy[1]
+    value === missing && return fallback
+    return Symbol(String(value))
 end
 
 function _has_current_candidate_summary(df::DataFrame)
@@ -2143,6 +2300,7 @@ function _has_current_candidate_summary(df::DataFrame)
         :msa0_issue,
         :n_sequences_msa0,
         :pid_thresholds_key,
+        :sampling_strategy,
         :effective_specieslist,
         :orthology,
         :specieslist_filter,
@@ -2216,7 +2374,10 @@ function _cached_selected_seeds(summary_path::AbstractString, workdir::AbstractS
     for seed in seeds
         _ensure_seed_blocks_tsv(_pid_sample_paths(workdir, seed.pid, 0), seed.pid)
     end
-    return (; seeds, sample_seed = _summary_seed_value(df, metadata.pid_sample_seed))
+    return (;
+        seeds,
+        sample_seed = _summary_seed_value(df, metadata.pid_sample_seed),
+        sampling_strategy = _summary_sampling_strategy(df, metadata.sampling_strategy))
 end
 
 function _has_matching_candidate_summary(summary_path::AbstractString, metadata)
@@ -2290,7 +2451,8 @@ function _thoraxe_msa_result(input_dir::AbstractString,
         warnings::Vector{String};
         pid_sample_count::Integer,
         pid_sample_fraction::Real,
-        pid_sample_seed)
+        pid_sample_seed,
+        sampling_strategy::Symbol)
     status = isempty(warnings) ? :ok : :warn
     return ThorAxeMSAResult(;
         input_dir,
@@ -2306,6 +2468,7 @@ function _thoraxe_msa_result(input_dir::AbstractString,
         pid_sample_count = Int(pid_sample_count),
         pid_sample_fraction = Float64(pid_sample_fraction),
         pid_sample_seed,
+        sampling_strategy,
         warnings,
         status
     )
@@ -2328,7 +2491,144 @@ function _cached_thoraxe_msa_result(input_dir::AbstractString,
         input_dir, summary_path, workdir, seeds, artifacts, warnings;
         pid_sample_count,
         pid_sample_fraction,
-        pid_sample_seed = cached.sample_seed)
+        pid_sample_seed = cached.sample_seed,
+        sampling_strategy = cached.sampling_strategy)
+end
+
+function _generate_validated_pid_candidate(target::ResolvedTarget,
+        input_dir::AbstractString,
+        workdir::AbstractString,
+        pid::Real,
+        pid_order::Integer,
+        specieslist::Union{Nothing, AbstractString};
+        sample_count::Integer,
+        overwrite::Bool = false,
+        thoraxe_fn::Function = ThorAxe.thoraxe)
+    @info "Scoring ThorAxe PID candidate." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id pid pid_order sample_count
+    candidate = merge(
+        _generate_pid_candidate(target, input_dir, workdir, pid, specieslist;
+            overwrite, thoraxe_fn),
+        (; workdir))
+    validation = _candidate_msa0_validation(target, candidate.msa, pid, workdir)
+    if !validation.eligible
+        @info "Skipping ineligible ThorAxe PID candidate." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id pid issue=validation.issue
+    end
+    return (; pid = Float64(pid), pid_order = Int(pid_order), candidate, validation)
+end
+
+function _prepare_candidate_species_samples!(target::ResolvedTarget,
+        input_dir::AbstractString,
+        workdir::AbstractString,
+        records::AbstractVector,
+        effective_specieslist::Union{Nothing, AbstractString},
+        sampling_strategy::Symbol;
+        sample_count::Integer,
+        sample_fraction::Real,
+        sample_seed::UInt64,
+        overwrite::Bool = false)
+    Int(sample_count) == 0 && return nothing
+    eligible_records = [record for record in records if record.validation.eligible]
+    isempty(eligible_records) && return nothing
+
+    @info "Preparing ThorAxe PID species samples." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id sampling_strategy sample_count sample_fraction
+    if sampling_strategy === :independent
+        for record in eligible_records
+            _ensure_pid_candidate_samples(workdir, record.pid, record.candidate.msa,
+                record.candidate.species;
+                sample_count,
+                sample_fraction,
+                sample_seed,
+                overwrite,
+                gene_id = target.ensembl_gene_id,
+                transcript_id = target.transcript_id)
+        end
+        return nothing
+    end
+
+    universe = _shared_sampling_universe(sampling_strategy, target,
+        eligible_records, effective_specieslist)
+    isempty(universe.species) &&
+        error("No species are available for sampling_strategy=$(sampling_strategy).")
+    _write_shared_species_samples(workdir, universe.species, universe.reference_species;
+        sample_count,
+        sample_fraction,
+        sample_seed,
+        overwrite)
+    _link_pid_candidate_samples(workdir, [record.pid for record in eligible_records];
+        sample_count,
+        overwrite)
+    return nothing
+end
+
+function _score_validated_pid_candidate(target::ResolvedTarget,
+        input_dir::AbstractString,
+        workdir::AbstractString,
+        record;
+        sample_count::Integer,
+        sample_fraction::Real,
+        sample_seed::UInt64,
+        metadata,
+        overwrite::Bool = false,
+        thoraxe_fn::Function = ThorAxe.thoraxe,
+        identity_fn::Function = compute_identity_against_reference)
+    candidate = record.candidate
+    validation = record.validation
+    pid = record.pid
+    pid_order = record.pid_order
+    if !validation.eligible
+        return _candidate_summary_row(
+            target, candidate, pid, pid_order, validation;
+            sample_count, sample_fraction, sample_seed, metadata)
+    end
+
+    if sample_count == 0
+        @info "Keeping ThorAxe PID candidate without sample scoring." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id pid
+        return _candidate_summary_row(
+            target, candidate, pid, pid_order, validation;
+            sample_count, sample_fraction, sample_seed, metadata)
+    end
+
+    score_rows = NamedTuple[]
+    for sample_idx in 1:sample_count
+        @info "Scoring ThorAxe PID sample." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id pid sample_idx sample_count
+        sample_paths = _pid_sample_paths(workdir, pid, sample_idx)
+        species_file = sample_paths.species_file
+        isfile(species_file) || continue
+        _run_thoraxe_pid_msa(
+            target, input_dir, workdir, pid, species_file, sample_idx;
+            overwrite, thoraxe_fn)
+        isfile(sample_paths.fasta_path) || continue
+        identity = identity_fn(
+            candidate.fasta_path, sample_paths.fasta_path;
+            logs_dir = joinpath(_thoraxe_logs_dir(workdir), "hhalign",
+                format_pid_dir(pid)),
+            label = "sample$(sample_idx)")
+        push!(score_rows,
+            (;
+                gene_id = target.ensembl_gene_id,
+                transcript_id = target.transcript_id,
+                pid = Float64(pid),
+                pid_order,
+                sample = sample_idx,
+                sample_label = _candidate_sample_label(sample_idx),
+                identity,
+                n_sequences_reference = nsequences(candidate.msa),
+                n_sequences_sample = read_file(sample_paths.fasta_path, FASTA) |>
+                                     nsequences
+            ))
+    end
+    isempty(score_rows) && error("No PID sample scores were computed for PID $(pid).")
+    CSV.write(_pid_scores_path(workdir, pid), DataFrame(score_rows))
+    identities = [row.identity for row in score_rows]
+    return _candidate_summary_row(
+        target, candidate, pid, pid_order, validation;
+        mean_identity = mean(identities),
+        median_identity = median(identities),
+        n_samples = length(identities),
+        sample_count,
+        sample_fraction,
+        sample_seed,
+        metadata)
 end
 
 function _score_pid_candidates(target::ResolvedTarget,
@@ -2343,21 +2643,33 @@ function _score_pid_candidates(target::ResolvedTarget,
         overwrite::Bool,
         thoraxe_fn::Function = ThorAxe.thoraxe,
         identity_fn::Function = compute_identity_against_reference)
-    score_rows = NamedTuple[]
-    @info "Scoring ThorAxe PID candidates." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id n_pids=length(pid_thresholds) pid_sample_count pid_sample_fraction
+    sampling_strategy = metadata.sampling_strategy
+    candidate_records = NamedTuple[]
+    @info "Scoring ThorAxe PID candidates." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id n_pids=length(pid_thresholds) pid_sample_count pid_sample_fraction sampling_strategy
     for (pid_order, pid) in enumerate(Float64.(pid_thresholds))
-        push!(score_rows,
-            _score_pid_candidate(
+        push!(candidate_records,
+            _generate_validated_pid_candidate(
                 target, input_dir, workdir, pid, pid_order, effective_specieslist;
+                sample_count = Int(pid_sample_count),
+                overwrite,
+                thoraxe_fn))
+    end
+    _prepare_candidate_species_samples!(target, input_dir, workdir,
+        candidate_records, effective_specieslist, sampling_strategy;
+        sample_count = Int(pid_sample_count),
+        sample_fraction = Float64(pid_sample_fraction),
+        sample_seed,
+        overwrite)
+    return [_score_validated_pid_candidate(
+                target, input_dir, workdir, record;
                 sample_count = Int(pid_sample_count),
                 sample_fraction = Float64(pid_sample_fraction),
                 sample_seed,
                 metadata,
                 overwrite,
                 thoraxe_fn,
-                identity_fn))
-    end
-    return score_rows
+                identity_fn)
+            for record in candidate_records]
 end
 
 function _select_scored_candidate_seeds(summary_path::AbstractString,
@@ -2377,9 +2689,11 @@ function build_thoraxe_msa(target::ResolvedTarget, workdir::AbstractString;
         transcript_query_retries::Integer = 2,
         pid_sample_count::Integer = 45,
         pid_sample_fraction::Real = 0.8,
-        pid_sample_seed::Union{Nothing, Integer} = nothing)
+        pid_sample_seed::Union{Nothing, Integer} = nothing,
+        sampling_strategy::Symbol = :common)
     _orthology_relationships(orthology)
     _validate_pid_sampling_options(pid_sample_count, pid_sample_fraction)
+    sampling_strategy = _validate_sampling_strategy(sampling_strategy)
     isempty(pid_thresholds) && error("pid_thresholds cannot be empty.")
     sample_seed = pid_sample_seed === nothing ? UInt64(rand(UInt32)) :
                   _normalize_pid_sample_seed(pid_sample_seed)
@@ -2399,6 +2713,7 @@ function build_thoraxe_msa(target::ResolvedTarget, workdir::AbstractString;
         sample_fraction = Float64(pid_sample_fraction),
         sample_seed,
         requested_sample_seed = pid_sample_seed,
+        sampling_strategy,
         effective_specieslist = filters.effective_specieslist,
         orthology,
         specieslist_filter,
@@ -2421,7 +2736,8 @@ function build_thoraxe_msa(target::ResolvedTarget, workdir::AbstractString;
         filters.effective_specieslist, metadata, stage_identity, filters, prepared;
         pid_sample_count,
         pid_sample_fraction,
-        sample_seed)
+        sample_seed,
+        sampling_strategy)
 end
 
 end

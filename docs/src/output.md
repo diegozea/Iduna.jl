@@ -29,6 +29,9 @@ around it. By default, `workdir` is a directory named after the input ID.
       pid_10.00/
         full/
           thoraxe/
+    samples/
+      species/
+        candidate_species_subset_001.txt
     candidates/
       pid_10.00/
         candidate_msa_full.fasta
@@ -36,10 +39,10 @@ around it. By default, `workdir` is a directory named after the input ID.
         scores.csv
         sequences/
           candidate_sequences_full.fasta
-          candidate_sequences_species_subset_001.fasta
+          candidate_sequences_species_subset_001.fasta  # independent sampling only
         species/
           candidate_species_full.txt
-          candidate_species_subset_001.txt
+          candidate_species_subset_001.txt  # symlink for shared sampling
     candidate_summary.csv
   expansion/  # absent when no_expansion=true / --no-expansion
     <gene>/<transcript>/
@@ -82,11 +85,13 @@ fails. `result.json` includes a compact `"stages"` list copied from these
 manifests, making reruns auditable without using it as the source of truth.
 
 `thoraxe_msa/runs/` keeps the raw ThorAxe output for each PID candidate and its
-PID-specific species samples. `thoraxe_msa/candidates/` stores each PID's
-full-species candidate `msa_0`, sampled species lists, gap-free sequence files,
-and per-PID score CSV. `thoraxe_msa/candidate_summary.csv` records validation
-status, eligibility, sample identity statistics, candidate size, and the selected
-seed rows.
+species samples. `thoraxe_msa/candidates/` stores each PID's full-species
+candidate `msa_0`, sampled species list paths, gap-free sequence files, and
+per-PID score CSV. With `sampling_strategy=:common` or `:input`, shared sampled
+species lists live in `thoraxe_msa/samples/species/` and each PID-local sampled
+species path is a symlink to the matching shared file.
+`thoraxe_msa/candidate_summary.csv` records validation status, eligibility,
+sample identity statistics, candidate size, and the selected seed rows.
 
 MSA paths are also available from the returned [`IdunaResult`](@ref):
 
@@ -99,6 +104,7 @@ result.thoraxe_msa.seeds[1].s_exon_blocks_tsv
 result.thoraxe_msa.pid_sample_count
 result.thoraxe_msa.pid_sample_fraction
 result.thoraxe_msa.pid_sample_seed
+result.thoraxe_msa.sampling_strategy
 
 # Full expansion runs only:
 expansion = result.expansions[1]

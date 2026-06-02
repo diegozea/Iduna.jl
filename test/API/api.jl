@@ -132,6 +132,7 @@ import JSON
     @test summary.status == "warn"
     @test summary.thoraxe_msa.status == "warn"
     @test summary.thoraxe_msa.warnings == thoraxe.warnings
+    @test summary.thoraxe_msa.sampling_strategy == "independent"
     @test summary.thoraxe_msa.seeds[1].stockholm_path == "seed.sto"
     @test summary.expansions[1].match_stockholm == "match.sto"
     missing_expansion_result = Iduna.IdunaResult(;
@@ -332,6 +333,7 @@ import JSON
             @test loaded.target.ensembl_gene_id == fixture.target.ensembl_gene_id
             @test loaded.thoraxe_msa.seeds[1].pid == 10.0
             @test loaded.thoraxe_msa.pid_sample_seed == UInt64(7)
+            @test loaded.thoraxe_msa.sampling_strategy === :independent
             @test loaded.expansions[1].n_hits == 0
             @test loaded.validations[1].query_name == "seed"
             @test Iduna.ResultsValidation.nsequences(Iduna.load_seed_msa(loaded)) == 1
@@ -961,6 +963,7 @@ import JSON
                 pid_sample_count = 12,
                 pid_sample_fraction = 0.65,
                 pid_sample_seed = 42,
+                sampling_strategy = :input,
                 _resolve_target = (args...; kwargs...) -> target,
                 _build_thoraxe_msa = (
                     args...; kwargs...) -> begin
@@ -973,6 +976,7 @@ import JSON
             @test captured[][:pid_sample_count] == 12
             @test captured[][:pid_sample_fraction] == 0.65
             @test captured[][:pid_sample_seed] == 42
+            @test captured[][:sampling_strategy] === :input
         end
     end
 

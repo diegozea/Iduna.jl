@@ -53,12 +53,14 @@ import JSON
             "--pid-thresholds", "10,20,30",
             "--pid-sample-count", "12",
             "--pid-sample-fraction", "0.65",
-            "--pid-sample-seed", "42"
+            "--pid-sample-seed", "42",
+            "--sampling-strategy", "input"
         ])
         @test kwargs[:pid_thresholds] == [10.0, 20.0, 30.0]
         @test kwargs[:pid_sample_count] == 12
         @test kwargs[:pid_sample_fraction] == 0.65
         @test kwargs[:pid_sample_seed] == 42
+        @test kwargs[:sampling_strategy] === :input
     end
 
     @testset "required arguments" begin
