@@ -3,7 +3,6 @@ module ThorAxeMSA
 import CSV
 import Dates
 import HHsuite_jll
-import HTTP
 import JSON
 import Scratch
 import SHA
@@ -18,7 +17,8 @@ using Statistics: mean, median
 using StatsBase: sample
 
 using ..Utils: DEFAULT_PID_THRESHOLDS, ResolvedTarget, SeedSelection, ThorAxeMSAResult,
-               _http_get_with_retries, _relative_artifact_path, _resolve_artifact_path,
+               _http_get_request, _http_get_with_retries, _relative_artifact_path,
+               _resolve_artifact_path,
                decode_body,
                fasta_sequence, format_pid, format_pid_dir, protein_alignment_stats,
                resolve_sequence_name, safe_rm,
@@ -341,7 +341,7 @@ end
 function _fetch_biomart_datasets_text(;
         url::AbstractString = _BIOMART_DATASETS_URL,
         retries::Integer = 4,
-        http_get::Function = HTTP.get)
+        http_get::Function = _http_get_request)
     # BioMart can return temporary 5xx/429 responses, so fetch through retry.
     resp = _http_get_with_retries(
         url, _BIOMART_TEXT_HEADERS; retries, sleep_seconds = 1.0, http_get)
@@ -533,7 +533,7 @@ function _fetch_ensembl_homology_data(species::AbstractString,
         gene_id::AbstractString;
         retries::Integer = 4,
         sleep_seconds::Real = 1.5,
-        http_get::Function = HTTP.get)
+        http_get::Function = _http_get_request)
     gene_core = strip_ensembl_version(gene_id)
     url = "$(_ENSEMBL_REST_BASE)/homology/id/$(species)/$(gene_core)?type=orthologues;sequence=none"
     resp = _http_get_with_retries(

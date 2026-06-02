@@ -1,6 +1,6 @@
 @testset "IDMapping" begin
-    response(body::AbstractString; status::Integer = 200) = Iduna.IDMapping.HTTP.Response(
-        status, Vector{UInt8}(body))
+    response(body::AbstractString; status::Integer = 200) = Iduna.Utils.HTTP.Response(
+        status; body)
 
     @test Iduna.IDMapping.sequences_match("ACDEFG", "ACDEFG")
     @test !Iduna.IDMapping.sequences_match("ACDEFG", "ACDFFG")

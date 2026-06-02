@@ -1,9 +1,9 @@
 module IDMapping
 
-import HTTP
 import JSON
 
-using ..Utils: ResolvedTarget, _http_get_with_retries, _is_transient_http_status,
+using ..Utils: ResolvedTarget, _http_get_request, _http_get_with_retries,
+               _is_transient_http_status,
                decode_body, fasta_sequence, format_fasta, id_kind,
                is_ensembl_transcript_id, protein_alignment_stats,
                strip_ensembl_version, write_text
@@ -50,7 +50,7 @@ function _http_get(url::AbstractString,
         headers = _JSON_HEADERS;
         retries::Int = 4,
         sleep_seconds::Real = 1.5,
-        http_get::Function = HTTP.get)
+        http_get::Function = _http_get_request)
     resp = _http_get_with_retries(url, headers; retries, sleep_seconds, http_get)
     if resp.status == 200
         return resp
