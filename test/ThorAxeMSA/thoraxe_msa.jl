@@ -333,6 +333,112 @@
     end
 
     mktempdir() do tmp
+        target = Iduna.ResolvedTarget(;
+            input_id = "ENST",
+            input_kind = :ensembl_transcript,
+            ensembl_gene_id = "ENSG",
+            transcript_id = "ENST",
+            species = "homo_sapiens")
+        fasta = joinpath(tmp, "candidate.fasta")
+        write(fasta,
+            ">ENSG\nAAAA\n" *
+            ">ORTHO1\nBBBB\n" *
+            ">ORTHO2\nCCCC\n" *
+            ">ORTHO3\nDDDD\n")
+        msa = Iduna.ThorAxeMSA.read_file(fasta, Iduna.ThorAxeMSA.FASTA)
+        eligible = (; eligible = true)
+        invalid = (; eligible = false)
+        common_records = [
+            (;
+                pid = 10.0,
+                candidate = (;
+                    msa,
+                    species = ["homo_sapiens", "mus_musculus", "danio_rerio",
+                        "xenopus_tropicalis"]),
+                validation = eligible),
+            (;
+                pid = 20.0,
+                candidate = (;
+                    msa,
+                    species = ["homo_sapiens", "mus_musculus", "rattus_norvegicus",
+                        "xenopus_tropicalis"]),
+                validation = eligible),
+            (;
+                pid = 30.0,
+                candidate = (;
+                    msa,
+                    species = ["homo_sapiens", "mus_musculus"]),
+                validation = invalid)
+        ]
+        Iduna.ThorAxeMSA._prepare_candidate_species_samples!(
+            target, joinpath(tmp, "input"), tmp, common_records, nothing, :common;
+            sample_count = 1,
+            sample_fraction = 1.0,
+            sample_seed = UInt64(7),
+            overwrite = true)
+        canonical = Iduna.ThorAxeMSA._shared_sample_species_file(tmp, 1)
+        common_species = split(chomp(read(canonical, String)), '\n')
+        @test first(common_species) == "homo_sapiens"
+        @test Set(common_species) ==
+              Set(["homo_sapiens", "mus_musculus", "xenopus_tropicalis"])
+        for pid in (10.0, 20.0)
+            link = Iduna.ThorAxeMSA._pid_sample_paths(tmp, pid, 1).species_file
+            @test islink(link)
+            @test read(link, String) == read(canonical, String)
+        end
+        @test !ispath(Iduna.ThorAxeMSA._pid_sample_paths(tmp, 30.0, 1).species_file)
+    end
+
+    mktempdir() do tmp
+        target = Iduna.ResolvedTarget(;
+            input_id = "ENST",
+            input_kind = :ensembl_transcript,
+            ensembl_gene_id = "ENSG",
+            transcript_id = "ENST",
+            species = "homo_sapiens")
+        fasta = joinpath(tmp, "candidate.fasta")
+        write(fasta,
+            ">ENSG\nAAAA\n" *
+            ">ORTHO1\nBBBB\n")
+        msa = Iduna.ThorAxeMSA.read_file(fasta, Iduna.ThorAxeMSA.FASTA)
+        records = [
+            (;
+                pid = 10.0,
+                candidate = (;
+                    msa,
+                    species = ["homo_sapiens", "mus_musculus"]),
+                validation = (; eligible = true)),
+            (;
+                pid = 20.0,
+                candidate = (;
+                    msa,
+                    species = ["homo_sapiens", "mus_musculus"]),
+                validation = (; eligible = true))
+        ]
+        Iduna.ThorAxeMSA._prepare_candidate_species_samples!(
+            target, joinpath(tmp, "input"), tmp, records,
+            "homo_sapiens,mus_musculus,danio_rerio", :input;
+            sample_count = 1,
+            sample_fraction = 1.0,
+            sample_seed = UInt64(9),
+            overwrite = true)
+        canonical = Iduna.ThorAxeMSA._shared_sample_species_file(tmp, 1)
+        @test Set(split(chomp(read(canonical, String)), '\n')) ==
+              Set(["homo_sapiens", "mus_musculus", "danio_rerio"])
+        for pid in (10.0, 20.0)
+            link = Iduna.ThorAxeMSA._pid_sample_paths(tmp, pid, 1).species_file
+            @test islink(link)
+            @test read(link, String) == read(canonical, String)
+        end
+        @test_throws ErrorException Iduna.ThorAxeMSA._prepare_candidate_species_samples!(
+            target, joinpath(tmp, "input"), tmp, records, nothing, :input;
+            sample_count = 1,
+            sample_fraction = 1.0,
+            sample_seed = UInt64(9),
+            overwrite = true)
+    end
+
+    mktempdir() do tmp
         input_dir = joinpath(tmp, "thoraxe_input")
         ensembl = joinpath(input_dir, "Ensembl")
         mkpath(ensembl)
@@ -350,6 +456,7 @@
             sample_fraction = 0.5,
             sample_seed = UInt64(7),
             requested_sample_seed = 7,
+            sampling_strategy = :independent,
             effective_specieslist = "homo_sapiens",
             orthology = "1:1",
             specieslist_filter = true,
@@ -372,6 +479,7 @@
                 pid_sample_count = metadata.pid_sample_count,
                 pid_sample_fraction = metadata.pid_sample_fraction,
                 pid_sample_seed = metadata.pid_sample_seed,
+                sampling_strategy = String(metadata.sampling_strategy),
                 pid_thresholds_key = metadata.pid_thresholds_key,
                 effective_specieslist = metadata.effective_specieslist,
                 orthology = metadata.orthology,
@@ -401,6 +509,7 @@
                 pid_sample_count = metadata.pid_sample_count,
                 pid_sample_fraction = metadata.pid_sample_fraction,
                 pid_sample_seed = metadata.pid_sample_seed,
+                sampling_strategy = String(metadata.sampling_strategy),
                 pid_thresholds_key = metadata.pid_thresholds_key,
                 effective_specieslist = metadata.effective_specieslist,
                 orthology = metadata.orthology,
@@ -425,6 +534,9 @@
         changed_fraction = merge(metadata, (; pid_sample_fraction = 0.75))
         @test !Iduna.ThorAxeMSA._candidate_summary_matches(df, changed_fraction)
         @test !Iduna.ThorAxeMSA._has_matching_candidate_summary(summary, changed_fraction)
+        changed_strategy = merge(metadata, (; sampling_strategy = :common))
+        @test !Iduna.ThorAxeMSA._candidate_summary_matches(df, changed_strategy)
+        @test !Iduna.ThorAxeMSA._has_matching_candidate_summary(summary, changed_strategy)
         changed_gene = merge(metadata, (; gene_id = "ENSG_DIFFERENT"))
         @test !Iduna.ThorAxeMSA._candidate_summary_matches(df, changed_gene)
         @test !Iduna.ThorAxeMSA._has_matching_candidate_summary(summary, changed_gene)
@@ -498,6 +610,7 @@
             sample_fraction = 0.5,
             sample_seed = UInt64(7),
             requested_sample_seed = 7,
+            sampling_strategy = :independent,
             effective_specieslist = "homo_sapiens",
             orthology = "1:1",
             specieslist_filter = true,
@@ -838,6 +951,7 @@
                 sample_fraction = 1.0,
                 sample_seed = UInt64(11),
                 requested_sample_seed = 11,
+                sampling_strategy = :independent,
                 effective_specieslist = nothing,
                 orthology = "1:1",
                 specieslist_filter = false,
@@ -871,6 +985,7 @@
                 sample_fraction = 1.0,
                 sample_seed = UInt64(13),
                 requested_sample_seed = 13,
+                sampling_strategy = :independent,
                 effective_specieslist = nothing,
                 orthology = "1:1",
                 specieslist_filter = false,
@@ -909,6 +1024,7 @@
                 sample_fraction = 1.0,
                 sample_seed = UInt64(12),
                 requested_sample_seed = 12,
+                sampling_strategy = :independent,
                 effective_specieslist = nothing,
                 orthology = "1:1",
                 specieslist_filter = false,
@@ -926,6 +1042,45 @@
             @test sampled_row.median_identity == 88.0
             @test sampled_row.n_samples == 1
             @test isfile(Iduna.ThorAxeMSA._pid_scores_path(tmp, sampled_pid))
+
+            common_pids = [54.0, 56.0]
+            common_calls = Ref(0)
+            common_thoraxe = (input_dir, run_root; identity, specieslist, phylosofs,
+                runner) -> begin
+                common_calls[] += 1
+                write_fake_thoraxe_dir(joinpath(run_root, "thoraxe"))
+                nothing
+            end
+            common_metadata = Iduna.ThorAxeMSA._candidate_run_metadata(
+                scoring_input, scoring_target, common_pids;
+                sample_count = 1,
+                sample_fraction = 1.0,
+                sample_seed = UInt64(15),
+                requested_sample_seed = 15,
+                sampling_strategy = :common,
+                effective_specieslist = nothing,
+                orthology = "1:1",
+                specieslist_filter = false,
+                biomart_datasets_filter = false)
+            common_rows = Iduna.ThorAxeMSA._score_pid_candidates(
+                scoring_target, scoring_input, tmp, common_pids, nothing,
+                common_metadata;
+                pid_sample_count = 1,
+                pid_sample_fraction = 1.0,
+                sample_seed = UInt64(15),
+                overwrite = true,
+                thoraxe_fn = common_thoraxe,
+                identity_fn = sampled_identity)
+            @test common_calls[] == 4
+            @test [row.pid for row in common_rows] == common_pids
+            @test all(row -> row.n_samples == 1, common_rows)
+            common_species_file = Iduna.ThorAxeMSA._shared_sample_species_file(tmp, 1)
+            @test isfile(common_species_file)
+            for pid in common_pids
+                species_file = Iduna.ThorAxeMSA._pid_sample_paths(tmp, pid, 1).species_file
+                @test islink(species_file)
+                @test read(species_file, String) == read(common_species_file, String)
+            end
 
             scored_rows = Iduna.ThorAxeMSA._score_pid_candidates(
                 scoring_target, scoring_input, tmp, [62.0, 63.0], nothing,
@@ -1451,6 +1606,7 @@ TableSet\tptroglodytes_gene_ensembl\tChimpanzee genes (Pan_tro_3.0)\t1
                 sample_fraction = 0.8,
                 sample_seed = UInt64(7),
                 requested_sample_seed = 7,
+                sampling_strategy = :common,
                 effective_specieslist = "homo_sapiens",
                 orthology = "1:1",
                 specieslist_filter = true,
@@ -1567,6 +1723,7 @@ TableSet\tptroglodytes_gene_ensembl\tChimpanzee genes (Pan_tro_3.0)\t1
                 sample_fraction = 0.8,
                 sample_seed = UInt64(9),
                 requested_sample_seed = 9,
+                sampling_strategy = :common,
                 effective_specieslist = nothing,
                 orthology = "1:1",
                 specieslist_filter = false,
@@ -1681,7 +1838,8 @@ TableSet\tptroglodytes_gene_ensembl\tChimpanzee genes (Pan_tro_3.0)\t1
                 nothing, (;), stage_identity, filters, prepared;
                 pid_sample_count = 0,
                 pid_sample_fraction = 0.8,
-                sample_seed = UInt64(1))
+                sample_seed = UInt64(1),
+                sampling_strategy = :independent)
             state = Iduna.Utils._read_stage_state(
                 Iduna.ThorAxeMSA._thoraxe_msa_stage_dir(workdir))
             @test state["status"] == "failed"

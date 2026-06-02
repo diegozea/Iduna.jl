@@ -673,6 +673,7 @@ function _relative_thoraxe_msa_paths(thoraxe::ThorAxeMSAResult, workdir::Abstrac
         pid_sample_count = thoraxe.pid_sample_count,
         pid_sample_fraction = thoraxe.pid_sample_fraction,
         pid_sample_seed = thoraxe.pid_sample_seed,
+        sampling_strategy = thoraxe.sampling_strategy,
         warnings = thoraxe.warnings,
         status = thoraxe.status
     )
@@ -876,6 +877,7 @@ function result_summary(result::IdunaResult)
             pid_sample_count = result.thoraxe_msa.pid_sample_count,
             pid_sample_fraction = result.thoraxe_msa.pid_sample_fraction,
             pid_sample_seed = result.thoraxe_msa.pid_sample_seed,
+            sampling_strategy = String(result.thoraxe_msa.sampling_strategy),
             warnings = result.thoraxe_msa.warnings,
             status = String(result.thoraxe_msa.status)
         ),

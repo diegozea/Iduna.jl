@@ -83,13 +83,16 @@ instead of fetching it again.
 Seed selection is per PID threshold. Iduna runs `transcript_query` once and
 builds one full-species candidate `msa_0` at each PID threshold. Each candidate
 is validated: indels versus UniProt exclude that PID from selection, while
-substitutions are reported as warnings. Species samples are drawn from each
-PID's own candidate `msa_0`, run at that PID, and scored by HHsuite against the
-same candidate. Iduna chooses the highest median identity, highest mean
-identity, largest candidate `msa_0` species count, and finally the first PID in
-`pid_thresholds` order. By default Iduna uses 45 samples, retains 80% of
-non-reference species per sample, and records a random `pid_sample_seed` unless
-one is supplied.
+substitutions are reported as warnings. By default, `sampling_strategy=:common`
+draws one shared set of species samples from the species common to all eligible
+`msa_0` candidates; each PID then runs ThorAxe with the same sampled species
+lists and is scored by HHsuite against its own full `msa_0`. Use
+`sampling_strategy=:independent` for the previous PID-local sampling behavior,
+or `sampling_strategy=:input` to sample from the effective input species list.
+Iduna chooses the highest median identity, highest mean identity, largest
+candidate `msa_0` species count, and finally the first PID in `pid_thresholds`
+order. By default Iduna uses 45 samples, retains 80% of non-reference species
+per sample, and records a random `pid_sample_seed` unless one is supplied.
 Set `pid_sample_count=0` to skip seed selection and carry every eligible PID
 candidate forward. In that mode `result.thoraxe_msa.seeds`,
 `result.expansions`, and `result.validations` can contain multiple entries.

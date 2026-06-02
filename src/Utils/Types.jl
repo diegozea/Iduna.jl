@@ -42,6 +42,8 @@ end
     ThorAxeMSAResult
 
 Paths and metadata produced by the ThorAxe MSA-building stage.
+`sampling_strategy` records how species samples were prepared for PID
+selection.
 """
 Base.@kwdef struct ThorAxeMSAResult
     input_dir::String
@@ -57,6 +59,7 @@ Base.@kwdef struct ThorAxeMSAResult
     pid_sample_count::Int = 0
     pid_sample_fraction::Float64 = 1.0
     pid_sample_seed::UInt64 = UInt64(0)
+    sampling_strategy::Symbol = :independent
     warnings::Vector{String} = String[]
     status::Symbol = :ok
 end

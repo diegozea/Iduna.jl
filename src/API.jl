@@ -23,7 +23,10 @@ drawn from each candidate `msa_0` and scored against that PID's full-species
 MSA; the default is 45.
 `pid_sample_fraction` controls the fraction of non-reference species retained in
 each sample, and `pid_sample_seed` can make the sampling reproducible. If
-omitted, a random seed is recorded with the result. Candidate `msa_0`
+omitted, a random seed is recorded with the result. `sampling_strategy` controls
+how species samples are shared across PID thresholds; the default `:common`
+uses one shared set of species samples for all eligible PID candidates.
+Candidate `msa_0`
 reconstructions with indels versus UniProt are reported and excluded from seed
 selection; substitution-only differences are warnings. Seed selection uses
 highest median identity, then highest mean identity, then the largest candidate
@@ -58,6 +61,7 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
         pid_sample_count::Integer = 45,
         pid_sample_fraction::Real = 0.8,
         pid_sample_seed::Union{Nothing, Integer} = nothing,
+        sampling_strategy::Symbol = :common,
         match_mode::Integer = 1,
         match_ratio::Union{Nothing, Real} = nothing,
         hmmbuild_symfrac::Real = 0.0,
@@ -105,7 +109,8 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
             transcript_query_retries,
             pid_sample_count,
             pid_sample_fraction,
-            pid_sample_seed)
+            pid_sample_seed,
+            sampling_strategy)
 
         if !no_expansion
             failed_stage = "msa_expansion"
@@ -743,6 +748,7 @@ function _load_result_thoraxe(summary, target::Utils.ResolvedTarget,
         pid_sample_count = Int(get(data, "pid_sample_count", 0)),
         pid_sample_fraction = Float64(get(data, "pid_sample_fraction", 1.0)),
         pid_sample_seed = UInt64(get(data, "pid_sample_seed", 0)),
+        sampling_strategy = Symbol(String(get(data, "sampling_strategy", "independent"))),
         warnings = String.(get(data, "warnings", String[])),
         status = thoraxe_status)
 end
