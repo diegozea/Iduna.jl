@@ -1,6 +1,6 @@
 name = "Iduna"
 uuid = "a1090517-0d21-41a4-b698-8a258aa9b9e4"
-version = "0.7.0"
+version = "0.8.0"
 authors = ["Diego Javier Zea <diegozea@gmail.com> and contributors"]
 
 [deps]

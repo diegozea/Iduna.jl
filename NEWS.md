@@ -1,5 +1,52 @@
 ## Iduna.jl Release Notes
 
+### Changes from v0.7.0 to v0.8.0
+
+Breaking changes:
+
+- Changed the default PID seed sampling strategy from PID-local sampling to
+  `sampling_strategy=:common`, which draws one shared set of species samples
+  from the species common to all eligible PID candidates. Use
+  `sampling_strategy=:independent` to restore the v0.7 behavior, or
+  `sampling_strategy=:input` to sample from the effective input species list.
+- Replaced expansion `step_state.json` files with the shared
+  `stage_state.json` manifest format. Code that reads expansion state files
+  directly should use the new filename and fields.
+- Saved result metadata is now move-safe and omits the absolute `workdir`; paths
+  for artifacts under the work directory are stored relative to it. The in-memory
+  `IdunaResult.workdir` remains absolute.
+- `IdunaResult.expansions` can contain `nothing` for a seed whose expansion is
+  unavailable, while still remaining indexed like `result.thoraxe_msa.seeds`.
+
+Added:
+
+- Added manifest-backed resumability for pipeline stages. `target`,
+  `thoraxe_input`, `thoraxe_msa`, expansion, validation, and `result` stages now
+  record `stage_state.json` manifests with input identities, outputs, actions,
+  warnings, and failures.
+- `overwrite=false` reruns now reuse completed matching stages and rebuild
+  missing, stale, failed, or incomplete stages. Copied or generated
+  `transcript_query` bundles are fingerprinted and reused when their target,
+  species list, orthology, and filter options still match.
+- Added the public `load_result(workdir)` API to reconstruct an `IdunaResult`
+  from current result artifacts without rerunning pipeline stages or writing
+  files, including after the result directory has been moved or copied.
+- Added `sampling_strategy` to the Julia API and `--sampling-strategy` to the
+  app. Supported strategies are `common`, `independent`, and `input`.
+- Added shared PID sample species files under `thoraxe_msa/samples/species/`
+  for shared sampling strategies, plus `sampling_strategy` metadata in
+  ThorAxe MSA results and candidate summaries.
+
+Internal changes:
+
+- Migrated HTTP usage to HTTP.jl v2 and added explicit CodecZlib-based gzip
+  response decoding.
+- Added tests for stage resumability, move-safe result loading, partial result
+  round-tripping, sampling strategies, and fallback/error paths.
+- Updated CI and documentation dependencies, including `codecov/codecov-action`
+  v6, `julia-actions/cache` v3, and Documenter compatibility for 1.17.0.
+- Added the WIP repository status badge.
+
 ### Changes from v0.6.0 to v0.7.0
 
 Breaking changes:
