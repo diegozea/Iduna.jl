@@ -326,7 +326,7 @@ function _mmseqs_search(seed_msa_sto::AbstractString,
         logs_dir::AbstractString;
         match_mode::Integer = 1,
         match_ratio::Union{Nothing, Real} = nothing,
-        threads::Union{Nothing, Integer} = nothing)
+        mmseqs_threads::Union{Nothing, Integer} = nothing)
     mmseqs_bin = MMseqs2_jll.mmseqs()
     mkpath(db_dir)
     seed_db = joinpath(db_dir, "seed_msa_db")
@@ -346,17 +346,20 @@ function _mmseqs_search(seed_msa_sto::AbstractString,
     _run_labeled(profile_cmd, "msa2profile", logs_dir)
 
     search_cmd = `$(mmseqs_bin) search $profile_db $base_db $search_result_db $tmp_dir -a`
-    threads !== nothing && (search_cmd = `$search_cmd --threads $(Int(threads))`)
+    mmseqs_threads !== nothing &&
+        (search_cmd = `$search_cmd --threads $(Int(mmseqs_threads))`)
     _run_labeled(search_cmd, "search", logs_dir)
 
     # The search results are centroid/consensus hits. `expandaln` expands those
     # hits to all cluster members, which remains Iduna's main MSA output.
     expandaln_cmd = `$(mmseqs_bin) expandaln $profile_db $base_db $search_result_db $aln_db $expanded_result_db`
-    threads !== nothing && (expandaln_cmd = `$expandaln_cmd --threads $(Int(threads))`)
+    mmseqs_threads !== nothing &&
+        (expandaln_cmd = `$expandaln_cmd --threads $(Int(mmseqs_threads))`)
     _run_labeled(expandaln_cmd, "expandaln", logs_dir)
 
     align_cmd = `$(mmseqs_bin) align $profile_db $seq_db $expanded_result_db $realigned_result_db`
-    threads !== nothing && (align_cmd = `$align_cmd --threads $(Int(threads))`)
+    mmseqs_threads !== nothing &&
+        (align_cmd = `$align_cmd --threads $(Int(mmseqs_threads))`)
     _run_labeled(align_cmd, "align", logs_dir)
 
     return (; seed_db, profile_db, seq_db, search_result_db,
@@ -868,12 +871,12 @@ function _run_expansion_workflow!(target::ResolvedTarget,
         match_ratio::Union{Nothing, Real},
         hmmbuild_symfrac::Real,
         centroids::Bool,
-        threads::Union{Nothing, Integer})
+        mmseqs_threads::Union{Nothing, Integer})
     return mktempdir(ctx.tmp_root; prefix = "mmseqs_tmp_") do tmp_dir
-        @info "Running MMseqs expansion workflow." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id pid=archived.seed_pid tmp_dir threads
+        @info "Running MMseqs expansion workflow." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id pid=archived.seed_pid tmp_dir mmseqs_threads
         # MMseqs finds candidate homologs; HMMER maps them back to seed columns.
         db_paths = _mmseqs_search(archived.sanitized_seed, mmseqs_db, ctx.db_dir,
-            tmp_dir, ctx.logs_dir; match_mode, match_ratio, threads)
+            tmp_dir, ctx.logs_dir; match_mode, match_ratio, mmseqs_threads)
         hits_tsv = joinpath(ctx.run_dir, "mmseqs_hits_raw.tsv")
         @info "Converting MMseqs hits." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id pid=archived.seed_pid hits_tsv
         _run_labeled(
@@ -942,10 +945,10 @@ function expand_msa(target::ResolvedTarget,
         match_ratio::Union{Nothing, Real} = nothing,
         hmmbuild_symfrac::Real = 0.0,
         centroids::Bool = false,
-        threads::Union{Nothing, Integer} = Threads.nthreads())
+        mmseqs_threads::Union{Nothing, Integer} = Threads.nthreads())
     0.0 <= hmmbuild_symfrac <= 1.0 ||
         error("hmmbuild_symfrac must be between 0.0 and 1.0.")
-    @info "Preparing MSA expansion." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id pid=seed.pid mmseqs_db centroids threads
+    @info "Preparing MSA expansion." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id pid=seed.pid mmseqs_db centroids mmseqs_threads
     ensure_mmseqs_db(mmseqs_db)
 
     ctx = _expansion_context(target, seed, workdir, mmseqs_db;
@@ -959,7 +962,7 @@ function expand_msa(target::ResolvedTarget,
 
     try
         run_outputs = _run_expansion_workflow!(target, ctx, archived, mmseqs_db;
-            match_mode, match_ratio, hmmbuild_symfrac, centroids, threads)
+            match_mode, match_ratio, hmmbuild_symfrac, centroids, mmseqs_threads)
         _write_step_state(ctx.run_dir, :done, ctx.identity, ctx.outputs;
             warnings = cache.cache_warnings,
             action = cache.action)

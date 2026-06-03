@@ -32,7 +32,7 @@ import JSON
             "--no-specieslist-filter",
             "--no-biomart-datasets-filter",
             "--centroids",
-            "--threads", "4",
+            "--mmseqs-threads", "4",
             "--transcript-query-retries", "3"
         ])
         @test kwargs[:workdir] == "work"
@@ -42,8 +42,20 @@ import JSON
         @test kwargs[:specieslist_filter] === false
         @test kwargs[:biomart_datasets_filter] === false
         @test kwargs[:centroids] === true
-        @test kwargs[:threads] == 4
+        @test kwargs[:mmseqs_threads] == 4
         @test kwargs[:transcript_query_retries] == 3
+    end
+
+    @testset "help documents installed app threading" begin
+        help = sprint() do io
+            Iduna.ArgParse.show_help(io, Iduna._app_arg_settings();
+                exit_when_done = false)
+        end
+        @test occursin("JULIA_NUM_THREADS=4 iduna", help)
+        @test occursin("iduna --threads=4 --", help)
+        @test occursin("julia --threads 4 --project=. -m Iduna", help)
+        @test occursin(r"Threads for MMseqs2 expansion\s+only\.", help)
+        @test !occursin("Start Julia with --threads N", help)
     end
 
     @testset "custom value parsing" begin
@@ -66,6 +78,8 @@ import JSON
     @testset "required arguments" begin
         @test_throws Iduna.ArgParse.ArgParseError Iduna._parse_app_args([
             "--mmseqs-db", "db"])
+        @test_throws Iduna.ArgParse.ArgParseError Iduna._parse_app_args([
+            "P20963", "--mmseqs-db", "db", "--threads", "4"])
     end
 
     @testset "run app writes JSON summary" begin

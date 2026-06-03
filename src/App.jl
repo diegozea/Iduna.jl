@@ -20,11 +20,21 @@ function _app_arg_settings(;
         prog = "iduna",
         description = "Build one ThorAxe-based MSA from a UniProt accession or an Ensembl transcript ID, " *
                       "optionally expanding it with MMseqs2/HMMER.",
+        epilog = """
+Julia runtime threads speed up ThorAxe PID sample scoring. For an installed app, either run:
+  JULIA_NUM_THREADS=4 iduna P20963 --mmseqs-db /path/to/db
+or pass Julia flags before the app separator:
+  iduna --threads=4 -- P20963 --mmseqs-db /path/to/db
+From a source checkout, use:
+  julia --threads 4 --project=. -m Iduna P20963 --mmseqs-db /path/to/db
+The Iduna option --mmseqs-threads controls MMseqs2 expansion only.
+""",
         usage = "iduna <UniProt-or-Ensembl-transcript-ID> [--mmseqs-db <path>] [--no-expansion] [options]",
         autofix_names = true,
         exc_handler,
         exit_after_help,
-        help_alignment_width = 36
+        help_alignment_width = 36,
+        preformatted_epilog = true
     )
     @add_arg_table! settings begin
         "id"
@@ -135,8 +145,8 @@ function _app_arg_settings(;
         metavar = "strategy"
         arg_type = String
 
-        "--threads"
-        help = "Threads for MMseqs2."
+        "--mmseqs-threads"
+        help = "Threads for MMseqs2 expansion only."
         metavar = "n"
         arg_type = Int
     end

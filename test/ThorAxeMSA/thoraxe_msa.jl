@@ -1191,6 +1191,81 @@
             @test sampled_row.n_samples == 1
             @test isfile(Iduna.ThorAxeMSA._pid_scores_path(tmp, sampled_pid))
 
+            parallel_pid = 53.5
+            parallel_lock = ReentrantLock()
+            parallel_write_lock = ReentrantLock()
+            parallel_call_kinds = Symbol[]
+            parallel_sample_threads = Int[]
+            parallel_identity_labels = String[]
+            function record_parallel_call!(kind::Symbol)
+                lock(parallel_lock)
+                try
+                    push!(parallel_call_kinds, kind)
+                    if kind === :sample
+                        push!(parallel_sample_threads, Base.Threads.threadid())
+                    end
+                finally
+                    unlock(parallel_lock)
+                end
+            end
+            parallel_thoraxe = (input_dir, run_root; identity, specieslist, phylosofs,
+                runner) -> begin
+                record_parallel_call!(specieslist === nothing ? :full : :sample)
+                specieslist === nothing || sleep(0.02)
+                lock(parallel_write_lock)
+                try
+                    write_fake_thoraxe_dir(joinpath(run_root, "thoraxe"))
+                finally
+                    unlock(parallel_write_lock)
+                end
+                nothing
+            end
+            parallel_identity = (reference_fasta, sample_fasta; logs_dir,
+                label) -> begin
+                lock(parallel_lock)
+                try
+                    push!(parallel_identity_labels, String(label))
+                finally
+                    unlock(parallel_lock)
+                end
+                mkpath(logs_dir)
+                write(joinpath(logs_dir, "$(label)_hhalign.out"), "fake\n")
+                parse(Float64, replace(String(label), "sample" => ""))
+            end
+            parallel_metadata = Iduna.ThorAxeMSA._candidate_run_metadata(
+                scoring_input, scoring_target, [parallel_pid];
+                sample_count = 4,
+                sample_fraction = 1.0,
+                sample_seed = UInt64(16),
+                requested_sample_seed = 16,
+                sampling_strategy = :independent,
+                effective_specieslist = nothing,
+                orthology = "1:1",
+                specieslist_filter = false,
+                biomart_datasets_filter = false)
+            parallel_row = Iduna.ThorAxeMSA._score_pid_candidate(
+                scoring_target, scoring_input, tmp, parallel_pid, 1, nothing;
+                sample_count = 4,
+                sample_fraction = 1.0,
+                sample_seed = UInt64(16),
+                metadata = parallel_metadata,
+                thoraxe_fn = parallel_thoraxe,
+                identity_fn = parallel_identity)
+            @test count(==(:full), parallel_call_kinds) == 1
+            @test count(==(:sample), parallel_call_kinds) == 4
+            @test sort(parallel_identity_labels) == ["sample1", "sample2", "sample3",
+                "sample4"]
+            if Base.Threads.threadpoolsize() > 1
+                @test length(unique(parallel_sample_threads)) > 1
+            end
+            @test parallel_row.mean_identity == 2.5
+            @test parallel_row.median_identity == 2.5
+            @test parallel_row.n_samples == 4
+            parallel_scores = Iduna.ThorAxeMSA.DataFrame(
+                Iduna.ThorAxeMSA.CSV.File(
+                Iduna.ThorAxeMSA._pid_scores_path(tmp, parallel_pid)))
+            @test parallel_scores.sample == 1:4
+
             common_pids = [54.0, 56.0]
             common_calls = Ref(0)
             common_thoraxe = (input_dir, run_root; identity, specieslist, phylosofs,
