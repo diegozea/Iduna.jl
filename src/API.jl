@@ -37,7 +37,10 @@ transcript_query bundle instead of fetching it again. Set `centroids=true` to
 also save the centroid-level MSA before MMseqs2 expands centroid hits to cluster
 members; the main expansion and validation still use the full expanded MSA.
 `centroids=true` requires expansion and cannot be combined with
-`no_expansion=true`.
+`no_expansion=true`. To run the repeated ThorAxe sample runs faster, start Julia
+with more than one Julia thread, for example `julia --threads 4`; Iduna uses
+those threads automatically during PID sample scoring. The `threads` keyword
+controls MMseqs2 expansion only.
 """
 function iduna(; id::Union{Nothing, AbstractString} = nothing,
         uniprot_id::Union{Nothing, AbstractString} = nothing,

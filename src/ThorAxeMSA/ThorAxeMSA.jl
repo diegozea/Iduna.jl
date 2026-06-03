@@ -8,6 +8,7 @@ import Scratch
 import SHA
 import ThorAxe
 
+using Base.Threads
 using DataFrames: DataFrame, nrow
 using MIToS.MSA: AbstractMultipleSequenceAlignment, FASTA, PIRSequences, Stockholm,
                  getannotsequence, join_msas, nsequences, read_file, sequence_id,
@@ -1817,36 +1818,12 @@ function _score_pid_candidate(target::ResolvedTarget,
         gene_id = target.ensembl_gene_id,
         transcript_id = target.transcript_id)
 
-    score_rows = NamedTuple[]
-    for sample_idx in 1:sample_count
-        @info "Scoring ThorAxe PID sample." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id pid sample_idx sample_count
-        sample_paths = _pid_sample_paths(workdir, pid, sample_idx)
-        species_file = sample_paths.species_file
-        isfile(species_file) || continue
-        _run_thoraxe_pid_msa(
-            target, input_dir, workdir, pid, species_file, sample_idx;
-            overwrite, thoraxe_fn)
-        isfile(sample_paths.fasta_path) || continue
-        identity = identity_fn(
-            candidate.fasta_path, sample_paths.fasta_path;
-            logs_dir = joinpath(_thoraxe_logs_dir(workdir), "hhalign",
-                format_pid_dir(pid)),
-            label = "sample$(sample_idx)")
-        push!(score_rows,
-            (;
-                gene_id = target.ensembl_gene_id,
-                transcript_id = target.transcript_id,
-                pid = Float64(pid),
-                pid_order,
-                sample = sample_idx,
-                sample_label = _candidate_sample_label(sample_idx),
-                identity,
-                n_sequences_reference = nsequences(candidate.msa),
-                n_sequences_sample = read_file(sample_paths.fasta_path, FASTA) |>
-                                     nsequences
-            ))
-    end
-    isempty(score_rows) && error("No PID sample scores were computed for PID $(pid).")
+    score_rows = _score_pid_samples(
+        target, input_dir, workdir, candidate, pid, pid_order;
+        sample_count,
+        overwrite,
+        thoraxe_fn,
+        identity_fn)
     CSV.write(_pid_scores_path(workdir, pid), DataFrame(score_rows))
     identities = [row.identity for row in score_rows]
     return _candidate_summary_row(
@@ -2560,6 +2537,84 @@ function _prepare_candidate_species_samples!(target::ResolvedTarget,
     return nothing
 end
 
+function _score_pid_sample(target::ResolvedTarget,
+        input_dir::AbstractString,
+        workdir::AbstractString,
+        candidate,
+        pid::Real,
+        pid_order::Integer,
+        sample_idx::Integer,
+        n_sequences_reference::Integer;
+        overwrite::Bool = false,
+        thoraxe_fn::Function = ThorAxe.thoraxe,
+        identity_fn::Function = compute_identity_against_reference)
+    @info "Scoring ThorAxe PID sample." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id pid sample_idx
+    sample_paths = _pid_sample_paths(workdir, pid, sample_idx)
+    species_file = sample_paths.species_file
+    isfile(species_file) || return nothing
+    _run_thoraxe_pid_msa(
+        target, input_dir, workdir, pid, species_file, sample_idx;
+        overwrite, thoraxe_fn)
+    isfile(sample_paths.fasta_path) || return nothing
+    identity = identity_fn(
+        candidate.fasta_path, sample_paths.fasta_path;
+        logs_dir = joinpath(_thoraxe_logs_dir(workdir), "hhalign",
+            format_pid_dir(pid)),
+        label = "sample$(sample_idx)")
+    return (;
+        gene_id = target.ensembl_gene_id,
+        transcript_id = target.transcript_id,
+        pid = Float64(pid),
+        pid_order,
+        sample = sample_idx,
+        sample_label = _candidate_sample_label(sample_idx),
+        identity,
+        n_sequences_reference,
+        n_sequences_sample = read_file(sample_paths.fasta_path, FASTA) |>
+                             nsequences
+    )
+end
+
+function _score_pid_samples(target::ResolvedTarget,
+        input_dir::AbstractString,
+        workdir::AbstractString,
+        candidate,
+        pid::Real,
+        pid_order::Integer;
+        sample_count::Integer,
+        overwrite::Bool = false,
+        thoraxe_fn::Function = ThorAxe.thoraxe,
+        identity_fn::Function = compute_identity_against_reference)
+    sample_total = Int(sample_count)
+    n_sequences_reference = nsequences(candidate.msa)
+    score_rows = Vector{Union{Nothing, NamedTuple}}(nothing, sample_total)
+
+    if sample_total == 1 || Threads.threadpoolsize() == 1
+        for sample_idx in 1:sample_total
+            score_rows[sample_idx] = _score_pid_sample(
+                target, input_dir, workdir, candidate, pid, pid_order, sample_idx,
+                n_sequences_reference;
+                overwrite,
+                thoraxe_fn,
+                identity_fn)
+        end
+    else
+        @info "Scoring ThorAxe PID samples in parallel." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id pid sample_count=sample_total julia_threads=Threads.threadpoolsize()
+        Threads.@threads :greedy for sample_idx in 1:sample_total
+            score_rows[sample_idx] = _score_pid_sample(
+                target, input_dir, workdir, candidate, pid, pid_order, sample_idx,
+                n_sequences_reference;
+                overwrite,
+                thoraxe_fn,
+                identity_fn)
+        end
+    end
+
+    rows = [row for row in score_rows if row !== nothing]
+    isempty(rows) && error("No PID sample scores were computed for PID $(pid).")
+    return rows
+end
+
 function _score_validated_pid_candidate(target::ResolvedTarget,
         input_dir::AbstractString,
         workdir::AbstractString,
@@ -2588,36 +2643,12 @@ function _score_validated_pid_candidate(target::ResolvedTarget,
             sample_count, sample_fraction, sample_seed, metadata)
     end
 
-    score_rows = NamedTuple[]
-    for sample_idx in 1:sample_count
-        @info "Scoring ThorAxe PID sample." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id pid sample_idx sample_count
-        sample_paths = _pid_sample_paths(workdir, pid, sample_idx)
-        species_file = sample_paths.species_file
-        isfile(species_file) || continue
-        _run_thoraxe_pid_msa(
-            target, input_dir, workdir, pid, species_file, sample_idx;
-            overwrite, thoraxe_fn)
-        isfile(sample_paths.fasta_path) || continue
-        identity = identity_fn(
-            candidate.fasta_path, sample_paths.fasta_path;
-            logs_dir = joinpath(_thoraxe_logs_dir(workdir), "hhalign",
-                format_pid_dir(pid)),
-            label = "sample$(sample_idx)")
-        push!(score_rows,
-            (;
-                gene_id = target.ensembl_gene_id,
-                transcript_id = target.transcript_id,
-                pid = Float64(pid),
-                pid_order,
-                sample = sample_idx,
-                sample_label = _candidate_sample_label(sample_idx),
-                identity,
-                n_sequences_reference = nsequences(candidate.msa),
-                n_sequences_sample = read_file(sample_paths.fasta_path, FASTA) |>
-                                     nsequences
-            ))
-    end
-    isempty(score_rows) && error("No PID sample scores were computed for PID $(pid).")
+    score_rows = _score_pid_samples(
+        target, input_dir, workdir, candidate, pid, pid_order;
+        sample_count,
+        overwrite,
+        thoraxe_fn,
+        identity_fn)
     CSV.write(_pid_scores_path(workdir, pid), DataFrame(score_rows))
     identities = [row.identity for row in score_rows]
     return _candidate_summary_row(

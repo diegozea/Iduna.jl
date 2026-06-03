@@ -100,6 +100,17 @@ candidate forward. In that mode `result.thoraxe_msa.seeds`,
 `nothing` for a missing expansion slot; use `pid=` or `index=` with
 `load_seed_msa` and `load_expanded_msa` to select one.
 
+The repeated ThorAxe runs used for PID sample scoring can run at the same time.
+Start Julia with more than one Julia thread before running Iduna:
+
+```bash
+julia --threads 4 --project=. -m Iduna P20963 --mmseqs-db /path/to/mmseqs/uniref_db
+```
+
+You can also set `JULIA_NUM_THREADS=4` before starting Julia. This affects the
+ThorAxe sampling step. The app option `--threads` is different: it controls
+MMseqs2 during the expansion step.
+
 If the ThorAxe `transcript_query` bundle has already been created, pass it with
 `thoraxe_input_dir`. Iduna copies that bundle into `workdir/thoraxe_input` and
 continues with the same ThorAxe MSA and PID seed stages. The copied bundle is
