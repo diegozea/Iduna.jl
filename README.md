@@ -46,12 +46,12 @@ The repeated ThorAxe runs used for PID sample scoring can run at the same time.
 Start Julia with more than one Julia thread before running Iduna:
 
 ```bash
-julia --threads 4 --project=. -m Iduna P20963 --mmseqs-db /path/to/mmseqs/db
+julia --threads 4 --project=. -m Iduna P20963 --mmseqs-db /path/to/mmseqs/db --mmseqs-threads 8
 ```
 
 You can also set `JULIA_NUM_THREADS=4` before starting Julia. This affects the
-ThorAxe sampling step. The app option `--threads` is different: it controls
-MMseqs2 during the expansion step.
+ThorAxe sampling step. The app option `--mmseqs-threads` is different: it
+controls MMseqs2 during the expansion step.
 
 To stop after the ThorAxe MSA stage, use `no_expansion=true` in Julia or
 `--no-expansion` in the app. In that mode `mmseqs_db` is not required,

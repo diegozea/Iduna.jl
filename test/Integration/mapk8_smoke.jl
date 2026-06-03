@@ -86,7 +86,7 @@
                 mmseqs_db,
                 overwrite = true,
                 pid_thresholds = [10.0],
-                threads = 1,
+                mmseqs_threads = 1,
                 transcript_query_retries = 3)
             return checked_mapk8_smoke_result(result)
         end

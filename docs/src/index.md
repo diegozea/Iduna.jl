@@ -104,12 +104,12 @@ The repeated ThorAxe runs used for PID sample scoring can run at the same time.
 Start Julia with more than one Julia thread before running Iduna:
 
 ```bash
-julia --threads 4 --project=. -m Iduna P20963 --mmseqs-db /path/to/mmseqs/uniref_db
+julia --threads 4 --project=. -m Iduna P20963 --mmseqs-db /path/to/mmseqs/uniref_db --mmseqs-threads 8
 ```
 
 You can also set `JULIA_NUM_THREADS=4` before starting Julia. This affects the
-ThorAxe sampling step. The app option `--threads` is different: it controls
-MMseqs2 during the expansion step.
+ThorAxe sampling step. The app option `--mmseqs-threads` is different: it
+controls MMseqs2 during the expansion step.
 
 If the ThorAxe `transcript_query` bundle has already been created, pass it with
 `thoraxe_input_dir`. Iduna copies that bundle into `workdir/thoraxe_input` and

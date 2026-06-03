@@ -260,14 +260,16 @@
         @test Iduna.MSAExpansion._step_state_unreadable_message(nothing) ==
               "state file disappeared while reading"
         hits_fasta = outputs.hits_fasta
+        @test_throws MethodError Iduna.MSAExpansion.expand_msa(
+            target, seed, tmp; mmseqs_db = db, threads = 1)
 
         cached = @test_logs (:info, r"Reusing cached MSA expansion") match_mode=:any Iduna.MSAExpansion.expand_msa(
-            target, seed, tmp; mmseqs_db = db, threads = 1)
-        cached_with_new_threads = Iduna.MSAExpansion.expand_msa(
-            target, seed, tmp; mmseqs_db = db, threads = 8)
+            target, seed, tmp; mmseqs_db = db, mmseqs_threads = 1)
+        cached_with_new_mmseqs_threads = Iduna.MSAExpansion.expand_msa(
+            target, seed, tmp; mmseqs_db = db, mmseqs_threads = 8)
         hits_msa = Iduna.MSAExpansion.read_file(hits_fasta, Iduna.MSAExpansion.FASTA)
         @test cached.status === :skipped
-        @test cached_with_new_threads.status === :skipped
+        @test cached_with_new_mmseqs_threads.status === :skipped
         @test cached.n_hits == Iduna.MSAExpansion.nsequences(hits_msa)
         @test cached.n_hits == 3
         @test cached.n_new_hits == 2
@@ -446,7 +448,7 @@
             summary_path = joinpath(tmp, "seed_summary.csv")
         )
         @test_throws Base.ProcessFailedException Iduna.MSAExpansion.expand_msa(
-            target, stale_failure_seed, tmp; mmseqs_db = db, threads = 1)
+            target, stale_failure_seed, tmp; mmseqs_db = db, mmseqs_threads = 1)
         stale_failure_state = Iduna.MSAExpansion._read_step_state(stale_failure_dir)
         @test stale_failure_state.status == "failed"
         @test occursin("no stage_state.json", stale_failure_state.warnings[1])
@@ -468,7 +470,7 @@
         success_db = build_self_hit_mmseqs_db(joinpath(tmp, "self_hit_mmseqs"))
         success = Iduna.MSAExpansion.expand_msa(
             target, success_seed, tmp; mmseqs_db = success_db, centroids = true,
-            threads = 1)
+            mmseqs_threads = 1)
         @test success.status === :ok
         @test success.n_new_hits == 0
         @test isfile(joinpath(success.run_dir, "centroid_msa",

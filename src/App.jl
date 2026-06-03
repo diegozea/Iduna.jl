@@ -135,8 +135,8 @@ function _app_arg_settings(;
         metavar = "strategy"
         arg_type = String
 
-        "--threads"
-        help = "Threads for MMseqs2 expansion only. Start Julia with --threads N for parallel ThorAxe sample scoring."
+        "--mmseqs-threads"
+        help = "Threads for MMseqs2 expansion. Start Julia with --threads N for parallel ThorAxe sample scoring."
         metavar = "n"
         arg_type = Int
     end

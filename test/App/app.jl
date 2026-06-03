@@ -32,7 +32,7 @@ import JSON
             "--no-specieslist-filter",
             "--no-biomart-datasets-filter",
             "--centroids",
-            "--threads", "4",
+            "--mmseqs-threads", "4",
             "--transcript-query-retries", "3"
         ])
         @test kwargs[:workdir] == "work"
@@ -42,7 +42,7 @@ import JSON
         @test kwargs[:specieslist_filter] === false
         @test kwargs[:biomart_datasets_filter] === false
         @test kwargs[:centroids] === true
-        @test kwargs[:threads] == 4
+        @test kwargs[:mmseqs_threads] == 4
         @test kwargs[:transcript_query_retries] == 3
     end
 
@@ -66,6 +66,8 @@ import JSON
     @testset "required arguments" begin
         @test_throws Iduna.ArgParse.ArgParseError Iduna._parse_app_args([
             "--mmseqs-db", "db"])
+        @test_throws Iduna.ArgParse.ArgParseError Iduna._parse_app_args([
+            "P20963", "--mmseqs-db", "db", "--threads", "4"])
     end
 
     @testset "run app writes JSON summary" begin

@@ -938,6 +938,7 @@ import JSON
                 mmseqs_db = "db",
                 workdir = joinpath(tmp, "centroids_forwarding"),
                 centroids = true,
+                mmseqs_threads = 7,
                 _resolve_target = (args...; kwargs...) -> target,
                 _build_thoraxe_msa = (args...; kwargs...) -> thoraxe,
                 _expand_msa = (
@@ -950,7 +951,12 @@ import JSON
             @test result.expansions[1].match_stockholm == expansion.match_stockholm
             @test captured[][:centroids] === true
             @test captured[][:mmseqs_db] == "db"
+            @test captured[][:mmseqs_threads] == 7
         end
+    end
+
+    @testset "generic threads keyword is not accepted" begin
+        @test_throws MethodError Iduna.iduna(; id = "Q13148", threads = 1)
     end
 
     @testset "PID sampling option forwarding" begin

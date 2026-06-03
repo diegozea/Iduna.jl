@@ -39,8 +39,8 @@ members; the main expansion and validation still use the full expanded MSA.
 `centroids=true` requires expansion and cannot be combined with
 `no_expansion=true`. To run the repeated ThorAxe sample runs faster, start Julia
 with more than one Julia thread, for example `julia --threads 4`; Iduna uses
-those threads automatically during PID sample scoring. The `threads` keyword
-controls MMseqs2 expansion only.
+those threads automatically during PID sample scoring. The `mmseqs_threads`
+keyword controls MMseqs2 expansion only.
 """
 function iduna(; id::Union{Nothing, AbstractString} = nothing,
         uniprot_id::Union{Nothing, AbstractString} = nothing,
@@ -69,7 +69,7 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
         match_ratio::Union{Nothing, Real} = nothing,
         hmmbuild_symfrac::Real = 0.0,
         centroids::Bool = false,
-        threads::Union{Nothing, Integer} = Threads.nthreads(),
+        mmseqs_threads::Union{Nothing, Integer} = Threads.nthreads(),
         _resolve_target::Function = IDMapping.resolve_target,
         _build_thoraxe_msa::Function = ThorAxeMSA.build_thoraxe_msa,
         _expand_msa::Function = MSAExpansion.expand_msa,
@@ -128,7 +128,7 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
                         match_ratio,
                         hmmbuild_symfrac,
                         centroids,
-                        threads))
+                        mmseqs_threads))
             end
         else
             @info "Skipping MSA expansion." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id

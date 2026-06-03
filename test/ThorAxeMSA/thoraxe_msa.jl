@@ -1193,6 +1193,7 @@
 
             parallel_pid = 53.5
             parallel_lock = ReentrantLock()
+            parallel_write_lock = ReentrantLock()
             parallel_call_kinds = Symbol[]
             parallel_sample_threads = Int[]
             parallel_identity_labels = String[]
@@ -1211,7 +1212,12 @@
                 runner) -> begin
                 record_parallel_call!(specieslist === nothing ? :full : :sample)
                 specieslist === nothing || sleep(0.02)
-                write_fake_thoraxe_dir(joinpath(run_root, "thoraxe"))
+                lock(parallel_write_lock)
+                try
+                    write_fake_thoraxe_dir(joinpath(run_root, "thoraxe"))
+                finally
+                    unlock(parallel_write_lock)
+                end
                 nothing
             end
             parallel_identity = (reference_fasta, sample_fasta; logs_dir,
