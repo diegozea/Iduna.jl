@@ -43,15 +43,28 @@ in `pid_thresholds` order. The default is 45 samples, 80% of non-reference
 species per sample, and a random `pid_sample_seed` recorded in `result.json`.
 
 The repeated ThorAxe runs used for PID sample scoring can run at the same time.
-Start Julia with more than one Julia thread before running Iduna:
+For an installed `iduna` app, set Julia threads with an environment variable:
+
+```bash
+JULIA_NUM_THREADS=4 iduna P20963 --mmseqs-db /path/to/mmseqs/db --mmseqs-threads 8
+```
+
+or pass Julia flags before the app separator:
+
+```bash
+iduna --threads=4 -- P20963 --mmseqs-db /path/to/mmseqs/db --mmseqs-threads 8
+```
+
+From a source checkout, start Julia with more than one Julia thread:
 
 ```bash
 julia --threads 4 --project=. -m Iduna P20963 --mmseqs-db /path/to/mmseqs/db --mmseqs-threads 8
 ```
 
-You can also set `JULIA_NUM_THREADS=4` before starting Julia. This affects the
-ThorAxe sampling step. The app option `--mmseqs-threads` is different: it
-controls MMseqs2 during the expansion step.
+This affects the ThorAxe sampling step. The app option `--mmseqs-threads` is
+different: it controls MMseqs2 during the expansion step. Do not put
+`--threads` after the Iduna arguments; it is a Julia runtime flag, not an Iduna
+option.
 
 To stop after the ThorAxe MSA stage, use `no_expansion=true` in Julia or
 `--no-expansion` in the app. In that mode `mmseqs_db` is not required,

@@ -46,6 +46,18 @@ import JSON
         @test kwargs[:transcript_query_retries] == 3
     end
 
+    @testset "help documents installed app threading" begin
+        help = sprint() do io
+            Iduna.ArgParse.show_help(io, Iduna._app_arg_settings();
+                exit_when_done = false)
+        end
+        @test occursin("JULIA_NUM_THREADS=4 iduna", help)
+        @test occursin("iduna --threads=4 --", help)
+        @test occursin("julia --threads 4 --project=. -m Iduna", help)
+        @test occursin(r"Threads for MMseqs2 expansion\s+only\.", help)
+        @test !occursin("Start Julia with --threads N", help)
+    end
+
     @testset "custom value parsing" begin
         kwargs = Iduna._parse_app_args([
             "P20963",
