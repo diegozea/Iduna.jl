@@ -41,14 +41,13 @@
 
     plain = Iduna.Utils.HTTP.Response(200; body = "plain body")
     @test Iduna.Utils.decode_body(plain) == "plain body"
+    @test Iduna.Utils._body_bytes("plain body") == Vector{UInt8}(codeunits("plain body"))
     gzip_body = UInt8[
     31, 139, 8, 0, 0, 0, 0, 0, 0, 3, 75, 175, 202, 44, 40, 72, 77, 81, 72,
     202, 79, 169, 4, 0, 196, 225, 85, 59, 12, 0, 0, 0
 ]
     gzipped = Iduna.Utils.HTTP.Response(
-        200;
-        headers = ["Content-Encoding" => "gzip"],
-        body = gzip_body)
+        200, ["Content-Encoding" => "gzip"]; body = gzip_body)
     @test Iduna.Utils.decode_body(gzipped) == "gzipped body"
 
     @testset "HTTP download retries" begin
