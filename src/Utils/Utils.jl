@@ -372,13 +372,14 @@ function _write_stage_state(stage_dir::AbstractString;
         exception = nothing,
         action::Union{Nothing, Symbol, AbstractString} = nothing,
         workdir::AbstractString = stage_dir,
+        preserve_started_at::Bool = false,
         extra = NamedTuple())
     mkpath(stage_dir)
     state_path = _stage_state_path(stage_dir)
     hash = _identity_hash(identity)
     timestamp = string(now(UTC))
     started_at = _stage_existing_started_at(stage_dir, hash)
-    if started_at === nothing || status === :running
+    if started_at === nothing || (status === :running && !preserve_started_at)
         started_at = timestamp
     end
     finished_at = status in (:done, :failed, :skipped) ? timestamp : nothing

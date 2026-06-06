@@ -86,8 +86,11 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
     failed_stage = "prepare_output_dir"
 
     try
-        @info "Preparing Iduna output directory." input_id=primary workdir output_dir overwrite
         root = Utils.prepare_output_dir(primary; workdir, output_dir, overwrite)
+        prepared_details = overwrite ?
+                           (; input_id = primary, workdir = root, overwrite) :
+                           (; input_id = primary, workdir = root)
+        @info "Prepared Iduna output directory." prepared_details...
 
         failed_stage = "resolve_target"
         target = _resolve_target_stage(primary, root;
@@ -100,7 +103,7 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
             resolver = _resolve_target)
 
         failed_stage = "thoraxe_msa"
-        @info "Building ThorAxe MSA." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id workdir=root
+        @info "Starting ThorAxe pipeline."
         thoraxe = _build_thoraxe_msa(target, root;
             pid_thresholds,
             specieslist,
@@ -119,7 +122,7 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
             failed_stage = "msa_expansion"
             n_seeds = length(thoraxe.seeds)
             for (index, seed) in enumerate(thoraxe.seeds)
-                @info "Expanding MSA seed." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id pid=seed.pid seed_index=index n_seeds
+                @info "Expanding MSA seed." seed_index=index n_seeds
                 push!(expansions,
                     _expand_msa(target, seed, root;
                         mmseqs_db,
@@ -131,11 +134,11 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
                         mmseqs_threads))
             end
         else
-            @info "Skipping MSA expansion." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id
+            @info "Skipping MSA expansion."
         end
 
         failed_stage = "validation"
-        @info "Validating Iduna results." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id n_seeds=length(thoraxe.seeds)
+        @info "Validating Iduna results." n_seeds=length(thoraxe.seeds)
         for (index, seed) in enumerate(thoraxe.seeds)
             push!(validations,
                 _call_validate_results(_validate_results, target, seed,
@@ -175,10 +178,10 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
             status
         )
         result = Utils._relative_result_paths(result)
-        @info "Writing Iduna result artifact." input_id=primary status=result.status result_path=joinpath(
+        @info "Writing Iduna result artifact." result_path=joinpath(
             root, "result.json")
         Utils.write_json(joinpath(root, "result.json"), Utils.result_summary(result))
-        @info "Iduna pipeline completed." input_id=primary status=result.status workdir=root
+        @info "Iduna pipeline completed." status=result.status
         return result
     catch err
         if root !== nothing
@@ -490,7 +493,7 @@ function _resolve_target_stage(primary::AbstractString, workdir::AbstractString;
         stage_label = "target")
     cached_target = cache.reusable ? _read_cached_target(workdir) : nothing
     if cached_target !== nothing
-        @info "Reusing cached target metadata." input_id=primary workdir
+        @info "Reusing cached target metadata."
         Utils._write_stage_state(stage_dir;
             stage = "target",
             stage_key = "target",
@@ -515,7 +518,7 @@ function _resolve_target_stage(primary::AbstractString, workdir::AbstractString;
         action,
         workdir)
     try
-        @info "Resolving target identifiers." input_id=primary workdir
+        @info "Resolving target identifiers."
         target = resolver(primary;
             workdir,
             uniprot_id = supplied_uniprot,
@@ -523,7 +526,7 @@ function _resolve_target_stage(primary::AbstractString, workdir::AbstractString;
             ensembl_protein_id,
             transcript_id = disambiguating_transcript,
             species)
-        @info "Writing target metadata." input_id=primary gene_id=target.ensembl_gene_id transcript_id=target.transcript_id
+        @info "Writing target metadata." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id
         Utils.write_json(outputs.target_json, _target_summary(target, workdir))
         Utils._write_stage_state(stage_dir;
             stage = "target",
