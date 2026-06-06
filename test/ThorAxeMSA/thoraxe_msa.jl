@@ -947,6 +947,7 @@
         withenv("CI" => nothing, "GITHUB_ACTIONS" => nothing) do
             @test !Iduna.ThorAxeMSA._terminal_progress_enabled(IOBuffer())
         end
+        @test !Iduna.ThorAxeMSA._io_is_tty(IOContext(IOBuffer()))
 
         hidden_progress_path = joinpath(tmp, "hidden_progress.log")
         open(hidden_progress_path, "w") do progress_io
