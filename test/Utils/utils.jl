@@ -230,6 +230,22 @@
             outputs = stage_outputs,
             action = :run,
             workdir)
+        running_state = Iduna.Utils._read_stage_state(stage_dir)
+        sleep(0.01)
+        Iduna.Utils._write_stage_state(stage_dir;
+            stage = "example",
+            stage_key = "example:stage",
+            status = :running,
+            identity = stage_identity,
+            outputs = stage_outputs,
+            action = :run,
+            workdir,
+            preserve_started_at = true,
+            extra = (; progress = (; status = "running")))
+        refreshed_state = Iduna.Utils._read_stage_state(stage_dir)
+        @test refreshed_state["started_at"] == running_state["started_at"]
+        @test refreshed_state["updated_at"] != running_state["updated_at"]
+        @test refreshed_state["progress"]["status"] == "running"
         running_stage = Iduna.Utils._classify_stage_state(
             stage_dir, stage_identity, stage_outputs; stage_label = "example")
         @test running_stage.status === :unfinished

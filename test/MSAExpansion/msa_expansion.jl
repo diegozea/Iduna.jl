@@ -84,8 +84,15 @@
         @test noisy_filtered_hits == [("hit", "ACD"), ("new_hit", "ACDG")]
 
         logs_dir = joinpath(tmp, "run_logs")
-        @test Iduna.MSAExpansion._run_labeled(
-            `sh -c "printf msa-out; printf msa-err >&2"`, "mock", logs_dir) === nothing
+        run_labeled_logs,
+        _ = Test.collect_test_logs() do
+            @test Iduna.MSAExpansion._run_labeled(
+                `sh -c "printf msa-out; printf msa-err >&2"`, "mock",
+                logs_dir) === nothing
+        end
+        @test isempty([log
+                       for log in run_labeled_logs
+                       if log.message == "Running MSA expansion command."])
         @test read(joinpath(logs_dir, "mock_stdout.log"), String) == "msa-out"
         @test read(joinpath(logs_dir, "mock_stderr.log"), String) == "msa-err"
 
@@ -468,9 +475,44 @@
             summary_path = joinpath(tmp, "seed_summary.csv")
         )
         success_db = build_self_hit_mmseqs_db(joinpath(tmp, "self_hit_mmseqs"))
-        success = Iduna.MSAExpansion.expand_msa(
-            target, success_seed, tmp; mmseqs_db = success_db, centroids = true,
-            mmseqs_threads = 1)
+        success_logs,
+        success = Test.collect_test_logs() do
+            Iduna.MSAExpansion.expand_msa(
+                target, success_seed, tmp; mmseqs_db = success_db, centroids = true,
+                mmseqs_threads = 1)
+        end
+        @test isempty([log
+                       for log in success_logs
+                       if log.message in ("Preparing MSA expansion directories.",
+            "Archiving MSA expansion seed.",
+            "Converting MMseqs hits.",
+            "Writing MSA expansion hits.",
+            "Building seed HMM.",
+            "Aligning MSA expansion hits.",
+            "Writing expanded alignment outputs.",
+            "Writing centroid MSA.")])
+        preparing_log = only([log
+                              for log in success_logs
+                              if log.message == "Preparing MSA expansion."])
+        preparing_kwargs = Dict(preparing_log.kwargs)
+        @test preparing_kwargs[:pid] == 60.0
+        @test haskey(preparing_kwargs, :mmseqs_db)
+        @test haskey(preparing_kwargs, :centroids)
+        @test !haskey(preparing_kwargs, :mmseqs_threads)
+        workflow_log = only([log
+                             for log in success_logs
+                             if log.message == "Running MMseqs expansion workflow."])
+        workflow_kwargs = Dict(workflow_log.kwargs)
+        @test workflow_kwargs[:mmseqs_threads] == 1
+        @test !haskey(workflow_kwargs, :pid)
+        @test !haskey(workflow_kwargs, :tmp_dir)
+        completion_log = only([log
+                               for log in success_logs
+                               if log.message == "MSA expansion completed."])
+        completion_kwargs = Dict(completion_log.kwargs)
+        @test completion_kwargs[:pid] == 60.0
+        @test completion_kwargs[:n_new_hits] == 0
+        @test !haskey(completion_kwargs, :run_dir)
         @test success.status === :ok
         @test success.n_new_hits == 0
         @test isfile(joinpath(success.run_dir, "centroid_msa",

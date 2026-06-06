@@ -405,13 +405,19 @@
             records_without_reference_overlap, "ENSG", "ENST")
 
         independent_workdir = joinpath(tmp, "independent")
-        Iduna.ThorAxeMSA._prepare_candidate_species_samples!(
-            target, joinpath(tmp, "input"), independent_workdir,
-            [first(records_without_reference_overlap)], nothing, :independent;
-            sample_count = 1,
-            sample_fraction = 1.0,
-            sample_seed = UInt64(7),
-            overwrite = true)
+        independent_logs,
+        _ = Test.collect_test_logs() do
+            Iduna.ThorAxeMSA._prepare_candidate_species_samples!(
+                target, joinpath(tmp, "input"), independent_workdir,
+                [first(records_without_reference_overlap)], nothing, :independent;
+                sample_count = 1,
+                sample_fraction = 1.0,
+                sample_seed = UInt64(7),
+                overwrite = true)
+        end
+        @test isempty([log
+                       for log in independent_logs
+                       if log.message == "Preparing common ThorAxe PID species samples."])
         independent_species_file = Iduna.ThorAxeMSA._pid_sample_paths(
             independent_workdir, 10.0, 1).species_file
         @test isfile(independent_species_file)
@@ -473,12 +479,30 @@
                     species = ["homo_sapiens", "mus_musculus"]),
                 validation = invalid)
         ]
-        Iduna.ThorAxeMSA._prepare_candidate_species_samples!(
-            target, joinpath(tmp, "input"), tmp, common_records, nothing, :common;
-            sample_count = 1,
-            sample_fraction = 1.0,
-            sample_seed = UInt64(7),
-            overwrite = true)
+        common_logs,
+        _ = Test.collect_test_logs() do
+            Iduna.ThorAxeMSA._prepare_candidate_species_samples!(
+                target, joinpath(tmp, "input"), tmp, common_records, nothing, :common;
+                sample_count = 1,
+                sample_fraction = 1.0,
+                sample_seed = UInt64(7),
+                overwrite = true)
+        end
+        common_info = only([log
+                            for log in common_logs
+                            if log.message ==
+                               "Preparing common ThorAxe PID species samples."])
+        common_info_kwargs = Dict(common_info.kwargs)
+        @test common_info_kwargs[:n_common_species] == 3
+        @test !haskey(common_info_kwargs, :sample_count)
+        common_warning = only([log
+                               for log in common_logs
+                               if log.message ==
+                                  "Common ThorAxe PID species list is small; consider sampling_strategy=:input or :independent."])
+        common_warning_kwargs = Dict(common_warning.kwargs)
+        @test common_warning_kwargs[:n_common_species] == 3
+        @test common_warning_kwargs[:warning_threshold] == 6
+        @test !haskey(common_warning_kwargs, :sample_count)
         canonical = Iduna.ThorAxeMSA._shared_sample_species_file(tmp, 1)
         common_species = split(chomp(read(canonical, String)), '\n')
         @test first(common_species) == "homo_sapiens"
@@ -490,6 +514,56 @@
             @test read(link, String) == read(canonical, String)
         end
         @test !ispath(Iduna.ThorAxeMSA._pid_sample_paths(tmp, 30.0, 1).species_file)
+
+        provided_logs,
+        _ = Test.collect_test_logs() do
+            Iduna.ThorAxeMSA._prepare_candidate_species_samples!(
+                target, joinpath(tmp, "input"), joinpath(tmp, "provided_common"),
+                common_records, "homo_sapiens,mus_musculus", :common;
+                sample_count = 1,
+                sample_fraction = 1.0,
+                sample_seed = UInt64(8),
+                overwrite = true)
+        end
+        provided_warning = only([log
+                                 for log in provided_logs
+                                 if occursin("provided specieslist",
+            String(log.message))])
+        @test Dict(provided_warning.kwargs)[:n_common_species] == 3
+
+        wide_species = ["homo_sapiens", "mus_musculus", "danio_rerio",
+            "xenopus_tropicalis", "gallus_gallus", "canis_lupus", "bos_taurus"]
+        wide_records = [
+            (;
+                pid = 40.0,
+                candidate = (; msa, species = wide_species),
+                validation = eligible),
+            (;
+                pid = 50.0,
+                candidate = (; msa, species = wide_species),
+                validation = eligible)
+        ]
+        wide_logs,
+        _ = Test.collect_test_logs() do
+            Iduna.ThorAxeMSA._prepare_candidate_species_samples!(
+                target, joinpath(tmp, "input"), joinpath(tmp, "wide_common"),
+                wide_records, nothing, :common;
+                sample_count = 1,
+                sample_fraction = 1.0,
+                sample_seed = UInt64(9),
+                overwrite = true)
+        end
+        wide_info = only([log
+                          for log in wide_logs
+                          if log.message ==
+                             "Preparing common ThorAxe PID species samples."])
+        wide_info_kwargs = Dict(wide_info.kwargs)
+        @test wide_info_kwargs[:n_common_species] == 7
+        @test !haskey(wide_info_kwargs, :sample_count)
+        @test isempty([log
+                       for log in wide_logs
+                       if occursin("Common ThorAxe PID species list is small",
+            String(log.message))])
     end
 
     mktempdir() do tmp
@@ -518,13 +592,25 @@
                     species = ["homo_sapiens", "mus_musculus"]),
                 validation = (; eligible = true))
         ]
-        Iduna.ThorAxeMSA._prepare_candidate_species_samples!(
-            target, joinpath(tmp, "input"), tmp, records,
-            "homo_sapiens,mus_musculus,danio_rerio", :input;
-            sample_count = 1,
-            sample_fraction = 1.0,
-            sample_seed = UInt64(9),
-            overwrite = true)
+        input_logs,
+        _ = Test.collect_test_logs() do
+            Iduna.ThorAxeMSA._prepare_candidate_species_samples!(
+                target, joinpath(tmp, "input"), tmp, records,
+                "homo_sapiens,mus_musculus,danio_rerio", :input;
+                sample_count = 1,
+                sample_fraction = 1.0,
+                sample_seed = UInt64(9),
+                overwrite = true)
+        end
+        @test isempty([log
+                       for log in input_logs
+                       if log.message == "Preparing common ThorAxe PID species samples."])
+        input_info = only([log
+                           for log in input_logs
+                           if log.message == "Preparing input ThorAxe PID species samples."])
+        input_info_kwargs = Dict(input_info.kwargs)
+        @test input_info_kwargs[:n_species] == 3
+        @test !haskey(input_info_kwargs, :sample_count)
         canonical = Iduna.ThorAxeMSA._shared_sample_species_file(tmp, 1)
         @test Set(split(chomp(read(canonical, String)), '\n')) ==
               Set(["homo_sapiens", "mus_musculus", "danio_rerio"])
@@ -783,17 +869,162 @@
     mktempdir() do tmp
         stdout_log = joinpath(tmp, "stdout.log")
         stderr_log = joinpath(tmp, "stderr.log")
-        Iduna.ThorAxeMSA._run_logged_command(
-            `$(Base.julia_cmd()) --startup-file=no -e "println(\"ok\")"`,
-            stdout_log,
-            stderr_log)
+        quiet_terminal_path = joinpath(tmp, "quiet_terminal_stdout.log")
+        open(quiet_terminal_path, "w") do terminal_io
+            redirect_stdout(terminal_io) do
+                Iduna.ThorAxeMSA._run_logged_command(
+                    `$(Base.julia_cmd()) --startup-file=no -e "println(\"ok\")"`,
+                    stdout_log,
+                    stderr_log)
+            end
+        end
         @test read(stdout_log, String) == "ok\n"
+        @test isempty(read(quiet_terminal_path, String))
         @test isempty(read(stderr_log, String))
+
+        live_stdout_path = joinpath(tmp, "live_process_stdout.log")
+        live_stderr_path = joinpath(tmp, "live_process_stderr.log")
+        open(live_stdout_path, "w") do live_stdout_io
+            open(live_stderr_path, "w") do live_stderr_io
+                redirect_stdout(live_stdout_io) do
+                    redirect_stderr(live_stderr_io) do
+                        Iduna.ThorAxeMSA._run_logged_command(
+                            `sh -c "printf live"`,
+                            joinpath(tmp, "tee_stdout.log"),
+                            joinpath(tmp, "tee_stderr.log");
+                            live_stdout = true)
+                    end
+                end
+            end
+        end
+        @test isempty(read(live_stdout_path, String))
+        @test read(live_stderr_path, String) == "live"
+        @test read(joinpath(tmp, "tee_stdout.log"), String) == "live"
+        @test isempty(read(joinpath(tmp, "tee_stderr.log"), String))
+
+        query_runner = Iduna.ThorAxeMSA._transcript_query_thoraxe_runner(
+            joinpath(tmp, "query_stdout.log"),
+            joinpath(tmp, "query_stderr.log"))
+        query_stdout_path = joinpath(tmp, "query_process_stdout.log")
+        query_stderr_path = joinpath(tmp, "query_process_stderr.log")
+        open(query_stdout_path, "w") do query_stdout_io
+            open(query_stderr_path, "w") do query_stderr_io
+                redirect_stdout(query_stdout_io) do
+                    redirect_stderr(query_stderr_io) do
+                        query_runner(`sh -c "printf query-live"`)
+                    end
+                end
+            end
+        end
+        @test isempty(read(query_stdout_path, String))
+        @test read(query_stderr_path, String) == "query-live"
+        @test read(joinpath(tmp, "query_stdout.log"), String) == "query-live"
+        @test isempty(read(joinpath(tmp, "query_stderr.log"), String))
+
+        query_spinner_path = joinpath(tmp, "query_spinner_stderr.log")
+        open(query_spinner_path, "w") do spinner_io
+            redirect_stderr(spinner_io) do
+                Iduna.ThorAxeMSA._run_logged_command(
+                    `sh -c "sleep 0.1; printf query-spinner"`,
+                    joinpath(tmp, "query_spinner_stdout.log"),
+                    joinpath(tmp, "query_spinner_command_stderr.log");
+                    live_stdout = true,
+                    progress_desc = "Running ThorAxe transcript_query: ",
+                    progress_enabled = true)
+            end
+        end
+        query_spinner_text = read(query_spinner_path, String)
+        @test Iduna.ThorAxeMSA._TRANSCRIPT_QUERY_SPINNER_INTERVAL_SECONDS ≈ 1 / 3
+        @test occursin("Running ThorAxe transcript_query", query_spinner_text)
+        @test !occursin("query-spinner", query_spinner_text)
+        @test read(joinpath(tmp, "query_spinner_stdout.log"), String) ==
+              "query-spinner"
+        @test isempty(read(joinpath(tmp, "query_spinner_command_stderr.log"), String))
+
+        withenv("CI" => "true", "GITHUB_ACTIONS" => nothing) do
+            @test !Iduna.ThorAxeMSA._terminal_progress_enabled(IOBuffer())
+        end
+        withenv("CI" => nothing, "GITHUB_ACTIONS" => nothing) do
+            @test !Iduna.ThorAxeMSA._terminal_progress_enabled(IOBuffer())
+        end
+
+        hidden_progress_path = joinpath(tmp, "hidden_progress.log")
+        open(hidden_progress_path, "w") do progress_io
+            Iduna.ThorAxeMSA._run_logged_command(
+                `sh -c "printf hidden"`,
+                joinpath(tmp, "hidden_stdout.log"),
+                joinpath(tmp, "hidden_stderr.log");
+                progress_desc = "Hidden progress: ",
+                progress_output = progress_io)
+        end
+        @test isempty(read(hidden_progress_path, String))
+        @test read(joinpath(tmp, "hidden_stdout.log"), String) == "hidden"
+
+        spinner_path = joinpath(tmp, "spinner.log")
+        open(spinner_path, "w") do progress_io
+            Iduna.ThorAxeMSA._run_logged_command(
+                `sh -c "sleep 0.2; printf spinner"`,
+                joinpath(tmp, "spinner_stdout.log"),
+                joinpath(tmp, "spinner_stderr.log");
+                progress_desc = "Spinner progress: ",
+                progress_output = progress_io,
+                progress_enabled = true)
+        end
+        @test occursin("Spinner progress", read(spinner_path, String))
+        @test read(joinpath(tmp, "spinner_stdout.log"), String) == "spinner"
+
+        failed_spinner_path = joinpath(tmp, "failed_spinner.log")
+        open(failed_spinner_path, "w") do progress_io
+            @test_throws ErrorException Iduna.ThorAxeMSA._run_logged_command(
+                `sh -c "sleep 0.1; exit 2"`,
+                joinpath(tmp, "failed_spinner_stdout.log"),
+                joinpath(tmp, "failed_spinner_stderr.log");
+                progress_desc = "Failing progress: ",
+                progress_output = progress_io,
+                progress_enabled = true)
+        end
+        @test occursin("External command stopped",
+            read(failed_spinner_path, String))
+
+        held_stdout_log = joinpath(tmp, "held_stdout.log")
+        held_stderr_log = joinpath(tmp, "held_stderr.log")
+        started = time()
+        Iduna.ThorAxeMSA._run_logged_command(
+            `sh -c "exec 3>&1; printf held; sleep 4 >&3 &"`,
+            held_stdout_log,
+            held_stderr_log)
+        @test time() - started < 2.0
+        @test read(held_stdout_log, String) == "held"
+        @test isempty(read(held_stderr_log, String))
 
         @test_throws ErrorException Iduna.ThorAxeMSA._run_logged_command(
             `sh -c "exit 2"`,
             joinpath(tmp, "failed_stdout.log"),
             joinpath(tmp, "failed_stderr.log"))
+
+        query_workdir = joinpath(tmp, "query")
+        tmp_gene_dir = joinpath(query_workdir, "ENSG00000000001")
+        mkpath(joinpath(tmp_gene_dir, "Ensembl"))
+        write(joinpath(tmp_gene_dir, "Ensembl", "ensembl_version.csv"), "version\n")
+        write(joinpath(tmp_gene_dir, "Ensembl", "tree.nh"), "(a,b);\n")
+        missing_outputs = Iduna.ThorAxeMSA._missing_transcript_query_outputs(
+            tmp_gene_dir)
+        @test "sequences.fasta" in missing_outputs
+        @test !("ensembl_version.csv" in missing_outputs)
+        @test !("tree.nh" in missing_outputs)
+
+        no_ensembl = joinpath(query_workdir, "NO_ENSEMBL")
+        mkpath(no_ensembl)
+        @test Iduna.ThorAxeMSA._missing_transcript_query_outputs(no_ensembl) ==
+              collect(Iduna.ThorAxeMSA._REQUIRED_ENSEMBL_FILES)
+        empty_ensembl = joinpath(query_workdir, "EMPTY_ENSEMBL")
+        mkpath(joinpath(empty_ensembl, "Ensembl"))
+        @test Iduna.ThorAxeMSA._missing_transcript_query_outputs(empty_ensembl) ==
+              collect(Iduna.ThorAxeMSA._REQUIRED_ENSEMBL_FILES)
+        complete_ensembl = joinpath(query_workdir, "COMPLETE_ENSEMBL")
+        write_test_ensembl_bundle(complete_ensembl)
+        @test isempty(Iduna.ThorAxeMSA._missing_transcript_query_outputs(
+            complete_ensembl))
     end
 
     mktempdir() do tmp
@@ -866,12 +1097,28 @@
             write_test_ensembl_bundle(joinpath(pwd(), "ENSG00000000001"))
             nothing
         end
-        rebuilt_input = Iduna.ThorAxeMSA._ensure_transcript_query(
-            target, queried_workdir;
-            specieslist = "homo_sapiens",
-            orthology = "1:1",
-            transcript_query_runner = query_runner,
-            sleep_fn = seconds -> nothing)
+        query_logs,
+        rebuilt_input = Test.collect_test_logs() do
+            Iduna.ThorAxeMSA._ensure_transcript_query(
+                target, queried_workdir;
+                specieslist = "homo_sapiens",
+                orthology = "1:1",
+                transcript_query_runner = query_runner,
+                sleep_fn = seconds -> nothing)
+        end
+        running_query_log = only([log
+                                  for log in query_logs
+                                  if log.message == "Running ThorAxe transcript_query."])
+        running_query_kwargs = Dict(running_query_log.kwargs)
+        @test haskey(running_query_kwargs, :logs_dir)
+        @test !haskey(running_query_kwargs, :stdout_log)
+        @test !haskey(running_query_kwargs, :stderr_log)
+        @test !haskey(running_query_kwargs, :orthology)
+        ready_query_log = only([log
+                                for log in query_logs
+                                if log.message ==
+                                   "ThorAxe transcript_query input is ready."])
+        @test !haskey(Dict(ready_query_log.kwargs), :input_dir)
         @test rebuilt_input == Iduna.ThorAxeMSA._thoraxe_input_dir(queried_workdir)
         @test query_calls[] == 1
 
@@ -1011,16 +1258,26 @@
                 nothing
             end
             temp_paths = Iduna.ThorAxeMSA._pid_sample_paths(tmp, 50.0, 0)
-            @test Iduna.ThorAxeMSA._run_thoraxe_pid_msa(
-                Iduna.ResolvedTarget(;
-                    input_id = "ENST",
-                    input_kind = :ensembl_transcript,
-                    ensembl_gene_id = "ENSG",
-                    transcript_id = "ENST"),
-                joinpath(tmp, "input"), tmp, 50.0, nothing, 0;
-                thoraxe_fn = fake_thoraxe) ==
+            pid_specieslist = "homo_sapiens,mus_musculus,danio_rerio," *
+                              "xenopus_tropicalis,gallus_gallus,canis_lupus"
+            pid_logs,
+            pid_result = Test.collect_test_logs() do
+                Iduna.ThorAxeMSA._run_thoraxe_pid_msa(
+                    Iduna.ResolvedTarget(;
+                        input_id = "ENST",
+                        input_kind = :ensembl_transcript,
+                        ensembl_gene_id = "ENSG",
+                        transcript_id = "ENST"),
+                    joinpath(tmp, "input"), tmp, 50.0, pid_specieslist, 0;
+                    thoraxe_fn = fake_thoraxe)
+            end
+            @test pid_result ==
                   (temp_paths.fasta_path, temp_paths.stockholm_path,
                 Iduna.ThorAxeMSA._pid_sample_thoraxe_dir(tmp, 50.0, 0))
+            @test isempty([log
+                           for log in pid_logs
+                           if log.message in ("Running ThorAxe PID MSA.",
+                "Running ThorAxe PID MSA command.")])
             @test fake_calls[] == 1
             @test isfile(temp_paths.stockholm_path)
 
@@ -1177,19 +1434,68 @@
                 orthology = "1:1",
                 specieslist_filter = false,
                 biomart_datasets_filter = false)
-            sampled_row = Iduna.ThorAxeMSA._score_pid_candidate(
-                scoring_target, scoring_input, tmp, sampled_pid, 1, nothing;
-                sample_count = 1,
-                sample_fraction = 1.0,
-                sample_seed = UInt64(12),
-                metadata = sampled_metadata,
-                thoraxe_fn = sampled_thoraxe,
-                identity_fn = sampled_identity)
+            sampled_progress_stderr = joinpath(tmp, "sampled_progress_stderr.log")
+            sampled_logs,
+            sampled_row = Test.collect_test_logs() do
+                open(sampled_progress_stderr, "w") do stderr_io
+                    redirect_stderr(stderr_io) do
+                        Iduna.ThorAxeMSA._score_pid_candidate(
+                            scoring_target, scoring_input, tmp, sampled_pid, 1, nothing;
+                            sample_count = 1,
+                            sample_fraction = 1.0,
+                            sample_seed = UInt64(12),
+                            metadata = sampled_metadata,
+                            thoraxe_fn = sampled_thoraxe,
+                            identity_fn = sampled_identity)
+                    end
+                end
+            end
+            @test !any(
+                log -> log.message in ("Scoring ThorAxe PID sample.",
+                    "Scoring ThorAxe PID candidate.",
+                    "Preparing ThorAxe PID candidate."),
+                sampled_logs)
+            @test isempty(read(sampled_progress_stderr, String))
             @test sampled_calls[] == 2
             @test sampled_row.mean_identity == 88.0
             @test sampled_row.median_identity == 88.0
             @test sampled_row.n_samples == 1
             @test isfile(Iduna.ThorAxeMSA._pid_scores_path(tmp, sampled_pid))
+
+            progress_pid = 53.25
+            progress_ref_fasta = joinpath(tmp, "progress_reference.fasta")
+            write(progress_ref_fasta, ">homo_sapiens\nAA\n>mus_musculus\nAA\n")
+            progress_candidate = (;
+                msa = Iduna.ThorAxeMSA.read_file(
+                    progress_ref_fasta, Iduna.ThorAxeMSA.FASTA),
+                fasta_path = progress_ref_fasta)
+            progress_paths = Iduna.ThorAxeMSA._pid_sample_paths(tmp, progress_pid, 1)
+            mkpath(dirname(progress_paths.species_file))
+            write(progress_paths.species_file, "homo_sapiens\n")
+            progress_thoraxe = (input_dir, run_root; identity, specieslist, phylosofs,
+                runner) -> begin
+                write_fake_thoraxe_dir(joinpath(run_root, "thoraxe"))
+                nothing
+            end
+            progress_output = IOBuffer()
+            progress_logs,
+            progress_rows = Test.collect_test_logs() do
+                Iduna.ThorAxeMSA._score_pid_samples(
+                    scoring_target, scoring_input, tmp, progress_candidate,
+                    progress_pid, 1;
+                    sample_count = 2,
+                    thoraxe_fn = progress_thoraxe,
+                    identity_fn = sampled_identity,
+                    progress_output,
+                    progress_enabled = true)
+            end
+            progress_text = String(take!(progress_output))
+            @test occursin("  0%", progress_text)
+            @test occursin("100%", progress_text)
+            @test !occursin("Scoring ThorAxe PID samples in parallel", progress_text)
+            @test !any(log -> log.message == "Scoring ThorAxe PID samples in parallel.",
+                progress_logs)
+            @test length(progress_rows) == 1
 
             parallel_pid = 53.5
             parallel_lock = ReentrantLock()
@@ -1285,15 +1591,28 @@
                 orthology = "1:1",
                 specieslist_filter = false,
                 biomart_datasets_filter = false)
-            common_rows = Iduna.ThorAxeMSA._score_pid_candidates(
-                scoring_target, scoring_input, tmp, common_pids, nothing,
-                common_metadata;
-                pid_sample_count = 1,
-                pid_sample_fraction = 1.0,
-                sample_seed = UInt64(15),
-                overwrite = true,
-                thoraxe_fn = common_thoraxe,
-                identity_fn = sampled_identity)
+            common_logs,
+            common_rows = Test.collect_test_logs() do
+                Iduna.ThorAxeMSA._score_pid_candidates(
+                    scoring_target, scoring_input, tmp, common_pids, nothing,
+                    common_metadata;
+                    pid_sample_count = 1,
+                    pid_sample_fraction = 1.0,
+                    sample_seed = UInt64(15),
+                    overwrite = true,
+                    thoraxe_fn = common_thoraxe,
+                    identity_fn = sampled_identity)
+            end
+            @test isempty([log
+                           for log in common_logs
+                           if log.message == "Preparing ThorAxe PID candidate."])
+            common_sampling_log = only([log
+                                        for log in common_logs
+                                        if log.message ==
+                                           "Preparing common ThorAxe PID species samples."])
+            common_sampling_kwargs = Dict(common_sampling_log.kwargs)
+            @test common_sampling_kwargs[:n_common_species] == 2
+            @test !haskey(common_sampling_kwargs, :sample_count)
             @test common_calls[] == 4
             @test [row.pid for row in common_rows] == common_pids
             @test all(row -> row.n_samples == 1, common_rows)
@@ -1734,7 +2053,7 @@ TableSet\tptroglodytes_gene_ensembl\tChimpanzee genes (Pan_tro_3.0)\t1
                 runner = command -> nothing)
             @test failed_action === :failed
 
-            invalid_action = @test_logs (:warn, r"invalid bundle") Iduna.ThorAxeMSA._transcript_query_attempt_action!(
+            invalid_action = @test_logs (:warn, r"invalid bundle") match_mode=:any Iduna.ThorAxeMSA._transcript_query_attempt_action!(
                 gene_core, tmp, "homo_sapiens", "homo_sapiens,mus_musculus",
                 stdout_log, stderr_log, tmp_gene_dir;
                 attempt = 1,
@@ -1756,7 +2075,7 @@ TableSet\tptroglodytes_gene_ensembl\tChimpanzee genes (Pan_tro_3.0)\t1
                     write_test_ensembl_bundle(joinpath(pwd(), gene_core))
                 nothing
             end
-            @test_logs (:warn, r"invalid bundle") Iduna.ThorAxeMSA._run_transcript_query_with_retries!(
+            @test_logs (:warn, r"invalid bundle") match_mode=:any Iduna.ThorAxeMSA._run_transcript_query_with_retries!(
                 tmp_gene_dir, gene_core, tmp, "homo_sapiens",
                 "homo_sapiens,mus_musculus", 2, stdout_log, stderr_log;
                 orthology = "1:1",
@@ -1766,6 +2085,43 @@ TableSet\tptroglodytes_gene_ensembl\tChimpanzee genes (Pan_tro_3.0)\t1
             @test retried_specieslists ==
                   ["homo_sapiens,mus_musculus", "homo_sapiens,mus_musculus"]
             @test slept == [1.0]
+
+            rm(tmp_gene_dir; recursive = true, force = true)
+            bundle_script = """
+            sleep(0.02)
+            gene = $(repr(gene_core))
+            files = $(repr(collect(Iduna.ThorAxeMSA._REQUIRED_ENSEMBL_FILES)))
+            mkpath(joinpath(gene, "Ensembl"))
+            for file in files
+                write(joinpath(gene, "Ensembl", file), "x\\n")
+            end
+            println("done")
+            """
+            live_retry_runner = _command -> Iduna.ThorAxeMSA._run_logged_command(
+                `$(Base.julia_cmd()) --startup-file=no -e $bundle_script`,
+                stdout_log,
+                stderr_log;
+                live_stdout = true)
+            tee_stdout_path = joinpath(tmp, "tee_process_stdout.log")
+            tee_stderr_path = joinpath(tmp, "tee_process_stderr.log")
+            open(tee_stdout_path, "w") do tee_stdout_io
+                open(tee_stderr_path, "w") do tee_stderr_io
+                    redirect_stdout(tee_stdout_io) do
+                        redirect_stderr(tee_stderr_io) do
+                            Iduna.ThorAxeMSA._run_transcript_query_with_retries!(
+                                tmp_gene_dir, gene_core, tmp, "homo_sapiens",
+                                "homo_sapiens,mus_musculus", 1, stdout_log, stderr_log;
+                                orthology = "1:1",
+                                runner = live_retry_runner,
+                                sleep_fn = seconds -> nothing)
+                        end
+                    end
+                end
+            end
+            @test Iduna.ThorAxeMSA._has_valid_ensembl_bundle(tmp_gene_dir)
+            @test read(stdout_log, String) == "done\n"
+            @test isempty(read(tee_stdout_path, String))
+            @test occursin("done\n", read(tee_stderr_path, String))
 
             rm(tmp_gene_dir; recursive = true, force = true)
             failed_calls = Ref(0)
@@ -1897,13 +2253,31 @@ TableSet\tptroglodytes_gene_ensembl\tChimpanzee genes (Pan_tro_3.0)\t1
             Iduna.ThorAxeMSA.write_file(
                 paths.stockholm_path, seed_msa, Iduna.ThorAxeMSA.Stockholm)
 
-            result = @test_logs (:info, r"Reusing cached ThorAxe MSA candidates") match_mode=:any Iduna.ThorAxeMSA.build_thoraxe_msa(
-                target, workdir;
-                pid_thresholds = [10.0],
-                specieslist = "homo_sapiens",
-                cached_thoraxe_input_dir = source,
-                pid_sample_count = 0,
-                pid_sample_seed = 7)
+            reuse_logs,
+            result = Test.collect_test_logs() do
+                Iduna.ThorAxeMSA.build_thoraxe_msa(
+                    target, workdir;
+                    pid_thresholds = [10.0],
+                    specieslist = "homo_sapiens",
+                    cached_thoraxe_input_dir = source,
+                    pid_sample_count = 0,
+                    pid_sample_seed = 7)
+            end
+            @test any(log -> log.message == "Reusing cached ThorAxe MSA candidates.",
+                reuse_logs)
+            @test !any(
+                log -> log.message in ("Resolving ThorAxe species filters.",
+                    "Preparing ThorAxe transcript_query input."),
+                reuse_logs)
+            resolved_species_log = only([log
+                                         for log in reuse_logs
+                                         if log.message ==
+                                            "Resolved ThorAxe transcript_query species."])
+            resolved_species_kwargs = Dict(resolved_species_log.kwargs)
+            @test resolved_species_kwargs[:n_requested_species] == 1
+            @test resolved_species_kwargs[:n_effective_species] == 1
+            @test !haskey(resolved_species_kwargs, :requested_specieslist_preview)
+            @test !haskey(resolved_species_kwargs, :effective_specieslist_preview)
             @test result.input_dir == input_dir
             @test result.pid_sample_seed == UInt64(7)
             @test result.pid_sample_count == 0
@@ -1982,13 +2356,20 @@ TableSet\tptroglodytes_gene_ensembl\tChimpanzee genes (Pan_tro_3.0)\t1
                 write_cached_test_thoraxe_dir(
                     Iduna.ThorAxeMSA._pid_sample_thoraxe_dir(scored_workdir, pid, 0))
             end
-            scored_result = Iduna.ThorAxeMSA.build_thoraxe_msa(target, scored_workdir;
-                pid_thresholds = [20.0, 30.0],
-                cached_thoraxe_input_dir = source,
-                specieslist_filter = false,
-                biomart_datasets_filter = false,
-                pid_sample_count = 0,
-                pid_sample_seed = 9)
+            scored_logs,
+            scored_result = Test.collect_test_logs() do
+                Iduna.ThorAxeMSA.build_thoraxe_msa(target, scored_workdir;
+                    pid_thresholds = [20.0, 30.0],
+                    cached_thoraxe_input_dir = source,
+                    specieslist_filter = false,
+                    biomart_datasets_filter = false,
+                    pid_sample_count = 0,
+                    pid_sample_seed = 9)
+            end
+            build_log = only([log
+                              for log in scored_logs
+                              if log.message == "Building ThorAxe MSA candidates."])
+            @test !haskey(Dict(build_log.kwargs), :pid_sample_fraction)
             @test scored_result.status === :ok
             @test scored_result.pid_sample_count == 0
             @test [seed.pid for seed in scored_result.seeds] == [20.0, 30.0]

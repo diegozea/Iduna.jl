@@ -1,4 +1,5 @@
 import JSON
+import Logging
 
 @testset "API" begin
     @test Iduna._pipeline_status(String[]) === :ok
@@ -694,24 +695,85 @@ import JSON
         end
     end
 
-    @testset "pipeline progress logging" begin
+    @testset "pipeline logging uses caller logger" begin
         mktempdir() do tmp
-            logged = @test_logs (:info, r"Preparing Iduna output directory") (:info,
-                r"Resolving target identifiers") (:info, r"Building ThorAxe MSA") (:info,
-                r"Expanding MSA seed") (:info, r"Validating Iduna results") (:info,
-                r"Writing Iduna result artifact") (:info,
-                r"Iduna pipeline completed") match_mode=:any begin
+            custom = Logging.ConsoleLogger(IOBuffer(), Logging.Warn)
+            seen_logger = Ref{Any}()
+            logged = Logging.with_logger(custom) do
                 Iduna.iduna(;
                     id = "Q13148",
                     mmseqs_db = "db",
                     workdir = joinpath(tmp, "logged"),
-                    _resolve_target = (args...; kwargs...) -> target,
+                    _resolve_target = (args...;
+                        kwargs...) -> begin
+                        seen_logger[] = Logging.current_logger()
+                        target
+                    end,
                     _build_thoraxe_msa = (args...; kwargs...) -> thoraxe,
                     _expand_msa = (args...; kwargs...) -> expansion,
                     _validate_results = (args...; kwargs...) -> validation)
             end
             @test logged.input_id == "Q13148"
             @test logged.status === :warn
+            @test seen_logger[] === custom
+
+            captured_workdir = joinpath(tmp, "captured")
+            captured_logs,
+            captured_result = Test.collect_test_logs() do
+                Iduna.iduna(;
+                    id = "Q13148",
+                    mmseqs_db = "db",
+                    workdir = captured_workdir,
+                    _resolve_target = (args...; kwargs...) -> target,
+                    _build_thoraxe_msa = (args...; kwargs...) -> thoraxe,
+                    _expand_msa = (args...; kwargs...) -> expansion,
+                    _validate_results = (args...; kwargs...) -> validation)
+            end
+            @test captured_result.status === :warn
+            prepared_log = only([log
+                                 for log in captured_logs
+                                 if log.message == "Prepared Iduna output directory."])
+            prepared_kwargs = Dict(prepared_log.kwargs)
+            @test prepared_kwargs[:input_id] == "Q13148"
+            @test prepared_kwargs[:workdir] == captured_workdir
+            @test !haskey(prepared_kwargs, :overwrite)
+            for message in ("Resolving target identifiers.",
+                "Writing target metadata.",
+                "Starting ThorAxe pipeline.",
+                "Iduna pipeline completed.")
+                log = only([log for log in captured_logs if log.message == message])
+                kwargs = Dict(log.kwargs)
+                @test !haskey(kwargs, :workdir)
+                @test !haskey(kwargs, :input_id)
+            end
+            expanding_log = only([log
+                                  for log in captured_logs
+                                  if log.message == "Expanding MSA seed."])
+            @test !haskey(Dict(expanding_log.kwargs), :pid)
+            artifact_log = only([log
+                                 for log in captured_logs
+                                 if log.message == "Writing Iduna result artifact."])
+            artifact_kwargs = Dict(artifact_log.kwargs)
+            @test haskey(artifact_kwargs, :result_path)
+            @test !haskey(artifact_kwargs, :status)
+
+            overwrite_logs,
+            _ = Test.collect_test_logs() do
+                Iduna.iduna(;
+                    id = "Q13148",
+                    mmseqs_db = "db",
+                    workdir = joinpath(tmp, "captured_overwrite"),
+                    overwrite = true,
+                    _resolve_target = (args...; kwargs...) -> target,
+                    _build_thoraxe_msa = (args...; kwargs...) -> thoraxe,
+                    _expand_msa = (args...; kwargs...) -> expansion,
+                    _validate_results = (args...; kwargs...) -> validation)
+            end
+            overwrite_prepared_log = only([log
+                                           for log in overwrite_logs
+                                           if log.message ==
+                                              "Prepared Iduna output directory."])
+            @test Dict(overwrite_prepared_log.kwargs)[:overwrite] === true
         end
     end
 
