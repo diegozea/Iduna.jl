@@ -46,9 +46,7 @@
     202, 79, 169, 4, 0, 196, 225, 85, 59, 12, 0, 0, 0
 ]
     gzipped = Iduna.Utils.HTTP.Response(
-        200;
-        headers = ["Content-Encoding" => "gzip"],
-        body = gzip_body)
+        200, ["Content-Encoding" => "gzip"]; body = gzip_body)
     @test Iduna.Utils.decode_body(gzipped) == "gzipped body"
 
     @testset "HTTP download retries" begin
