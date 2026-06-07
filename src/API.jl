@@ -14,13 +14,17 @@ logs under `workdir`, and the returned [`IdunaResult`](@ref) stores paths plus
 the resolved identifiers and validation statistics.
 
 `orthology` controls the ThorAxe relationship filter (`"1:1"`, `"1:n"`, or
-`"m:n"`). By default, Iduna filters the ThorAxe species list with Ensembl
-homology and then filters against currently available BioMart Ensembl Gene
-datasets before `transcript_query`. That step can be slow, especially for broad
-species lists; runs are often faster when a small curated `specieslist` is
-provided. `pid_sample_count` controls how many PID-specific species samples are
-drawn from each candidate `msa_0` and scored against that PID's full-species
-MSA; the default is 45.
+`"m:n"`). By default, Iduna starts from `specieslist="ases"`, the Ases
+webserver's 12-species list. Set `specieslist="all"` or `specieslist=""` for
+unrestricted ThorAxe species selection, or pass a comma-separated species list,
+file path, or single species name. The lowercase strings `"ases"` and `"all"`
+are reserved presets; use `./ases` or `./all` for files with those names. Iduna
+filters the requested species with Ensembl homology and then filters against
+currently available BioMart Ensembl Gene datasets before `transcript_query`.
+That step can be slow, especially for broad species lists; runs are often faster
+when a small curated `specieslist` is provided. `pid_sample_count` controls how
+many PID-specific species samples are drawn from each candidate `msa_0` and
+scored against that PID's full-species MSA; the default is 45.
 `pid_sample_fraction` controls the fraction of non-reference species retained in
 each sample, and `pid_sample_seed` can make the sampling reproducible. If
 omitted, a random seed is recorded with the result. `sampling_strategy` controls
@@ -55,7 +59,7 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
         overwrite::Bool = false,
         pid_thresholds::AbstractVector{<:Real} = Utils.DEFAULT_PID_THRESHOLDS,
         species::Union{Nothing, AbstractString} = nothing,
-        specieslist::Union{Nothing, AbstractString} = nothing,
+        specieslist::AbstractString = "ases",
         orthology::AbstractString = "1:1",
         specieslist_filter::Bool = true,
         biomart_datasets_filter::Bool = true,

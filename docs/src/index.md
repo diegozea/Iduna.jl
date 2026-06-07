@@ -64,13 +64,18 @@ julia --project=. -m Iduna ENST00000362089.10 --no-expansion
 For an Ensembl transcript input, Iduna resolves the parent Ensembl gene ID and
 species needed by ThorAxe. It does not require UniProt mapping on that path.
 
-Iduna filters the ThorAxe species list with Ensembl homology by default using
-`orthology="1:1"`, then applies `biomart_datasets_filter=true` as a second
-preflight against the current BioMart Ensembl Gene dataset list. BioMart dataset
-names are used only internally; species names are still passed to ThorAxe. Use
-`orthology="1:n"` or `"m:n"` for broader ortholog relationships, set
-`specieslist_filter=false` to skip the Ensembl homology step, or set
-`biomart_datasets_filter=false` to skip the BioMart dataset preflight.
+Iduna starts from `specieslist="ases"` by default, the Ases webserver's
+12-species list, filters it with Ensembl homology using `orthology="1:1"`, then
+applies `biomart_datasets_filter=true` as a second preflight against the current
+BioMart Ensembl Gene dataset list. BioMart dataset names are used only
+internally; species names are still passed to ThorAxe. Use `specieslist="all"`
+or `specieslist=""` for unrestricted ThorAxe species selection, pass a
+comma-separated species list, file path, or single species name for an explicit
+selection, use `orthology="1:n"` or `"m:n"` for broader ortholog relationships,
+set `specieslist_filter=false` to skip the Ensembl homology step, or set
+`biomart_datasets_filter=false` to skip the BioMart dataset preflight. The
+lowercase strings `"ases"` and `"all"` are reserved presets; use `./ases` or
+`./all` for files with those names.
 The BioMart dataset list is cached in package scratch space and refreshed when
 used on a later calendar date. Iduna also reports species recorded in
 `transcript_query` BioMart failure outputs when a run completes with partial

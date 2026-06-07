@@ -1213,6 +1213,39 @@ import Logging
         end
     end
 
+    @testset "specieslist option forwarding" begin
+        mktempdir() do tmp
+            captured_default = Ref{Dict{Symbol, Any}}()
+            Iduna.iduna(;
+                id = "Q13148",
+                workdir = joinpath(tmp, "default_specieslist_forwarding"),
+                no_expansion = true,
+                _resolve_target = (args...; kwargs...) -> target,
+                _build_thoraxe_msa = (
+                    args...; kwargs...) -> begin
+                    captured_default[] = Dict{Symbol, Any}(kwargs)
+                    thoraxe
+                end,
+                _validate_results = (args...; kwargs...) -> validation)
+            @test captured_default[][:specieslist] == "ases"
+
+            captured_all = Ref{Dict{Symbol, Any}}()
+            Iduna.iduna(;
+                id = "Q13148",
+                workdir = joinpath(tmp, "all_specieslist_forwarding"),
+                no_expansion = true,
+                specieslist = "all",
+                _resolve_target = (args...; kwargs...) -> target,
+                _build_thoraxe_msa = (
+                    args...; kwargs...) -> begin
+                    captured_all[] = Dict{Symbol, Any}(kwargs)
+                    thoraxe
+                end,
+                _validate_results = (args...; kwargs...) -> validation)
+            @test captured_all[][:specieslist] == "all"
+        end
+    end
+
     @testset "multiple seed expansion mode" begin
         mktempdir() do tmp
             seed1 = Iduna.SeedSelection(;

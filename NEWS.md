@@ -4,6 +4,9 @@
 
 Breaking changes:
 
+- Changed the default ThorAxe `specieslist` to `"ases"`, matching the Ases
+  webserver 12-species list. Use `specieslist="all"` or `specieslist=""` to
+  restore unrestricted ThorAxe species selection.
 - Changed the default PID seed sampling strategy from PID-local sampling to
   `sampling_strategy=:common`, which draws one shared set of species samples
   from the species common to all eligible PID candidates. Use
