@@ -118,14 +118,14 @@ end
 Top-level result returned by `Iduna.iduna`. It keeps the full pipeline status
 and links to the per-stage result objects. `expansions` is empty when the run
 was requested with `no_expansion=true`; otherwise it is indexed like
-`thoraxe_msa.seeds` and can contain `nothing` for missing expansion results.
+`thoraxe_msa.seeds` and can contain `missing` for unavailable expansion results.
 """
 Base.@kwdef struct IdunaResult
     input_id::String
     workdir::String
     target::ResolvedTarget
     thoraxe_msa::ThorAxeMSAResult
-    expansions::Vector{Union{Nothing, ExpansionResult}}
+    expansions::Vector{Union{Missing, ExpansionResult}}
     validations::Vector{ValidationResult}
     stages::Vector{Any} = Any[]
     warnings::Vector{String} = String[]
@@ -235,7 +235,7 @@ end
 function _iduna_expanded_dimensions(expansions::AbstractVector,
         validations::AbstractVector, index::Integer; compact::Bool = false)
     1 <= index <= length(expansions) || return nothing
-    expansions[index] === nothing && return nothing
+    ismissing(expansions[index]) && return nothing
     validation = _iduna_validation_at(validations, index)
     validation === nothing && return nothing
     return _iduna_msa_dimensions(validation.expanded_nseq, validation.expanded_ncol;
@@ -292,12 +292,12 @@ function _iduna_classify_status(status)
 end
 
 function _iduna_expansion_status(expansion)
-    expansion === nothing && return :missing
+    ismissing(expansion) && return :missing
     _iduna_classify_status(expansion.status)
 end
 
 function _iduna_expansion_hits(expansion)
-    expansion === nothing && return 0
+    ismissing(expansion) && return 0
     return expansion.n_hits
 end
 
@@ -316,12 +316,12 @@ end
 
 function _iduna_append_expansion_dimensions!(segments, expansions::AbstractVector,
         seeds::AbstractVector, validations::AbstractVector)
-    n_slots = length(expansions)
-    if n_slots == 1
+    n_expansions = length(expansions)
+    if n_expansions == 1
         dimensions = _iduna_expanded_dimensions(expansions, validations, 1)
         dimensions === nothing ||
             _iduna_push_summary_part!(segments, _iduna_segment("selected MSA $(dimensions)"))
-    elseif n_slots > 1
+    elseif n_expansions > 1
         entries = _iduna_expansion_dimension_entries(seeds, expansions, validations)
         isempty(entries) ||
             _iduna_push_summary_part!(segments,
@@ -332,7 +332,7 @@ end
 
 function _iduna_expansions_summary(expansions::AbstractVector,
         seeds::AbstractVector, validations::AbstractVector)
-    n_slots = length(expansions)
+    n_expansions = length(expansions)
     completed = count(expansion -> _iduna_expansion_status(expansion) === :ok, expansions)
     warned = count(expansion -> _iduna_expansion_status(expansion) === :warn, expansions)
     failed = count(expansion -> _iduna_expansion_status(expansion) === :failed, expansions)
@@ -340,8 +340,8 @@ function _iduna_expansions_summary(expansions::AbstractVector,
     missing = count(expansion -> _iduna_expansion_status(expansion) === :missing, expansions)
     n_hits = sum(_iduna_expansion_hits, expansions; init = 0)
 
-    segments = [_iduna_count_segment(n_slots, "slot")]
-    if n_slots == 0
+    segments = [_iduna_count_segment(n_expansions, "expansion")]
+    if n_expansions == 0
         _iduna_push_summary_part!(segments, _iduna_segment("empty"; color = :light_black))
     else
         completed > 0 &&
@@ -360,7 +360,7 @@ function _iduna_expansions_summary(expansions::AbstractVector,
                     color = :light_black))
         missing > 0 &&
             _iduna_push_summary_part!(segments,
-                _iduna_count_segment(missing, "nothing", plural = "nothing",
+                _iduna_count_segment(missing, "missing", plural = "missing",
                     color = :light_black))
     end
     _iduna_push_summary_part!(segments,

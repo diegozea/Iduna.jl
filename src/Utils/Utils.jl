@@ -700,7 +700,7 @@ function _relative_expansion_paths(expansion::ExpansionResult, workdir::Abstract
     )
 end
 
-_relative_expansion_paths(::Nothing, _workdir::AbstractString) = nothing
+_relative_expansion_paths(::Missing, _workdir::AbstractString) = missing
 
 function _relative_validation_paths(validation::ValidationResult, workdir::AbstractString)
     return ValidationResult(;
@@ -823,7 +823,7 @@ function _expansion_summary(expansion::ExpansionResult)
     )
 end
 
-_expansion_summary(::Nothing) = nothing
+_expansion_summary(::Missing) = nothing
 
 function _validation_summary(validation::ValidationResult)
     return (;

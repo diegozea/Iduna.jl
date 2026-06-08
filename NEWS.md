@@ -1,5 +1,18 @@
 ## Iduna.jl Release Notes
 
+### Changes from v0.8.0 to v0.9.0
+
+Breaking changes:
+
+- `IdunaResult.expansions` now uses `missing` for a seed whose expansion is
+  unavailable, while still remaining indexed like `result.thoraxe_msa.seeds`.
+  JSON summaries continue to store unavailable expansions as `null`.
+
+Changed:
+
+- Renamed expansion display wording from slots to expansions, and reports
+  unavailable expansion results as `missing` instead of `nothing`.
+
 ### Changes from v0.7.0 to v0.8.0
 
 Breaking changes:

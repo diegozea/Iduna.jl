@@ -102,7 +102,7 @@ Set `pid_sample_count=0` to skip seed selection and carry every eligible PID
 candidate forward. In that mode `result.thoraxe_msa.seeds`,
 `result.expansions`, and `result.validations` can contain multiple entries.
 `result.expansions` is indexed like `result.thoraxe_msa.seeds` and can contain
-`nothing` for a missing expansion slot; use `pid=` or `index=` with
+`missing` for an unavailable expansion result; use `pid=` or `index=` with
 `load_seed_msa` and `load_expanded_msa` to select one.
 
 The repeated ThorAxe runs used for PID sample scoring can run at the same time.

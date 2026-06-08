@@ -13,6 +13,12 @@ using ..Utils: ExpansionResult, ResolvedTarget, SeedSelection, ValidationResult,
                _classify_stage_state, _file_sha256, _read_stage_state,
                _write_stage_state
 
+const _MaybeExpansion = Union{Nothing, Missing, ExpansionResult}
+
+function _has_expansion(expansion::_MaybeExpansion)
+    !(expansion === nothing || ismissing(expansion))
+end
+
 export alignment_stats,
        load_expanded_msa,
        load_seed_msa,
@@ -110,13 +116,13 @@ end
 
 function _validation_input_paths(target::ResolvedTarget,
         seed::SeedSelection,
-        expansion::Union{Nothing, ExpansionResult},
+        expansion::_MaybeExpansion,
         workdir::AbstractString)
     seed_path = _resolve_artifact_path(
         seed.stockholm_path, seed.workdir === nothing ? workdir : seed.workdir)
-    expanded_path = expansion === nothing ? nothing :
+    expanded_path = _has_expansion(expansion) ?
                     _resolve_artifact_path(expansion.match_stockholm,
-        expansion.workdir === nothing ? workdir : expansion.workdir)
+        expansion.workdir === nothing ? workdir : expansion.workdir) : nothing
     uniprot_path = target.uniprot_sequence_path === nothing ? nothing :
                    _resolve_artifact_path(target.uniprot_sequence_path,
         target.workdir === nothing ? workdir : target.workdir)
@@ -148,7 +154,7 @@ end
 
 function _validation_identity(target::ResolvedTarget,
         seed::SeedSelection,
-        expansion::Union{Nothing, ExpansionResult},
+        expansion::_MaybeExpansion,
         paths)
     return (;
         target = (;
@@ -162,8 +168,9 @@ function _validation_identity(target::ResolvedTarget,
         seed = (;
             pid = Float64(seed.pid),
             stockholm_sha256 = _hash_existing(paths.seed_path)),
-        expansion = expansion === nothing ? nothing :
-                    (; match_stockholm_sha256 = _hash_existing(paths.expanded_path),),
+        expansion = _has_expansion(expansion) ?
+                    (; match_stockholm_sha256 = _hash_existing(paths.expanded_path),) :
+                    nothing,
         uniprot_sequence_sha256 = _hash_existing(paths.uniprot_path)
     )
 end
@@ -199,12 +206,12 @@ function _cached_validation_warnings(workdir::AbstractString, seed::SeedSelectio
     return String.(get(state, "warnings", String[]))
 end
 
-function _cached_alignment_warnings(row, expansion::Union{Nothing, ExpansionResult})
+function _cached_alignment_warnings(row, expansion::_MaybeExpansion)
     identical = _maybe_bool(row.aln_identical)
     identical === nothing && return String[]
     insertions = something(_maybe_int(row.aln_insertions), 0)
     deletions = something(_maybe_int(row.aln_deletions), 0)
-    label = expansion === nothing ? "Seed query" : "Expanded query"
+    label = _has_expansion(expansion) ? "Expanded query" : "Seed query"
     if insertions != 0 || deletions != 0
         return ["$(label) has indels relative to the UniProt sequence."]
     elseif identical == false
@@ -214,7 +221,7 @@ function _cached_alignment_warnings(row, expansion::Union{Nothing, ExpansionResu
 end
 
 function _cached_validation_result(outputs, workdir::AbstractString, seed::SeedSelection,
-        expansion::Union{Nothing, ExpansionResult})
+        expansion::_MaybeExpansion)
     df = DataFrame(CSV.File(outputs.stats_path))
     isempty(df) && error("Cached validation stats at $(outputs.stats_path) are empty.")
     row = first(eachrow(df))
@@ -241,11 +248,11 @@ function _cached_validation_result(outputs, workdir::AbstractString, seed::SeedS
         status = isempty(warnings) ? :ok : :warn)
 end
 
-function _validation_alignment_stats(paths, expansion::Union{Nothing, ExpansionResult})
+function _validation_alignment_stats(paths, expansion::_MaybeExpansion)
     seed_stats = alignment_stats(paths.seed_path)
-    expanded_stats = expansion === nothing ? nothing :
-                     alignment_stats(paths.expanded_path)
-    final_stats = expansion === nothing ? seed_stats : expanded_stats
+    expanded_stats = _has_expansion(expansion) ? alignment_stats(paths.expanded_path) :
+                     nothing
+    final_stats = _has_expansion(expansion) ? expanded_stats : seed_stats
     return (; seed_stats, expanded_stats, final_stats)
 end
 
@@ -261,8 +268,8 @@ function _empty_uniprot_comparison()
     )
 end
 
-function _alignment_warnings(expansion::Union{Nothing, ExpansionResult}, aln_stats)
-    label = expansion === nothing ? "Seed query" : "Expanded query"
+function _alignment_warnings(expansion::_MaybeExpansion, aln_stats)
+    label = _has_expansion(expansion) ? "Expanded query" : "Seed query"
     if aln_stats.insertions != 0 || aln_stats.deletions != 0
         return ["$(label) has indels relative to the UniProt sequence."]
     elseif aln_stats.identical == false
@@ -273,7 +280,7 @@ end
 
 function _compare_final_query_to_uniprot(target::ResolvedTarget,
         seed::SeedSelection,
-        expansion::Union{Nothing, ExpansionResult},
+        expansion::_MaybeExpansion,
         final_stats,
         uniprot_path::Union{Nothing, AbstractString},
         workdir::AbstractString)
@@ -376,7 +383,7 @@ end
 
 function validate_results(target::ResolvedTarget,
         seed::SeedSelection,
-        expansion::Union{Nothing, ExpansionResult},
+        expansion::_MaybeExpansion,
         workdir::AbstractString;
         overwrite::Bool = false)
     paths = _validation_input_paths(target, seed, expansion, workdir)

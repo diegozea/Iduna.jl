@@ -85,7 +85,7 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
     root = nothing
     target = nothing
     thoraxe = nothing
-    expansions = Union{Nothing, Utils.ExpansionResult}[]
+    expansions = Union{Missing, Utils.ExpansionResult}[]
     validations = Utils.ValidationResult[]
     failed_stage = "prepare_output_dir"
 
@@ -284,7 +284,7 @@ end
 
 function _write_failure_result(input_id::AbstractString, workdir::AbstractString,
         failed_stage::AbstractString, err; target = nothing, thoraxe = nothing,
-        expansions = Union{Nothing, Utils.ExpansionResult}[],
+        expansions = Union{Missing, Utils.ExpansionResult}[],
         validations = Utils.ValidationResult[])
     try
         Utils.write_json(joinpath(workdir, "result.json"),
@@ -299,16 +299,16 @@ end
 
 function _failure_expansions(failed_stage::AbstractString, thoraxe,
         expansions::AbstractVector)
-    padded = Union{Nothing, Utils.ExpansionResult}[expansions...]
+    padded = Union{Missing, Utils.ExpansionResult}[expansions...]
     if String(failed_stage) == "msa_expansion" && thoraxe !== nothing
-        append!(padded, fill(nothing, max(0, length(thoraxe.seeds) - length(padded))))
+        append!(padded, fill(missing, max(0, length(thoraxe.seeds) - length(padded))))
     end
     return padded
 end
 
 function _failure_result_summary(input_id::AbstractString, workdir::AbstractString,
         failed_stage::AbstractString, err; target = nothing, thoraxe = nothing,
-        expansions = Union{Nothing, Utils.ExpansionResult}[],
+        expansions = Union{Missing, Utils.ExpansionResult}[],
         validations = Utils.ValidationResult[])
     stage_keys = _current_stage_keys(target, thoraxe, expansions, validations;
         failed_stage)
@@ -825,7 +825,7 @@ function _load_result_expansions(summary, target::Utils.ResolvedTarget,
     expansion_data = _result_vector(summary, "expansions")
     isempty(expansion_data) &&
         return _empty_result_expansions(summary, thoraxe, workdir)
-    expansions = Union{Nothing, Utils.ExpansionResult}[_load_result_expansion_slot(
+    expansions = Union{Missing, Utils.ExpansionResult}[_load_result_expansion_at_index(
                                                            expansion_data, target,
                                                            seed, workdir, index)
                                                        for (index, seed) in
@@ -837,41 +837,41 @@ end
 function _empty_result_expansions(summary, thoraxe::Utils.ThorAxeMSAResult,
         workdir::AbstractString)
     failed_stage = get(summary, "failed_stage", nothing)
-    expansions = Union{Nothing, Utils.ExpansionResult}[]
+    expansions = Union{Missing, Utils.ExpansionResult}[]
     failed_stage === nothing && return expansions
     String(failed_stage) == "msa_expansion" || return expansions
     isempty(thoraxe.seeds) && return expansions
-    @warn "Expansion failed before producing summaries; preserving empty expansion slots." workdir n_seeds=length(
+    @warn "Expansion failed before producing summaries; preserving missing expansion results." workdir n_seeds=length(
         thoraxe.seeds)
-    append!(expansions, fill(nothing, length(thoraxe.seeds)))
+    append!(expansions, fill(missing, length(thoraxe.seeds)))
     return expansions
 end
 
-function _load_result_expansion_slot(expansion_data::AbstractVector,
+function _load_result_expansion_at_index(expansion_data::AbstractVector,
         target::Utils.ResolvedTarget, seed::Utils.SeedSelection,
-        workdir::AbstractString, index::Integer)::Union{Nothing, Utils.ExpansionResult}
+        workdir::AbstractString, index::Integer)::Union{Missing, Utils.ExpansionResult}
     data = index <= length(expansion_data) ? expansion_data[index] : nothing
-    data === nothing && return _missing_result_expansion_slot(workdir, index)
+    data === nothing && return _missing_result_expansion_summary(workdir, index)
     data isa AbstractDict ||
-        return _malformed_result_expansion_slot(workdir, index)
+        return _malformed_result_expansion_summary(workdir, index)
     try
         return _load_result_expansion(data, target, seed, workdir)
     catch err
         err isa InterruptException && rethrow()
-        @warn "Could not reconstruct expansion result; preserving empty expansion slot." workdir index exception=(
+        @warn "Could not reconstruct expansion result; preserving missing expansion result." workdir index exception=(
             err, catch_backtrace())
-        return nothing
+        return missing
     end
 end
 
-function _missing_result_expansion_slot(workdir::AbstractString, index::Integer)
+function _missing_result_expansion_summary(workdir::AbstractString, index::Integer)
     @warn "Expansion summary is missing for a selected ThorAxe seed." workdir index
-    return nothing
+    return missing
 end
 
-function _malformed_result_expansion_slot(workdir::AbstractString, index::Integer)
+function _malformed_result_expansion_summary(workdir::AbstractString, index::Integer)
     @warn "Skipping partial expansion summary that cannot be matched to a ThorAxe seed." workdir index
-    return nothing
+    return missing
 end
 
 function _warn_extra_expansion_summaries(expansion_data::AbstractVector,
@@ -916,7 +916,7 @@ function _validation_from_result_summary(data, outputs)
 end
 
 function _load_result_validations(summary, thoraxe::Utils.ThorAxeMSAResult,
-        expansions::Vector{Union{Nothing, Utils.ExpansionResult}},
+        expansions::Vector{Union{Missing, Utils.ExpansionResult}},
         workdir::AbstractString)
     validation_data = _result_vector(summary, "validations")
     validations = Utils.ValidationResult[]
@@ -976,7 +976,7 @@ function load_expanded_msa(result::Utils.IdunaResult; keepinserts::Bool = true,
     seed_index <= length(result.expansions) ||
         error("No expanded MSA is available at index $(seed_index).")
     expansion = result.expansions[seed_index]
-    expansion === nothing &&
+    ismissing(expansion) &&
         error("No expanded MSA is available at index $(seed_index).")
     expansion_path = Utils._resolve_artifact_path(
         expansion.match_stockholm, result.workdir)

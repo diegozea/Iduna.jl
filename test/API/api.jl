@@ -146,7 +146,7 @@ import Logging
         workdir = "workdir",
         target,
         thoraxe_msa = thoraxe,
-        expansions = Union{Nothing, Iduna.ExpansionResult}[nothing],
+        expansions = Union{Missing, Iduna.ExpansionResult}[missing],
         validations = Iduna.ValidationResult[],
         status = :error)
     @test Iduna.Utils.result_summary(missing_expansion_result).expansions[1] === nothing
@@ -245,7 +245,7 @@ import Logging
             pid_sample_fraction = 1.0,
             pid_sample_seed = UInt64(7))
 
-        fixture_expansions = Union{Nothing, Iduna.ExpansionResult}[]
+        fixture_expansions = Union{Missing, Iduna.ExpansionResult}[]
         if expansion
             for seed in fixture_seeds
                 pid_dir = Iduna.Utils.format_pid_dir(seed.pid)
@@ -421,7 +421,7 @@ import Logging
                 "Q13148", workdir, "msa_expansion", ErrorException("boom");
                 target = fixture.target,
                 thoraxe = fixture.thoraxe,
-                expansions = Union{Nothing, Iduna.ExpansionResult}[fixture.expansions[1]])
+                expansions = Union{Missing, Iduna.ExpansionResult}[fixture.expansions[1]])
             @test !(:workdir in propertynames(summary))
             @test summary.failed_stage == "msa_expansion"
             @test summary.thoraxe_msa.seeds[1].stockholm_path ==
@@ -485,7 +485,7 @@ import Logging
             loaded = @test_logs (:warn, r"Could not reconstruct expansion") match_mode=:any Iduna.load_result(
                 workdir)
             @test length(loaded.expansions) == 1
-            @test loaded.expansions[1] === nothing
+            @test ismissing(loaded.expansions[1])
             @test_throws ErrorException Iduna.load_expanded_msa(loaded)
         end
 
@@ -546,7 +546,7 @@ import Logging
             loaded = @test_logs (:warn, r"Could not reconstruct expansion") match_mode=:any Iduna.load_result(
                 workdir)
             @test length(loaded.expansions) == 2
-            @test loaded.expansions[1] === nothing
+            @test ismissing(loaded.expansions[1])
             @test loaded.expansions[2] isa Iduna.ExpansionResult
             @test_throws ErrorException Iduna.load_expanded_msa(loaded; index = 1)
             @test Iduna.ResultsValidation.nsequences(
@@ -554,7 +554,7 @@ import Logging
         end
 
         mktempdir() do tmp
-            workdir = joinpath(tmp, "malformed_expansion_slots")
+            workdir = joinpath(tmp, "malformed_expansion_summaries")
             _write_load_result_fixture(workdir; validation = false,
                 pids = [10.0, 80.0, 90.0])
             data = JSON.parse(read(joinpath(workdir, "result.json"), String))
@@ -567,8 +567,8 @@ import Logging
                 r"Skipping partial expansion summary") (:warn,
                 r"Ignoring expansion summaries") match_mode=:any Iduna.load_result(workdir)
             @test length(loaded.expansions) == 3
-            @test loaded.expansions[1] === nothing
-            @test loaded.expansions[2] === nothing
+            @test ismissing(loaded.expansions[1])
+            @test ismissing(loaded.expansions[2])
             @test loaded.expansions[3] isa Iduna.ExpansionResult
         end
 
@@ -587,7 +587,7 @@ import Logging
                 r"Expansion failed before producing summaries") match_mode=:any Iduna.load_result(
                 workdir)
             @test length(loaded.expansions) == 2
-            @test all(expansion -> expansion === nothing, loaded.expansions)
+            @test all(ismissing, loaded.expansions)
             err = try
                 Iduna.load_expanded_msa(loaded; index = 1)
                 nothing
@@ -638,7 +638,7 @@ import Logging
         end
 
         mktempdir() do tmp
-            workdir = joinpath(tmp, "malformed_validation_slots")
+            workdir = joinpath(tmp, "malformed_validation_summaries")
             _write_load_result_fixture(workdir; expansion = false)
             data = JSON.parse(read(joinpath(workdir, "result.json"), String))
             data["validations"] = Any["partial", data["validations"][1]]
@@ -881,7 +881,7 @@ import Logging
             "ThorAxeMSAResult, 1 seed, selected PID 10.0 (100 seqs, 1000 cols)",
             result_text)
         @test occursin(
-            "1 slot, 1 completed, 0 hits, selected MSA (250 seqs, 1000 cols)",
+            "1 expansion, 1 completed, 0 hits, selected MSA (250 seqs, 1000 cols)",
             result_text)
         @test occursin("1 result, ok", result_text)
         @test occursin("0 stages, empty", result_text)
@@ -897,7 +897,7 @@ import Logging
         @test !occursin("\e[", result_text)
 
         missing_result_text = repr("text/plain", missing_expansion_result)
-        @test occursin("1 slot, 1 nothing, 0 hits", missing_result_text)
+        @test occursin("1 expansion, 1 missing, 0 hits", missing_result_text)
         @test occursin("0 results, empty", missing_result_text)
         @test occursin(":error", missing_result_text)
 
@@ -936,7 +936,7 @@ import Logging
             workdir = "workdir",
             target = empty_target,
             thoraxe_msa = empty_thoraxe,
-            expansions = Union{Nothing, Iduna.ExpansionResult}[],
+            expansions = Union{Missing, Iduna.ExpansionResult}[],
             validations = Iduna.ValidationResult[],
             stages = Any["no status"],
             status = :unknown)
@@ -944,7 +944,7 @@ import Logging
         @test occursin("ResolvedTarget, unknown, unknown", empty_sections_text)
         @test occursin("ThorAxeMSAResult, 0 seeds, selected PIDs unknown",
             empty_sections_text)
-        @test occursin("0 slots, empty, 0 hits", empty_sections_text)
+        @test occursin("0 expansions, empty, 0 hits", empty_sections_text)
         @test occursin("1 stage, 1 unknown", empty_sections_text)
 
         warn_expansion = _display_expansion("warn_expansion"; status = :warn)
@@ -961,7 +961,7 @@ import Logging
             stages = Any[Dict("status" => "warn")],
             status = :warn)
         warn_count_text = repr("text/plain", warn_count_result)
-        @test occursin("1 slot, 1 warn, 0 hits", warn_count_text)
+        @test occursin("1 expansion, 1 warn, 0 hits", warn_count_text)
         @test occursin("ThorAxeMSAResult, 1 seed, selected PID 10.0",
             warn_count_text)
         @test !occursin("(seqs, cols)", warn_count_text)
@@ -1006,7 +1006,7 @@ import Logging
             "ThorAxeMSAResult, 2 seeds, selected PIDs (seqs, cols) 10.0 (100, 1000), 80.0 (95, 900)",
             multi_result_text)
         @test occursin(
-            "2 slots, 2 completed, 0 hits, selected MSAs (seqs, cols) 10.0 (250, 1000), 80.0 (275, 900)",
+            "2 expansions, 2 completed, 0 hits, selected MSAs (seqs, cols) 10.0 (250, 1000), 80.0 (275, 900)",
             multi_result_text)
 
         unknown_status_result = Iduna.IdunaResult(;
@@ -1014,7 +1014,7 @@ import Logging
             workdir = "workdir",
             target,
             thoraxe_msa = thoraxe,
-            expansions = Union{Nothing, Iduna.ExpansionResult}[nothing],
+            expansions = Union{Missing, Iduna.ExpansionResult}[missing],
             validations = Iduna.ValidationResult[],
             stages = Any[(; status = :paused)],
             status = :mystery)
@@ -1032,7 +1032,7 @@ import Logging
             validations = Iduna.ValidationResult[],
             status = :unknown)
         unknown_expansion_text = repr("text/plain", unknown_expansion_result)
-        @test occursin("1 slot, 1 unknown, 0 hits", unknown_expansion_text)
+        @test occursin("1 expansion, 1 unknown, 0 hits", unknown_expansion_text)
 
         function _colored_result_text(displayed_result)
             buffer = IOBuffer()
@@ -1080,7 +1080,7 @@ import Logging
         @test occursin("\e[31m1 failed\e[39m", failed_result_text)
 
         unknown_result_colored_text = _colored_result_text(unknown_status_result)
-        @test occursin("\e[90m1 nothing\e[39m", unknown_result_colored_text)
+        @test occursin("\e[90m1 missing\e[39m", unknown_result_colored_text)
         @test occursin("\e[90mempty\e[39m", unknown_result_colored_text)
         @test occursin("\e[90m1 unknown\e[39m", unknown_result_colored_text)
         @test occursin("\e[90m:mystery\e[39m", unknown_result_colored_text)

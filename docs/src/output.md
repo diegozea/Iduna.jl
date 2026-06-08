@@ -108,9 +108,9 @@ result.thoraxe_msa.sampling_strategy
 
 # Full expansion runs only:
 expansion = result.expansions[1]
-expansion === nothing || expansion.match_stockholm
-expansion === nothing || expansion.s_exon_blocks_tsv
-expansion === nothing || expansion.a3m_path
+ismissing(expansion) || expansion.match_stockholm
+ismissing(expansion) || expansion.s_exon_blocks_tsv
+ismissing(expansion) || expansion.a3m_path
 ```
 
 `result.workdir` is absolute in memory. Saved metadata, including
