@@ -54,7 +54,9 @@ import JSON
         @test occursin("JULIA_NUM_THREADS=4 iduna", help)
         @test occursin("iduna --threads=4 --", help)
         @test occursin("julia --threads 4 --project=. -m Iduna", help)
-        @test occursin(r"ases\s+\(default\), all, empty", help)
+        @test occursin(
+            r"ases\s+\(default curated set used on the\s+Ases webserver\), all/empty",
+            help)
         @test occursin(r"Threads for MMseqs2 expansion\s+only\.", help)
         @test !occursin("Start Julia with --threads N", help)
     end

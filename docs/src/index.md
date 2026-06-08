@@ -64,8 +64,8 @@ julia --project=. -m Iduna ENST00000362089.10 --no-expansion
 For an Ensembl transcript input, Iduna resolves the parent Ensembl gene ID and
 species needed by ThorAxe. It does not require UniProt mapping on that path.
 
-Iduna starts from `specieslist="ases"` by default, the Ases webserver's
-12-species list, filters it with Ensembl homology using `orthology="1:1"`, then
+Iduna starts from `specieslist="ases"` by default, the curated set used on the
+Ases webserver, filters it with Ensembl homology using `orthology="1:1"`, then
 applies `biomart_datasets_filter=true` as a second preflight against the current
 BioMart Ensembl Gene dataset list. BioMart dataset names are used only
 internally; species names are still passed to ThorAxe. Use `specieslist="all"`

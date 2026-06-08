@@ -170,6 +170,11 @@ Copy a Stockholm MSA to a form that MMseqs2 can read.
 
 Iduna removes its s-exon provenance annotations from this temporary copy because
 MMseqs2 does not need them. The original file is not changed.
+
+# Arguments
+
+- `source::AbstractString`: source Stockholm MSA path.
+- `dest::AbstractString`: destination path for the sanitized copy.
 """
 function prepare_stockholm_for_mmseqs(source::AbstractString, dest::AbstractString)
     mkpath(dirname(dest))
@@ -317,6 +322,10 @@ end
 
 Rewrite a Stockholm file so split annotations and sequence fragments are stored
 in a stable order.
+
+# Arguments
+
+- `path::AbstractString`: Stockholm file to rewrite in place.
 """
 function normalize_stockholm_annotations!(path::AbstractString)
     lines = readlines(path)
@@ -959,19 +968,34 @@ function _finished_expansion_result(ctx,
 end
 
 """
-    expand_msa(target, seed, workdir; mmseqs_db, kwargs...) -> ExpansionResult
+    expand_msa(target, seed, workdir; mmseqs_db, overwrite=false, match_mode=1,
+               match_ratio=nothing, hmmbuild_symfrac=0.0, centroids=false,
+               mmseqs_threads=Threads.nthreads()) -> ExpansionResult
 
 Expand one selected seed MSA against an MMseqs2 database.
+
+# Arguments
+
+- `target::ResolvedTarget`: resolved target metadata.
+- `seed::SeedSelection`: selected ThorAxe seed to expand.
+- `workdir::AbstractString`: Iduna work directory.
 
 # Keywords
 
 - `mmseqs_db::AbstractString`: MMseqs2 database prefix.
-- `overwrite::Bool = false`: rebuild package-owned expansion outputs.
-- `match_mode::Integer = 1`: MMseqs2 profile matching mode.
-- `match_ratio`: optional MMseqs2 match-ratio setting.
-- `hmmbuild_symfrac::Real = 0.0`: HMMER `hmmbuild` symbol fraction.
-- `centroids::Bool = false`: also save a centroid-level MSA.
-- `mmseqs_threads`: number of threads passed to MMseqs2.
+- `overwrite::Bool = false`: reuse package-owned expansion outputs when their
+  run identity still matches. When `true`, Iduna rebuilds those outputs.
+- `match_mode::Integer = 1`: MMseqs2 profile matching mode passed to
+  `mmseqs msa2profile --match-mode`.
+- `match_ratio = nothing`: optional MMseqs2 match-ratio setting. When `nothing`,
+  Iduna does not pass `--match-ratio` to MMseqs2. Other values are passed to
+  `mmseqs msa2profile --match-ratio`.
+- `hmmbuild_symfrac::Real = 0.0`: HMMER `hmmbuild` symbol fraction. Must be
+  between `0.0` and `1.0`.
+- `centroids::Bool = false`: only save the full expanded MSA. When `true`, Iduna
+  also saves a centroid-level MSA.
+- `mmseqs_threads = Threads.nthreads()`: number of threads passed to MMseqs2.
+  This uses the active Julia thread count unless another value is passed.
 
 # Returns
 

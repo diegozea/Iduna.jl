@@ -32,12 +32,18 @@ One possible Ensembl transcript match for a UniProt entry.
 # Fields
 
 - `transcript_id::String`: Ensembl transcript ID.
-- `ensembl_gene_id`: Ensembl gene ID for the transcript.
-- `ensembl_protein_id`: Ensembl protein ID for the transcript.
-- `isoform_id`: UniProt isoform ID linked to this transcript.
-- `species`: Species name from UniProt or Ensembl.
-- `sequence_validated::Bool`: Whether the protein sequence matched UniProt.
-- `mapping_confirmed`: Whether the mapping was confirmed by sequence or metadata.
+- `ensembl_gene_id::Union{Nothing, String} = nothing`: Ensembl gene ID for the
+  transcript. `nothing` means no gene ID was supplied or resolved.
+- `ensembl_protein_id::Union{Nothing, String} = nothing`: Ensembl protein ID for
+  the transcript. `nothing` means no protein ID was supplied or resolved.
+- `isoform_id::Union{Nothing, String} = nothing`: UniProt isoform ID linked to
+  this transcript. `nothing` means no isoform ID was supplied or resolved.
+- `species::Union{Nothing, String} = nothing`: Species name from UniProt or
+  Ensembl. `nothing` means no species was supplied or resolved.
+- `sequence_validated::Bool = false`: Whether the protein sequence matched
+  UniProt. `false` means it did not match or was not checked.
+- `mapping_confirmed::Union{Nothing, Bool} = nothing`: Whether the mapping was
+  confirmed by sequence or metadata. `nothing` means it was not checked.
 """
 Base.@kwdef struct EnsemblCandidate
     transcript_id::String
@@ -84,6 +90,10 @@ end
     fetch_uniprot_entry(uniprot_id)
 
 Fetch UniProt metadata and linked Ensembl transcript IDs for one accession.
+
+# Arguments
+
+- `uniprot_id::AbstractString`: UniProt accession to fetch.
 
 # Returns
 
@@ -217,6 +227,11 @@ end
 
 Return `true` when two protein sequences are the same after FASTA parsing and
 case normalization.
+
+# Arguments
+
+- `uniprot_seq::AbstractString`: UniProt protein sequence.
+- `ensembl_seq::AbstractString`: Ensembl protein sequence.
 """
 function sequences_match(uniprot_seq::AbstractString, ensembl_seq::AbstractString)::Bool
     protein_alignment_stats(ensembl_seq, uniprot_seq).identical
@@ -307,6 +322,10 @@ end
 
 Look up the parent Ensembl gene ID for an Ensembl transcript.
 
+# Arguments
+
+- `transcript_id::AbstractString`: Ensembl transcript ID to look up.
+
 # Throws
 
 - `ErrorException`: if Ensembl metadata cannot be fetched or parsed.
@@ -383,20 +402,33 @@ function _resolve_transcript_target(input_id::AbstractString,
 end
 
 """
-    resolve_target(input_id; workdir, kwargs...) -> ResolvedTarget
+    resolve_target(input_id; workdir, uniprot_id=nothing, ensembl_gene_id=nothing,
+                   ensembl_protein_id=nothing, transcript_id=nothing,
+                   species=nothing) -> ResolvedTarget
 
 Resolve one UniProt accession or Ensembl transcript ID into the IDs Iduna needs
 for ThorAxe and validation.
+
+# Arguments
+
+- `input_id::AbstractString`: UniProt accession or Ensembl transcript ID to
+  resolve.
 
 # Keywords
 
 - `workdir::AbstractString`: Iduna work directory where fetched sequences are
   saved.
-- `uniprot_id`: UniProt accession to record when the main input is a transcript.
-- `ensembl_gene_id`: Ensembl gene ID to use instead of a fetched value.
-- `ensembl_protein_id`: Ensembl protein ID to use instead of a fetched value.
-- `transcript_id`: Ensembl transcript ID to prefer when resolving a UniProt ID.
-- `species`: Species name to use instead of a fetched value.
+- `uniprot_id = nothing`: UniProt accession to record when the main input is a
+  transcript. When `nothing`, no UniProt accession is attached unless the input
+  itself is UniProt.
+- `ensembl_gene_id = nothing`: Ensembl gene ID to use instead of a fetched value.
+  When `nothing`, Iduna fetches or infers the gene ID.
+- `ensembl_protein_id = nothing`: Ensembl protein ID to use instead of a fetched
+  value. When `nothing`, Iduna uses fetched metadata when available.
+- `transcript_id = nothing`: Ensembl transcript ID to prefer when resolving a
+  UniProt ID. When `nothing`, Iduna chooses from validated candidates.
+- `species = nothing`: Species name to use instead of a fetched value. When
+  `nothing`, Iduna uses fetched metadata when available.
 
 # Returns
 

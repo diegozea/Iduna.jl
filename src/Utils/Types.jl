@@ -10,17 +10,26 @@ Resolved IDs and sequence checks for one input protein or transcript.
 - `input_id::String`: ID given by the user.
 - `input_kind::Symbol`: Kind of input ID, such as `:uniprot` or
   `:ensembl_transcript`.
-- `uniprot_id`: UniProt accession, when one is available.
+- `uniprot_id::Union{Nothing, String} = nothing`: UniProt accession. `nothing`
+  means no UniProt accession was supplied or resolved.
 - `ensembl_gene_id::String`: Ensembl gene ID used by ThorAxe.
 - `transcript_id::String`: Ensembl transcript ID used by ThorAxe.
-- `ensembl_protein_id`: Ensembl protein ID, when one is available.
-- `species`: Species name, when it can be resolved.
-- `uniprot_sequence_path`: Path to the saved UniProt protein sequence.
-- `ensembl_protein_sequence_path`: Path to the saved Ensembl protein sequence.
-- `sequence_validated`: Whether the UniProt and Ensembl protein sequences matched.
-- `mapping_confirmed`: Whether the UniProt-to-Ensembl mapping was confirmed.
-- `workdir`: Work directory used for paths stored in this result.
-- `warnings::Vector{String}`: Non-fatal problems found while resolving the target.
+- `ensembl_protein_id::Union{Nothing, String} = nothing`: Ensembl protein ID.
+  `nothing` means no Ensembl protein ID was supplied or resolved.
+- `species::Union{Nothing, String} = nothing`: Species name. `nothing` means it
+  could not be resolved.
+- `uniprot_sequence_path::Union{Nothing, String} = nothing`: Path to the saved
+  UniProt protein sequence. `nothing` means no UniProt sequence was saved.
+- `ensembl_protein_sequence_path::Union{Nothing, String} = nothing`: Path to the
+  saved Ensembl protein sequence. `nothing` means no Ensembl sequence was saved.
+- `sequence_validated::Union{Nothing, Bool} = nothing`: Whether the UniProt and
+  Ensembl protein sequences matched. `nothing` means the comparison was not run.
+- `mapping_confirmed::Union{Nothing, Bool} = nothing`: Whether the
+  UniProt-to-Ensembl mapping was confirmed. `nothing` means it was not checked.
+- `workdir::Union{Nothing, String} = nothing`: Work directory used for paths
+  stored in this result. `nothing` means paths are not tied to a work directory.
+- `warnings::Vector{String} = String[]`: Non-fatal problems found while resolving
+  the target. An empty vector means no warnings were recorded.
 """
 Base.@kwdef struct ResolvedTarget
     input_id::String
@@ -46,14 +55,20 @@ A ThorAxe percent identity (PID) seed selected for later steps.
 # Fields
 
 - `pid::Float64`: Percent identity threshold used to build this seed.
-- `median_identity`: Median identity score used during seed selection.
-- `mean_identity`: Mean identity score used during seed selection.
+- `median_identity::Union{Missing, Float64}`: Median identity score used during
+  seed selection. `missing` means the score was unavailable.
+- `mean_identity::Union{Missing, Float64}`: Mean identity score used during seed
+  selection. `missing` means the score was unavailable.
 - `stockholm_path::String`: Path to the selected seed MSA in Stockholm format.
-- `fasta_path`: Path to the selected seed MSA in FASTA format.
-- `s_exon_blocks_tsv`: Path to the table that maps MSA columns to s-exons.
+- `fasta_path::Union{Nothing, String} = nothing`: Path to the selected seed MSA
+  in FASTA format. `nothing` means no FASTA copy is available.
+- `s_exon_blocks_tsv::Union{Nothing, String} = nothing`: Path to the table that
+  maps MSA columns to s-exons. `nothing` means no table is available.
 - `summary_path::String`: Path to the seed-selection summary table.
-- `used_fallback_dir::Bool`: Whether a fallback ThorAxe output directory was used.
-- `workdir`: Work directory used for paths stored in this result.
+- `used_fallback_dir::Bool = false`: Whether a fallback ThorAxe output directory
+  was used.
+- `workdir::Union{Nothing, String} = nothing`: Work directory used for paths
+  stored in this result. `nothing` means paths are not tied to a work directory.
 """
 Base.@kwdef struct SeedSelection
     pid::Float64
@@ -85,12 +100,18 @@ Paths and metadata from the ThorAxe MSA-building stage.
   and selected seeds.
 - `seeds::Vector{SeedSelection}`: Seed MSAs selected for validation and expansion.
 - `logs_dir::String`: Directory with ThorAxe logs.
-- `pid_sample_count::Int`: Number of species samples used to score each PID.
-- `pid_sample_fraction::Float64`: Fraction of non-reference species in each sample.
-- `pid_sample_seed::UInt64`: Random seed used for PID sampling.
-- `sampling_strategy::Symbol`: How species samples were shared across PID values.
-- `warnings::Vector{String}`: Non-fatal problems from the ThorAxe MSA stage.
-- `status::Symbol`: Stage status, such as `:ok`, `:warn`, or `:error`.
+- `pid_sample_count::Int = 0`: Number of species samples used to score each PID.
+  `0` means sampling was disabled or no sampling count was recorded.
+- `pid_sample_fraction::Float64 = 1.0`: Fraction of non-reference species in each
+  sample. `1.0` means all available non-reference species were kept.
+- `pid_sample_seed::UInt64 = UInt64(0)`: Random seed used for PID sampling. `0`
+  means no random seed was recorded.
+- `sampling_strategy::Symbol = :independent`: How species samples were shared
+  across PID values. Accepted values are `:common`, `:independent`, and `:input`;
+  this constructor default mainly supports manually built or legacy results.
+- `warnings::Vector{String} = String[]`: Non-fatal problems from the ThorAxe MSA
+  stage. An empty vector means no warnings were recorded.
+- `status::Symbol = :ok`: Stage status, such as `:ok`, `:warn`, or `:error`.
 """
 Base.@kwdef struct ThorAxeMSAResult
     input_dir::String
@@ -120,19 +141,22 @@ Paths and hit counts from the MMseqs2 and HMMER expansion stage.
 
 - `run_dir::String`: Directory for this expansion run.
 - `seed_stockholm::String`: Seed MSA used for expansion.
-- `seed_fasta`: Seed MSA in FASTA format, when available.
+- `seed_fasta::Union{Nothing, String} = nothing`: Seed MSA in FASTA format.
+  `nothing` means no FASTA copy is available.
 - `hits_fasta::String`: Raw sequence hits found by MMseqs2.
 - `full_stockholm::String`: Expanded MSA with all columns.
 - `match_stockholm::String`: Expanded MSA restricted to match columns.
 - `a3m_path::String`: Expanded MSA in A3M format.
-- `s_exon_blocks_tsv`: Table that maps expanded MSA columns to s-exons.
+- `s_exon_blocks_tsv::Union{Nothing, String} = nothing`: Table that maps
+  expanded MSA columns to s-exons. `nothing` means no table is available.
 - `db_dir::String`: Directory with temporary MMseqs2 databases.
 - `hmm_dir::String`: Directory with HMMER files.
 - `logs_dir::String`: Directory with expansion logs.
-- `n_hits::Int`: Number of sequence hits found.
-- `n_new_hits::Int`: Number of hits not already present in the seed.
-- `status::Symbol`: Stage status, such as `:ok`, `:warn`, or `:error`.
-- `workdir`: Work directory used for paths stored in this result.
+- `n_hits::Int = 0`: Number of sequence hits found.
+- `n_new_hits::Int = 0`: Number of hits not already present in the seed.
+- `status::Symbol = :ok`: Stage status, such as `:ok`, `:warn`, or `:error`.
+- `workdir::Union{Nothing, String} = nothing`: Work directory used for paths
+  stored in this result. `nothing` means paths are not tied to a work directory.
 """
 Base.@kwdef struct ExpansionResult
     run_dir::String
@@ -160,23 +184,35 @@ Statistics for the seed MSA, the expanded MSA, and the UniProt comparison.
 # Fields
 
 - `stats_path::String`: CSV file with the validation statistics.
-- `query_name`: Sequence name used for the query in the MSA.
-- `query_vs_uniprot_path`: Alignment report comparing the query with UniProt.
-- `seed_nseq`: Number of sequences in the seed MSA.
-- `seed_ncol`: Number of columns in the seed MSA.
-- `seed_clusters62`: Number of Hobohm clusters at 62% identity in the seed MSA.
-- `seed_neff80`: Effective sequence count at 80% identity in the seed MSA.
-- `expanded_nseq`: Number of sequences in the expanded MSA.
-- `expanded_ncol`: Number of columns in the expanded MSA.
-- `expanded_clusters62`: Number of Hobohm clusters at 62% identity in the
+- `query_name::Union{Nothing, String} = nothing`: Sequence name used for the
+  query in the MSA. `nothing` means no query sequence was found.
+- `query_vs_uniprot_path::Union{Nothing, String} = nothing`: Alignment report
+  comparing the query with UniProt. `nothing` means no report is available.
+- `seed_nseq::Union{Nothing, Int} = nothing`: Number of sequences in the seed MSA.
+- `seed_ncol::Union{Nothing, Int} = nothing`: Number of columns in the seed MSA.
+- `seed_clusters62::Union{Nothing, Int} = nothing`: Number of Hobohm clusters at
+  62% identity in the seed MSA.
+- `seed_neff80::Union{Nothing, Float64} = nothing`: Effective sequence count at
+  80% identity in the seed MSA.
+- `expanded_nseq::Union{Nothing, Int} = nothing`: Number of sequences in the
+  expanded MSA. `nothing` means no expanded MSA statistics are available.
+- `expanded_ncol::Union{Nothing, Int} = nothing`: Number of columns in the
   expanded MSA.
-- `expanded_neff80`: Effective sequence count at 80% identity in the expanded MSA.
-- `aln_identical`: Whether the final query sequence matched the UniProt sequence.
-- `aln_mismatches`: Number of mismatched residues in the UniProt comparison.
-- `aln_insertions`: Number of insertions in the UniProt comparison.
-- `aln_deletions`: Number of deletions in the UniProt comparison.
-- `warnings::Vector{String}`: Non-fatal validation problems.
-- `status::Symbol`: Validation status, such as `:ok`, `:warn`, or `:error`.
+- `expanded_clusters62::Union{Nothing, Int} = nothing`: Number of Hobohm clusters
+  at 62% identity in the expanded MSA.
+- `expanded_neff80::Union{Nothing, Float64} = nothing`: Effective sequence count
+  at 80% identity in the expanded MSA.
+- `aln_identical::Union{Nothing, Bool} = nothing`: Whether the final query
+  sequence matched the UniProt sequence. `nothing` means it was not checked.
+- `aln_mismatches::Union{Nothing, Int} = nothing`: Number of mismatched residues
+  in the UniProt comparison.
+- `aln_insertions::Union{Nothing, Int} = nothing`: Number of insertions in the
+  UniProt comparison.
+- `aln_deletions::Union{Nothing, Int} = nothing`: Number of deletions in the
+  UniProt comparison.
+- `warnings::Vector{String} = String[]`: Non-fatal validation problems. An empty
+  vector means no warnings were recorded.
+- `status::Symbol = :ok`: Validation status, such as `:ok`, `:warn`, or `:error`.
 """
 Base.@kwdef struct ValidationResult
     stats_path::String
@@ -209,11 +245,14 @@ Top-level result returned by [`Iduna.iduna`](@ref).
 - `workdir::String`: Absolute path to the work directory.
 - `target::ResolvedTarget`: Resolved target IDs and sequence checks.
 - `thoraxe_msa::ThorAxeMSAResult`: ThorAxe MSA outputs and selected seeds.
-- `expansions::Vector`: Expansion results, indexed like `thoraxe_msa.seeds`.
+- `expansions::Vector{Union{Missing, ExpansionResult}}`: Expansion results,
+  indexed like `thoraxe_msa.seeds`.
 - `validations::Vector{ValidationResult}`: Validation results for each seed.
-- `stages::Vector{Any}`: Compact summaries of completed or failed pipeline stages.
-- `warnings::Vector{String}`: Non-fatal problems from the full run.
-- `status::Symbol`: Overall status, such as `:ok`, `:warn`, or `:error`.
+- `stages::Vector{Any} = Any[]`: Compact summaries of completed or failed
+  pipeline stages.
+- `warnings::Vector{String} = String[]`: Non-fatal problems from the full run.
+  An empty vector means no warnings were recorded.
+- `status::Symbol = :ok`: Overall status, such as `:ok`, `:warn`, or `:error`.
 
 `expansions` is empty when `no_expansion=true`. Otherwise it may contain
 `missing` for a seed where expansion did not finish.

@@ -128,7 +128,7 @@ By default, Iduna selects one percent identity (PID) seed. Set
 `pid_sample_count=0` to skip seed selection and carry every eligible PID
 candidate forward, producing one
 validation directory and, unless `no_expansion=true`, one expansion directory
-per selected PID. `result.expansions` is seed-indexed and may contain `nothing`
+per selected PID. `result.expansions` is seed-indexed and may contain `missing`
 for a seed whose expansion is unavailable.
 
 `expanded_msa/` is the full MMseqs2 cluster-expanded MSA and remains the main

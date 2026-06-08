@@ -35,6 +35,10 @@ export alignment_stats,
 
 Load an MSA from Stockholm, A3M, FASTA, or `.fa` input.
 
+# Arguments
+
+- `path::AbstractString`: MSA file path to load.
+
 # Keywords
 
 - `keepinserts::Bool = true`: keep insertion columns when reading formats that
@@ -56,6 +60,16 @@ end
     load_seed_msa(seed; keepinserts=true, workdir=seed.workdir)
 
 Load the selected ThorAxe seed MSA described by a [`SeedSelection`](@ref).
+
+# Arguments
+
+- `seed::SeedSelection`: selected ThorAxe seed to load.
+
+# Keywords
+
+- `keepinserts::Bool = true`: keep insertion columns when reading the MSA.
+- `workdir = seed.workdir`: work directory used to resolve relative result
+  paths.
 """
 function load_seed_msa(seed::SeedSelection; keepinserts::Bool = true,
         workdir::Union{Nothing, AbstractString} = seed.workdir)
@@ -68,6 +82,16 @@ end
     load_expanded_msa(expansion; keepinserts=true, workdir=expansion.workdir)
 
 Load the match-column expanded MSA described by an [`ExpansionResult`](@ref).
+
+# Arguments
+
+- `expansion::ExpansionResult`: expansion result to load.
+
+# Keywords
+
+- `keepinserts::Bool = true`: keep insertion columns when reading the MSA.
+- `workdir = expansion.workdir`: work directory used to resolve relative result
+  paths.
 """
 function load_expanded_msa(expansion::ExpansionResult; keepinserts::Bool = true,
         workdir::Union{Nothing, AbstractString} = expansion.workdir)
@@ -81,10 +105,15 @@ end
 
 Load one MSA and compute simple size and diversity statistics.
 
+# Arguments
+
+- `path::AbstractString`: MSA file path to load and summarize.
+
 # Keywords
 
 - `cluster_threshold::Real = 62.0`: identity threshold for Hobohm clustering.
 - `neff_threshold::Real = 80.0`: identity threshold for effective sequence count.
+  Both thresholds are percent identity values.
 
 # Returns
 
@@ -426,9 +455,18 @@ end
 
 Compute validation statistics for one seed and its optional expansion.
 
+# Arguments
+
+- `target::ResolvedTarget`: resolved target metadata.
+- `seed::SeedSelection`: selected ThorAxe seed to validate.
+- `expansion`: optional expansion result. Pass `nothing` or `missing` when the
+  run stopped after the ThorAxe MSA stage.
+- `workdir::AbstractString`: Iduna work directory.
+
 # Keywords
 
-- `overwrite::Bool = false`: rebuild package-owned validation outputs.
+- `overwrite::Bool = false`: reuse package-owned validation outputs when their
+  run identity still matches. When `true`, Iduna rebuilds those outputs.
 
 # Returns
 

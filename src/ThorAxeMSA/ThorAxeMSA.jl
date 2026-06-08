@@ -1368,6 +1368,12 @@ end
 
 Rebuild the transcript-level MSA for one transcript from ThorAxe s-exon outputs.
 
+# Arguments
+
+- `thoraxe_dir::AbstractString`: ThorAxe output directory.
+- `gene_id::AbstractString`: Ensembl gene ID.
+- `transcript_id::AbstractString`: Ensembl transcript ID to rebuild.
+
 # Returns
 
 - A tuple `(msa, species)`, where `msa` is the reconstructed MSA and `species`
@@ -1530,13 +1536,20 @@ function _identity_from_codes(positions::Vector{Int}, codes::Vector{Char})
 end
 
 """
-    compute_identity_against_reference(reference_fasta, sample_fasta; kwargs...)
+    compute_identity_against_reference(reference_fasta, sample_fasta;
+                                       logs_dir=nothing, label="seed")
 
 Compare a sampled MSA with its full reference MSA using HHsuite.
 
+# Arguments
+
+- `reference_fasta::AbstractString`: full reference MSA in FASTA format.
+- `sample_fasta::AbstractString`: sampled MSA in FASTA format.
+
 # Keywords
 
-- `logs_dir`: directory where the HHalign output should be copied.
+- `logs_dir = nothing`: directory where the HHalign output should be copied. When
+  `nothing`, the temporary HHalign output is not copied.
 - `label::AbstractString = "seed"`: label used in the copied log file name.
 
 # Returns
@@ -2435,6 +2448,10 @@ candidate summary table.
 
 Candidates are ranked by median identity, mean identity, candidate MSA size, and
 then the original PID order.
+
+# Arguments
+
+- `summary_path::AbstractString`: ThorAxe candidate summary CSV path.
 """
 function select_best_seed(summary_path::AbstractString)
     df = _candidate_summary_dataframe(summary_path)
@@ -3028,25 +3045,58 @@ function _select_scored_candidate_seeds(summary_path::AbstractString,
 end
 
 """
-    build_thoraxe_msa(target, workdir; kwargs...) -> ThorAxeMSAResult
+    build_thoraxe_msa(target, workdir; pid_thresholds=DEFAULT_PID_THRESHOLDS,
+                      specieslist="ases", cached_thoraxe_input_dir=nothing,
+                      overwrite=false, orthology="1:1", specieslist_filter=true,
+                      biomart_datasets_filter=true, transcript_query_retries=2,
+                      pid_sample_count=45, pid_sample_fraction=0.8,
+                      pid_sample_seed=nothing,
+                      sampling_strategy=:common) -> ThorAxeMSAResult
 
 Run or reuse the ThorAxe input and MSA stages for one resolved target.
 
+# Arguments
+
+- `target::ResolvedTarget`: resolved target metadata.
+- `workdir::AbstractString`: Iduna work directory.
+
 # Keywords
 
-- `pid_thresholds`: ThorAxe percent identity (PID) thresholds to test.
+- `pid_thresholds = DEFAULT_PID_THRESHOLDS`: ThorAxe percent identity (PID)
+  thresholds to test; currently `[10, 20, 30, 60, 80]`.
 - `specieslist::AbstractString = "ases"`: species preset, list, file, or name.
-- `cached_thoraxe_input_dir`: existing transcript-query bundle to copy and reuse.
-- `overwrite::Bool = false`: rebuild package-owned stage outputs.
+  Accepted presets are `"ases"` for the default curated set used on the Ases
+  webserver, and `"all"` or `""` for unrestricted ThorAxe species selection.
+  Other values are treated as a species-list file path, a comma-separated species
+  list, or one species name.
+- `cached_thoraxe_input_dir = nothing`: existing transcript-query bundle to copy
+  and reuse. When `nothing`, Iduna runs transcript-query to build the input
+  bundle.
+- `overwrite::Bool = false`: reuse package-owned stage outputs when their run
+  identity still matches. When `true`, Iduna rebuilds those outputs.
 - `orthology::AbstractString = "1:1"`: Ensembl homology relationship filter.
-- `specieslist_filter::Bool = true`: filter requested species by Ensembl homology.
+  Accepted values are `"1:1"` for one-to-one orthologs, `"1:n"` for one-to-one
+  and one-to-many orthologs, and `"m:n"` for one-to-one, one-to-many, and
+  many-to-many orthologs.
+- `specieslist_filter::Bool = true`: filter requested species by Ensembl
+  homology. When `false`, Iduna passes the requested species list through without
+  this Ensembl homology filter.
 - `biomart_datasets_filter::Bool = true`: keep species with BioMart datasets.
-- `transcript_query_retries::Integer = 2`: retry count for transcript-query runs.
+  When `false`, Iduna does not remove species that lack a matching BioMart
+  dataset.
+- `transcript_query_retries::Integer = 2`: number of transcript-query attempts.
 - `pid_sample_count::Integer = 45`: number of species samples per PID candidate.
+  `0` disables sampling-based seed selection and carries every eligible PID
+  candidate forward.
 - `pid_sample_fraction::Real = 0.8`: fraction of non-reference species per sample.
-- `pid_sample_seed`: random seed for reproducible PID sampling.
+  Must be greater than `0` and at most `1`.
+- `pid_sample_seed = nothing`: random seed for reproducible PID sampling. When
+  `nothing`, Iduna chooses a random seed and records it in the result.
 - `sampling_strategy::Symbol = :common`: how species samples are shared across
-  PID candidates.
+  PID candidates. Accepted values are `:common`, which samples one shared species
+  universe from species common to all eligible PID candidates; `:independent`,
+  which samples separately within each PID candidate; and `:input`, which samples
+  from the effective input species list after filtering.
 """
 function build_thoraxe_msa(target::ResolvedTarget, workdir::AbstractString;
         pid_thresholds::AbstractVector{<:Real} = DEFAULT_PID_THRESHOLDS,

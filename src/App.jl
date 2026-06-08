@@ -96,12 +96,15 @@ The Iduna option --mmseqs-threads controls MMseqs2 expansion only.
         arg_type = String
 
         "--specieslist"
-        help = "ThorAxe species list: ases (default), all, empty, path, comma list, or one species."
+        help = "ThorAxe species list: ases (default curated set used on the " *
+               "Ases webserver), all/empty for unrestricted selection, path, " *
+               "comma list, or one species."
         metavar = "path-or-list"
         arg_type = String
 
         "--orthology"
-        help = "Orthology relationship passed to transcript_query: 1:1, 1:n, or m:n."
+        help = "Orthology relationship: 1:1 one-to-one, 1:n adds one-to-many, " *
+               "m:n also adds many-to-many."
         metavar = "relationship"
         arg_type = String
 
@@ -126,12 +129,14 @@ The Iduna option --mmseqs-threads controls MMseqs2 expansion only.
         arg_type = Int
 
         "--pid-sample-count"
-        help = "PID-specific species samples per candidate MSA for seed selection, default 45."
+        help = "PID-specific species samples per candidate MSA for seed " *
+               "selection, default 45."
         metavar = "n"
         arg_type = Int
 
         "--pid-sample-fraction"
-        help = "Fraction of non-reference species retained in each PID-specific sample, default 0.8."
+        help = "Fraction of non-reference species retained in each PID-specific " *
+               "sample, default 0.8."
         metavar = "x"
         arg_type = Float64
 
@@ -141,7 +146,8 @@ The Iduna option --mmseqs-threads controls MMseqs2 expansion only.
         arg_type = Int
 
         "--sampling-strategy"
-        help = "Species sampling strategy for PID seed selection: common, independent, or input."
+        help = "PID sampling: common shares species across PIDs, independent " *
+               "samples per PID, input samples from the effective input species list."
         metavar = "strategy"
         arg_type = String
 

@@ -2,8 +2,8 @@ using Base.Threads
 import JSON
 
 """
-    iduna(; id, mmseqs_db=nothing, no_expansion=false, kwargs...) -> IdunaResult
-    iduna(id; mmseqs_db=nothing, no_expansion=false, kwargs...) -> IdunaResult
+    iduna(; id=nothing) -> IdunaResult
+    iduna(id) -> IdunaResult
 
 Build one ThorAxe-based MSA from a UniProt accession or Ensembl transcript ID.
 By default, Iduna then expands the MSA with MMseqs2 and HMMER and validates the
@@ -16,27 +16,80 @@ selected seeds, validation statistics, warnings, and status.
 # Arguments
 
 - `id`: UniProt accession or Ensembl transcript ID. It can be passed as the first
-  positional argument or as a keyword.
+  positional argument or as a keyword. When passed as a keyword, the default is
+  `nothing`.
 
 # Keywords
 
-- `mmseqs_db`: MMseqs2 database prefix used for expansion.
-- `no_expansion::Bool = false`: stop after the ThorAxe MSA stage.
-- `workdir`: output directory. Defaults to a directory named after the input ID.
-- `overwrite::Bool = false`: rebuild package-owned stage outputs.
-- `pid_thresholds`: ThorAxe percent identity (PID) thresholds to test.
+- `uniprot_id = nothing`: UniProt accession to use as the primary input or to
+  record when resolving a transcript input. When `nothing`, Iduna uses `id`,
+  `ensembl_transcript_id`, or `transcript_id` to choose the main input.
+- `ensembl_transcript_id = nothing`: Ensembl transcript ID to use as the primary
+  input. When `nothing`, it is ignored.
+- `transcript_id = nothing`: Ensembl transcript ID to use as the primary input or
+  to prefer when resolving a UniProt ID. When `nothing`, Iduna chooses a
+  transcript from fetched metadata when needed.
+- `ensembl_gene_id = nothing`: Ensembl gene ID to use instead of a fetched value.
+  When `nothing`, Iduna fetches or infers the gene ID.
+- `ensembl_protein_id = nothing`: Ensembl protein ID to use instead of a fetched
+  value. When `nothing`, Iduna uses fetched metadata when available.
+- `mmseqs_db = nothing`: MMseqs2 database prefix used for expansion. When
+  `nothing`, expansion is only valid with `no_expansion=true`; otherwise Iduna
+  throws an error.
+- `no_expansion::Bool = false`: run MMseqs2/HMMER expansion after the ThorAxe
+  MSA stage. When `true`, Iduna stops after ThorAxe and `mmseqs_db` is not
+  required.
+- `workdir = nothing`: output directory. When `nothing`, this defaults to a
+  directory named after the input ID in the current directory.
+- `output_dir = nothing`: older name for `workdir`. When `nothing`, `workdir`
+  controls the output directory.
+- `overwrite::Bool = false`: reuse package-owned stage outputs when their run
+  identity still matches. When `true`, Iduna rebuilds those outputs.
+- `pid_thresholds = DEFAULT_PID_THRESHOLDS`: ThorAxe percent identity (PID)
+  thresholds to test; currently `[10, 20, 30, 60, 80]`.
+- `species = nothing`: species name to use instead of a fetched value. When
+  `nothing`, Iduna uses fetched metadata when available.
 - `specieslist::AbstractString = "ases"`: species preset, list, file, or name.
+  Accepted presets are `"ases"` for the default curated set used on the Ases
+  webserver, and `"all"` or `""` for unrestricted ThorAxe species selection.
+  Other values are treated as a species-list file path, a comma-separated species
+  list, or one species name.
 - `orthology::AbstractString = "1:1"`: Ensembl homology relationship filter.
-- `specieslist_filter::Bool = true`: filter requested species by Ensembl homology.
+  Accepted values are `"1:1"` for one-to-one orthologs, `"1:n"` for one-to-one
+  and one-to-many orthologs, and `"m:n"` for one-to-one, one-to-many, and
+  many-to-many orthologs.
+- `specieslist_filter::Bool = true`: filter requested species by Ensembl
+  homology. When `false`, Iduna passes the requested species list through without
+  this Ensembl homology filter.
 - `biomart_datasets_filter::Bool = true`: keep species with BioMart datasets.
-- `thoraxe_input_dir`: complete transcript-query bundle to copy and reuse.
+  When `false`, Iduna does not remove species that lack a matching BioMart
+  dataset.
+- `thoraxe_input_dir = nothing`: complete transcript-query bundle to copy and
+  reuse. When `nothing`, Iduna runs transcript-query to build the input bundle.
+- `transcript_query_retries::Integer = 2`: number of transcript-query attempts.
 - `pid_sample_count::Integer = 45`: number of species samples per PID candidate.
+  `0` disables sampling-based seed selection and carries every eligible PID
+  candidate forward.
 - `pid_sample_fraction::Real = 0.8`: fraction of non-reference species per sample.
-- `pid_sample_seed`: random seed for reproducible PID sampling.
+  Must be greater than `0` and at most `1`.
+- `pid_sample_seed = nothing`: random seed for reproducible PID sampling. When
+  `nothing`, Iduna chooses a random seed and records it in the result.
 - `sampling_strategy::Symbol = :common`: how species samples are shared across
-  PID candidates.
-- `centroids::Bool = false`: also save a centroid-level MSA during expansion.
-- `mmseqs_threads`: number of threads passed to MMseqs2.
+  PID candidates. Accepted values are `:common`, which samples one shared species
+  universe from species common to all eligible PID candidates; `:independent`,
+  which samples separately within each PID candidate; and `:input`, which samples
+  from the effective input species list after filtering.
+- `match_mode::Integer = 1`: MMseqs2 profile matching mode passed to
+  `mmseqs msa2profile --match-mode`.
+- `match_ratio = nothing`: optional MMseqs2 match-ratio setting. When `nothing`,
+  Iduna does not pass `--match-ratio` to MMseqs2. Other values are passed to
+  `mmseqs msa2profile --match-ratio`.
+- `hmmbuild_symfrac::Real = 0.0`: HMMER `hmmbuild` symbol fraction. Must be
+  between `0.0` and `1.0`.
+- `centroids::Bool = false`: only save the full expanded MSA. When `true`, Iduna
+  also saves a centroid-level MSA and requires expansion.
+- `mmseqs_threads = Threads.nthreads()`: number of threads passed to MMseqs2.
+  This uses the active Julia thread count unless another value is passed.
 
 # Returns
 
@@ -964,11 +1017,17 @@ end
 
 Load a selected ThorAxe seed MSA from an [`IdunaResult`](@ref) as a MIToS MSA.
 
+# Arguments
+
+- `result::IdunaResult`: result whose selected seed MSA should be loaded.
+
 # Keywords
 
 - `keepinserts::Bool = true`: keep insertion columns when reading the MSA.
-- `pid`: choose the seed with this percent identity threshold.
-- `index`: choose the seed by position in `result.thoraxe_msa.seeds`.
+- `pid = nothing`: choose the seed with this percent identity threshold. Pass
+  either `pid` or `index`, not both.
+- `index = nothing`: choose the seed by position in `result.thoraxe_msa.seeds`.
+  Pass either `pid` or `index`, not both.
 """
 function load_seed_msa(result::Utils.IdunaResult; keepinserts::Bool = true,
         pid::Union{Nothing, Real} = nothing,
@@ -985,11 +1044,17 @@ end
 
 Load an expanded match-column MSA from an [`IdunaResult`](@ref) as a MIToS MSA.
 
+# Arguments
+
+- `result::IdunaResult`: result whose expanded MSA should be loaded.
+
 # Keywords
 
 - `keepinserts::Bool = true`: keep insertion columns when reading the MSA.
-- `pid`: choose the expansion linked to this percent identity threshold.
-- `index`: choose the expansion by position in `result.expansions`.
+- `pid = nothing`: choose the expansion linked to this percent identity threshold.
+  Pass either `pid` or `index`, not both.
+- `index = nothing`: choose the expansion by position in `result.expansions`.
+  Pass either `pid` or `index`, not both.
 
 # Throws
 

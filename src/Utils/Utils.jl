@@ -60,7 +60,8 @@ export DEFAULT_PID_THRESHOLDS,
 """
     DEFAULT_PID_THRESHOLDS
 
-Default ThorAxe percent identity (PID) thresholds tested during seed selection.
+Default ThorAxe percent identity (PID) thresholds tested during seed selection:
+`[10.0, 20.0, 30.0, 60.0, 80.0]`.
 """
 const DEFAULT_PID_THRESHOLDS = Float64[10, 20, 30, 60, 80]
 
@@ -68,7 +69,7 @@ const DEFAULT_PID_THRESHOLDS = Float64[10, 20, 30, 60, 80]
     S_EXON_CODE_FEATURE
 
 Stockholm column annotation name used to store one short s-exon code per MSA
-column.
+column. The value is `"SExonCode"`.
 """
 const S_EXON_CODE_FEATURE = "SExonCode"
 
@@ -76,14 +77,14 @@ const S_EXON_CODE_FEATURE = "SExonCode"
     S_EXON_CODE_MAP_FEATURE
 
 Stockholm file annotation name used to map short s-exon codes back to ThorAxe
-s-exon IDs.
+s-exon IDs. The value is `"SExonCodeMap"`.
 """
 const S_EXON_CODE_MAP_FEATURE = "SExonCodeMap"
 
 """
     S_EXON_MISSING_CODE
 
-Column code used when an MSA column has no assigned s-exon.
+Column code used when an MSA column has no assigned s-exon. The value is `'.'`.
 """
 const S_EXON_MISSING_CODE = '.'
 const _STAGE_STATE_SCHEMA_VERSION = 1
@@ -132,6 +133,10 @@ end
     strip_ensembl_version(id) -> String
 
 Remove the version suffix from an Ensembl ID.
+
+# Arguments
+
+- `id::AbstractString`: Ensembl ID, with or without a version suffix.
 """
 strip_ensembl_version(id::AbstractString)::String = String(split(String(id), '.'; limit = 2)[1])
 
@@ -145,6 +150,10 @@ end
 
 Return common sequence-name forms for an ID, including version-stripped Ensembl
 names and names without numeric prefixes.
+
+# Arguments
+
+- `id::AbstractString`: sequence name or biological identifier to normalize.
 """
 function sequence_name_variants(id::AbstractString)
     variants = String[]
@@ -160,6 +169,11 @@ end
     resolve_sequence_name(msa, ids; fallback=false)
 
 Find the first sequence name in `msa` that matches one of the requested IDs.
+
+# Arguments
+
+- `msa`: MSA whose sequence names should be searched.
+- `ids`: one ID or an iterable of IDs to match against sequence-name variants.
 
 # Keywords
 
@@ -195,6 +209,11 @@ end
 
 Align two protein sequences and count mismatches, insertions, and deletions.
 
+# Arguments
+
+- `query_seq::AbstractString`: query protein sequence.
+- `reference_seq::AbstractString`: reference protein sequence.
+
 # Keywords
 
 - `include_alignment::Bool = false`: include the BioAlignments alignment object
@@ -226,6 +245,10 @@ end
     is_ensembl_transcript_id(id) -> Bool
 
 Return `true` when `id` looks like an Ensembl transcript ID.
+
+# Arguments
+
+- `id::AbstractString`: identifier to classify.
 """
 is_ensembl_transcript_id(id::AbstractString)::Bool = occursin(r"^ENS[A-Z]*T[0-9]+(\.[0-9]+)?$", String(id))
 
@@ -236,6 +259,10 @@ is_ensembl_transcript_id(id::AbstractString)::Bool = occursin(r"^ENS[A-Z]*T[0-9]
     is_uniprot_id(id) -> Bool
 
 Return `true` when `id` looks like a UniProt accession or isoform accession.
+
+# Arguments
+
+- `id::AbstractString`: identifier to classify.
 """
 is_uniprot_id(id::AbstractString)::Bool = occursin(
     r"^([OPQ][0-9][A-Z0-9]{3}[0-9]|[A-NR-Z][0-9][A-Z][A-Z0-9]{2}[0-9]|[A-NR-Z][0-9][A-Z][A-Z0-9]{2}[0-9][A-Z][A-Z0-9]{2}[0-9])(-[0-9]+)?$",
@@ -245,6 +272,10 @@ is_uniprot_id(id::AbstractString)::Bool = occursin(
     id_kind(id) -> Symbol
 
 Classify an input ID as `:uniprot` or `:ensembl_transcript`.
+
+# Arguments
+
+- `id::AbstractString`: identifier to classify.
 
 # Throws
 
@@ -260,6 +291,10 @@ end
     format_pid(pid) -> String
 
 Format a percent identity value for user-facing tables and messages.
+
+# Arguments
+
+- `pid::Real`: percent identity value.
 """
 format_pid(pid::Real) = @sprintf("%.1f", Float64(pid))
 
@@ -267,6 +302,10 @@ format_pid(pid::Real) = @sprintf("%.1f", Float64(pid))
     format_pid_dir(pid) -> String
 
 Format a percent identity value as a stable directory name.
+
+# Arguments
+
+- `pid::Real`: percent identity value.
 """
 format_pid_dir(pid::Real) = "pid_$(@sprintf("%.2f", Float64(pid)))"
 
@@ -279,6 +318,10 @@ end
     decode_body(resp) -> String
 
 Read an HTTP response body as text, including gzipped response bodies.
+
+# Arguments
+
+- `resp::HTTP.Response`: HTTP response whose body should be decoded.
 """
 function decode_body(resp::HTTP.Response)::String
     body = _body_bytes(resp.body)
@@ -293,10 +336,18 @@ end
 
 Choose and create the Iduna work directory.
 
+# Arguments
+
+- `input_id::AbstractString`: input ID used to derive the default output
+  directory when no directory is passed.
+
 # Keywords
 
-- `workdir`: preferred name for the output directory.
-- `output_dir`: older name for the same setting.
+- `workdir = nothing`: preferred name for the output directory. When `nothing`,
+  `output_dir` is used, or the input ID is used if `output_dir` is also
+  `nothing`.
+- `output_dir = nothing`: older name for the same setting. When `nothing`,
+  `workdir` controls the output directory.
 - `overwrite::Bool = false`: accepted for caller consistency; stage cleanup is
   handled by each stage.
 
@@ -329,6 +380,11 @@ end
 
 Remove a path only when it is inside the active work directory.
 
+# Arguments
+
+- `path::AbstractString`: file or directory to remove.
+- `root::AbstractString`: work directory that must contain `path`.
+
 # Throws
 
 - `ErrorException`: if `path` is outside `root`.
@@ -351,11 +407,16 @@ end
 Run an external command and write its standard output and standard error to
 files.
 
+# Arguments
+
+- `cmd::Cmd`: command to run.
+
 # Keywords
 
 - `stdout_path::AbstractString`: file for standard output.
 - `stderr_path::AbstractString`: file for standard error.
-- `workdir`: directory where the command should run.
+- `workdir = nothing`: directory where the command should run. When `nothing`,
+  the command runs in the current directory.
 """
 function run_logged(cmd::Cmd;
         stdout_path::AbstractString,
@@ -381,6 +442,10 @@ end
     fasta_sequence(content) -> Union{Nothing, String}
 
 Extract the sequence from FASTA text and return it in upper case.
+
+# Arguments
+
+- `content::AbstractString`: FASTA text to parse.
 """
 function fasta_sequence(content::AbstractString)::Union{Nothing, String}
     seq = String[]
@@ -409,6 +474,11 @@ end
     format_fasta(id, seq) -> String
 
 Format one protein sequence as FASTA text.
+
+# Arguments
+
+- `id::AbstractString`: FASTA record identifier.
+- `seq::AbstractString`: protein sequence to write.
 """
 format_fasta(id::AbstractString,
     seq::AbstractString)::String = string(">", id, "\n", _wrap_sequence(uppercase(String(seq))))
@@ -438,6 +508,11 @@ end
     write_text(path, text) -> String
 
 Write text to a file and create parent directories when needed.
+
+# Arguments
+
+- `path::AbstractString`: output file path.
+- `text::AbstractString`: text to write.
 """
 function write_text(path::AbstractString, text::AbstractString)
     mkpath(dirname(path))
@@ -451,6 +526,11 @@ end
     write_json(path, obj) -> String
 
 Write an object as pretty JSON and create parent directories when needed.
+
+# Arguments
+
+- `path::AbstractString`: output file path.
+- `obj`: JSON-serializable object to write.
 """
 function write_json(path::AbstractString, obj)
     mkpath(dirname(path))
@@ -473,6 +553,11 @@ end
     _pipeline_stage_dir(workdir, stage_key) -> String
 
 Return the package-owned directory used to store state for one pipeline stage.
+
+# Arguments
+
+- `workdir::AbstractString`: Iduna work directory.
+- `stage_key::AbstractString`: stable key identifying one stage instance.
 """
 function _pipeline_stage_dir(workdir::AbstractString, stage_key::AbstractString)
     safe_key = replace(String(stage_key), ':' => "__", '/' => "__", '\\' => "__")
@@ -483,6 +568,10 @@ end
     _stage_state_path(stage_dir) -> String
 
 Return the path to the JSON state file stored inside a stage directory.
+
+# Arguments
+
+- `stage_dir::AbstractString`: stage state directory.
 """
 _stage_state_path(stage_dir::AbstractString) = joinpath(stage_dir, _STAGE_STATE_FILE)
 
@@ -544,12 +633,36 @@ function _stage_existing_started_at(stage_dir::AbstractString, identity_hash::Ab
 end
 
 """
-    _write_stage_state(stage_dir; stage, stage_key, status, identity, outputs, kwargs...)
+    _write_stage_state(stage_dir; stage, stage_key, status, identity,
+                       outputs=NamedTuple(), warnings=String[], exception=nothing,
+                       action=nothing, workdir=stage_dir,
+                       preserve_started_at=false, extra=NamedTuple())
 
 Write the JSON state file that lets Iduna decide whether a stage can be reused.
 
 This is an internal contract shared by pipeline stages. Paths under `workdir`
 are stored as relative paths so a result directory can be moved.
+
+# Arguments
+
+- `stage_dir::AbstractString`: directory where the stage state file is written.
+
+# Keywords
+
+- `stage::AbstractString`: human-readable stage name.
+- `stage_key::AbstractString`: stable key identifying this stage instance.
+- `status::Symbol`: stage status, such as `:running`, `:done`, or `:failed`.
+- `identity`: JSON-serializable data that defines the run inputs.
+- `outputs = NamedTuple()`: JSON-serializable output paths or path groups.
+- `warnings::AbstractVector{<:AbstractString} = String[]`: non-fatal warnings to
+  record.
+- `exception = nothing`: exception summary to record for failed stages.
+- `action = nothing`: stage action, such as `:run`, `:rebuild`, or `:reuse`.
+- `workdir::AbstractString = stage_dir`: root used to store output paths as
+  relative paths.
+- `preserve_started_at::Bool = false`: keep the previous start timestamp when
+  updating a running stage with the same identity.
+- `extra = NamedTuple()`: extra JSON-serializable fields to merge into the state.
 """
 function _write_stage_state(stage_dir::AbstractString;
         stage::AbstractString,
@@ -596,9 +709,19 @@ function _write_stage_state(stage_dir::AbstractString;
 end
 
 """
-    _classify_stage_state(stage_dir, identity, outputs; stage_label="stage")
+    _classify_stage_state(stage_dir, identity, required_outputs; stage_label="stage")
 
 Compare a saved stage state with the requested inputs and outputs.
+
+# Arguments
+
+- `stage_dir::AbstractString`: directory that may contain a stage state file.
+- `identity`: JSON-serializable data that defines the requested run inputs.
+- `required_outputs`: output paths or path groups that must exist for reuse.
+
+# Keywords
+
+- `stage_label::AbstractString = "stage"`: label used in warnings.
 
 # Returns
 
@@ -667,6 +790,10 @@ end
     s_exon_blocks_path(stockholm_path) -> String
 
 Return the default TSV path for s-exon column blocks next to a Stockholm MSA.
+
+# Arguments
+
+- `stockholm_path::AbstractString`: Stockholm MSA path.
 """
 function s_exon_blocks_path(stockholm_path::AbstractString)
     root, _ = splitext(String(stockholm_path))
@@ -678,9 +805,22 @@ end
 
 Read the per-column s-exon codes from an MSA.
 
+When the annotation is absent, this returns one [`S_EXON_MISSING_CODE`](@ref)
+for each MSA column.
+
+# Arguments
+
+- `msa`: MSA to inspect.
+
+# Keywords
+
+- `feature::AbstractString = S_EXON_CODE_FEATURE`: Stockholm column annotation
+  name used to read s-exon codes.
+
 # Throws
 
-- `ErrorException`: if the MSA does not contain the requested annotation.
+- `ErrorException`: if the requested annotation exists but has a different length
+  from the MSA.
 """
 function s_exon_codes(msa::AbstractMultipleSequenceAlignment;
         feature::AbstractString = S_EXON_CODE_FEATURE)
@@ -697,6 +837,15 @@ end
     has_s_exon_annotations(msa; feature=S_EXON_CODE_FEATURE) -> Bool
 
 Return `true` when an MSA has Iduna s-exon column annotations.
+
+# Arguments
+
+- `msa`: MSA to inspect.
+
+# Keywords
+
+- `feature::AbstractString = S_EXON_CODE_FEATURE`: Stockholm column annotation
+  name used to detect s-exon codes.
 """
 function has_s_exon_annotations(msa::AbstractMultipleSequenceAlignment;
         feature::AbstractString = S_EXON_CODE_FEATURE)
@@ -708,6 +857,17 @@ end
     s_exon_code_map(msa; feature=S_EXON_CODE_MAP_FEATURE)
 
 Read the map from short s-exon codes to ThorAxe s-exon IDs.
+
+When the annotation is absent, this returns an empty dictionary.
+
+# Arguments
+
+- `msa`: MSA to inspect.
+
+# Keywords
+
+- `feature::AbstractString = S_EXON_CODE_MAP_FEATURE`: Stockholm file annotation
+  name used to read the s-exon code map.
 """
 function s_exon_code_map(msa::AbstractMultipleSequenceAlignment;
         feature::AbstractString = S_EXON_CODE_MAP_FEATURE)
@@ -737,7 +897,9 @@ function _format_s_exon_code_map(code_map)
 end
 
 """
-    set_s_exon_annotations!(msa, codes, code_map; kwargs...)
+    set_s_exon_annotations!(msa, codes, code_map;
+                            code_feature=S_EXON_CODE_FEATURE,
+                            map_feature=S_EXON_CODE_MAP_FEATURE)
 
 Store Iduna s-exon annotations on an MSA.
 
@@ -746,6 +908,13 @@ Store Iduna s-exon annotations on an MSA.
 - `msa`: MSA to annotate.
 - `codes::AbstractString`: one short code for each MSA column.
 - `code_map`: map from each short code to its ThorAxe s-exon ID.
+
+# Keywords
+
+- `code_feature::AbstractString = S_EXON_CODE_FEATURE`: Stockholm column
+  annotation name used to store s-exon codes.
+- `map_feature::AbstractString = S_EXON_CODE_MAP_FEATURE`: Stockholm file
+  annotation name used to store the s-exon code map.
 """
 function set_s_exon_annotations!(msa::AbstractMultipleSequenceAlignment,
         codes::AbstractString,
@@ -801,15 +970,28 @@ function _write_s_exon_block_rows(io,
 end
 
 """
-    write_s_exon_blocks_tsv(path, msa; alignment, pid=nothing, append=false, kwargs...)
+    write_s_exon_blocks_tsv(path, msa; alignment, pid=nothing, append=false,
+                            code_feature=S_EXON_CODE_FEATURE,
+                            map_feature=S_EXON_CODE_MAP_FEATURE)
 
 Write a TSV table that groups neighboring MSA columns with the same s-exon.
+
+# Arguments
+
+- `path::AbstractString`: TSV output path.
+- `msa`: MSA to summarize. When s-exon annotations are absent, only the header is
+  written.
 
 # Keywords
 
 - `alignment::AbstractString`: label for the MSA being written.
-- `pid`: percent identity threshold to record in the table.
+- `pid = nothing`: percent identity threshold to record in the table. When
+  `nothing`, the PID column is left empty for those rows.
 - `append::Bool = false`: append rows to an existing table.
+- `code_feature::AbstractString = S_EXON_CODE_FEATURE`: Stockholm column
+  annotation name used to read s-exon codes.
+- `map_feature::AbstractString = S_EXON_CODE_MAP_FEATURE`: Stockholm file
+  annotation name used to read the s-exon code map.
 """
 function write_s_exon_blocks_tsv(path::AbstractString,
         msa::AbstractMultipleSequenceAlignment;
@@ -831,9 +1013,13 @@ function write_s_exon_blocks_tsv(path::AbstractString,
 end
 
 """
-    ensure_mmseqs_db(db)
+    ensure_mmseqs_db(db) -> String
 
 Check that an MMseqs2 database prefix has the files Iduna needs.
+
+# Arguments
+
+- `db::AbstractString`: MMseqs2 database prefix.
 
 # Throws
 
@@ -1029,6 +1215,15 @@ end
     collect_stage_summaries(workdir; stage_keys=nothing)
 
 Read stage summaries from an Iduna work directory.
+
+# Arguments
+
+- `workdir::AbstractString`: Iduna work directory to scan.
+
+# Keywords
+
+- `stage_keys = nothing`: optional stage keys to keep. When `nothing`, all found
+  stage summaries are returned.
 """
 function collect_stage_summaries(workdir::AbstractString; stage_keys = nothing)
     paths = String[]
@@ -1110,6 +1305,10 @@ end
     result_summary(result) -> NamedTuple
 
 Return a compact, JSON-friendly summary of an [`IdunaResult`](@ref).
+
+# Arguments
+
+- `result::IdunaResult`: result to summarize.
 """
 function result_summary(result::IdunaResult)
     result = _relative_result_paths(result)
