@@ -200,7 +200,7 @@
             write(outputs.match_stockholm,
                 "# STOCKHOLM 1.0\n#=GF SExonCodeMap \"0\"=>\"1_0\"\nseed ACDE\n#=GC SExonCode 0000\n//\n")
             write(outputs.a3m_path, "cached a3m\n")
-            write(outputs.hits_fasta, ">seed one\nACDE\n>hit one\nACDF\n>hit_two\nACDG\n")
+            write(outputs.hits_fasta, ">seed one\nACDE\n>hit one\nACDFG\n>hit_two\nACD\n")
             if centroids
                 mkpath(dirname(outputs.centroid_full_stockholm))
                 write(outputs.centroid_full_stockholm,
@@ -274,10 +274,10 @@
             target, seed, tmp; mmseqs_db = db, mmseqs_threads = 1)
         cached_with_new_mmseqs_threads = Iduna.MSAExpansion.expand_msa(
             target, seed, tmp; mmseqs_db = db, mmseqs_threads = 8)
-        hits_msa = Iduna.MSAExpansion.read_file(hits_fasta, Iduna.MSAExpansion.FASTA)
+        hit_counts = Iduna.MSAExpansion._cached_hit_counts(hits_fasta, Set(["seed"]))
         @test cached.status === :skipped
         @test cached_with_new_mmseqs_threads.status === :skipped
-        @test cached.n_hits == Iduna.MSAExpansion.nsequences(hits_msa)
+        @test cached.n_hits == hit_counts.n_hits
         @test cached.n_hits == 3
         @test cached.n_new_hits == 2
 
