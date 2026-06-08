@@ -4,3 +4,4 @@ Iduna = "a1090517-0d21-41a4-b698-8a258aa9b9e4"
 
 [compat]
 Documenter = "1.17.0"
+Iduna = "0.7.0"
