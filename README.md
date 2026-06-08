@@ -8,11 +8,20 @@
 [![Coverage](https://coveralls.io/repos/github/diegozea/Iduna.jl/badge.svg?branch=main)](https://coveralls.io/github/diegozea/Iduna.jl?branch=main)
 [![Aqua](https://raw.githubusercontent.com/JuliaTesting/Aqua.jl/master/badge.svg)](https://github.com/JuliaTesting/Aqua.jl)
 
-Iduna _(Intrinsically Disordered Unit Aligner)_ builds a ThorAxe MSA for one UniProt
-accession or Ensembl transcript ID and, by default, expands the selected seed MSA
-with MMseqs2/HMMER.
+## What Iduna Does
+
+Iduna _(Intrinsically Disordered Unit Aligner)_ builds a
+[ThorAxe](https://github.com/diegozea/ThorAxe.jl) multiple sequence alignment
+(MSA) for one UniProt accession or Ensembl transcript ID.
+
+An MSA lines up related protein sequences so they can be compared residue by
+residue. By default, Iduna expands the ThorAxe seed alignment with MMseqs2 and
+HMMER, then writes validation summaries for the final result.
+
 For transcript inputs, Iduna resolves the parent Ensembl gene and species before
-calling [ThorAxe](https://github.com/diegozea/ThorAxe.jl).
+calling ThorAxe.
+
+## Quick Start
 
 ```julia
 using Iduna
@@ -21,58 +30,38 @@ result = iduna("P20963"; mmseqs_db="/path/to/mmseqs/db", workdir="P20963")
 expanded = load_expanded_msa(result)
 ```
 
-The package writes a stable work directory containing ThorAxe outputs, PID seed
-MSAs, expansion outputs, logs, and validation stats. `result.workdir` is
-absolute, while artifact paths under it are reported relative to `workdir`.
-Pipeline stages record `stage_state.json` manifests with input identities and
-required outputs. Rerunning with `overwrite=false` reuses completed matching
-stages, including `transcript_query` bundles, and rebuilds only missing, stale,
-failed, or incomplete stages.
+`mmseqs_db` is required for the default full run. Use `no_expansion=true` when
+you only need the ThorAxe seed MSA.
 
-For seed selection, Iduna runs `transcript_query` once and builds one
-full-species candidate `msa_0` at each PID threshold. Each candidate is validated:
-indels versus UniProt exclude that PID from selection, while substitutions are
-reported as warnings. By default, `sampling_strategy=:common` draws one shared
-set of species samples from the species common to all eligible candidates, runs
-each PID with those same sampled species lists, and scores by HHsuite against
-that PID's own full `msa_0`. Use `sampling_strategy=:independent` for PID-local
-sampling or `sampling_strategy=:input` to sample from the effective input species
-list. The selected seed is the highest median identity, then highest mean
-identity, then the largest candidate `msa_0` species count, then the first PID
-in `pid_thresholds` order. The default is 45 samples, 80% of non-reference
-species per sample, and a random `pid_sample_seed` recorded in `result.json`.
-
-The repeated ThorAxe runs used for PID sample scoring can run at the same time.
-For an installed `iduna` app, set Julia threads with an environment variable:
+## Command Line Use
 
 ```bash
-JULIA_NUM_THREADS=4 iduna P20963 --mmseqs-db /path/to/mmseqs/db --mmseqs-threads 8
+julia --project=. -m Iduna P20963 --mmseqs-db /path/to/mmseqs/db --workdir P20963
 ```
 
-or pass Julia flags before the app separator:
+The installed `iduna` app accepts the same Iduna options. Julia thread flags
+must be passed to Julia before the Iduna arguments; `--mmseqs-threads` controls
+only the MMseqs2 expansion step.
 
-```bash
-iduna --threads=4 -- P20963 --mmseqs-db /path/to/mmseqs/db --mmseqs-threads 8
-```
+## Main Outputs
 
-From a source checkout, start Julia with more than one Julia thread:
+Iduna writes a stable work directory. The main files and folders are:
 
-```bash
-julia --threads 4 --project=. -m Iduna P20963 --mmseqs-db /path/to/mmseqs/db --mmseqs-threads 8
-```
+- `result.json`: a summary that can be loaded later with `load_result`.
+- `thoraxe_msa/`: ThorAxe seed alignments and seed-selection summaries.
+- `expansion/`: expanded MSAs from MMseqs2/HMMER, unless expansion is skipped.
+- `validation/`: size, diversity, and query-sequence checks.
+- `logs/`: logs from the external tools.
 
-This affects the ThorAxe sampling step. The app option `--mmseqs-threads` is
-different: it controls MMseqs2 during the expansion step. Do not put
-`--threads` after the Iduna arguments; it is a Julia runtime flag, not an Iduna
-option.
+Rerunning with `overwrite=false` reuses matching completed stages when their
+inputs and required outputs still match.
 
-To stop after the ThorAxe MSA stage, use `no_expansion=true` in Julia or
-`--no-expansion` in the app. In that mode `mmseqs_db` is not required,
-`isempty(result.expansions)`, and the ThorAxe MSA paths are available from
-`result.thoraxe_msa.baseline_stockholms`,
-`result.thoraxe_msa.baseline_fastas`,
-`result.thoraxe_msa.seeds[1].stockholm_path`, and
-`result.thoraxe_msa.seeds[1].fasta_path`.
+## Common Options
+
+### Stop After ThorAxe
+
+Use `no_expansion=true` in Julia or `--no-expansion` in the app. In this mode,
+`mmseqs_db` is not required.
 
 ```julia
 thoraxe_only = iduna("ENST00000362089.10"; no_expansion=true,
@@ -80,35 +69,33 @@ thoraxe_only = iduna("ENST00000362089.10"; no_expansion=true,
 seed = load_seed_msa(thoraxe_only)
 ```
 
-Set `pid_sample_count=0` to skip PID seed selection and carry every eligible
-PID candidate forward as a seed. In that mode `result.thoraxe_msa.seeds`,
-`result.expansions`, and `result.validations` may contain more than one entry;
-pass `pid=` or `index=` to `load_seed_msa` or `load_expanded_msa` when needed.
+### Choose Species
 
-Pass `centroids=true` in Julia, or `--centroids` in the app, to also save a
-centroid-level MSA before MMseqs2 expands centroid hits to cluster members. This
-is a side output; the regular `expanded_msa/` files remain the main result.
-If an earlier cached expansion lacks the requested centroid files, Iduna warns
-and rebuilds that PID expansion.
+Iduna starts from `specieslist="ases"` by default, the curated species set used
+by the Ases webserver. You can also pass `specieslist="all"`, a file path, a
+comma-separated list, or one species name.
 
-By default, Iduna starts from `specieslist="ases"`, the Ases webserver's
-12-species list, filters it with Ensembl homology using `orthology="1:1"`, then
-checks BioMart Ensembl Gene dataset availability with
-`biomart_datasets_filter=true`. BioMart dataset names are only used internally;
-ThorAxe still receives species names. Use `specieslist="all"` or
-`specieslist=""` for unrestricted ThorAxe species selection, pass a
-comma-separated species list, file path, or single species name for an explicit
-selection, use `orthology="1:n"` or `"m:n"` to keep broader ortholog
-relationships, set `specieslist_filter=false` to skip the Ensembl step, or set
-`biomart_datasets_filter=false` to skip the BioMart dataset preflight. The
-lowercase strings `"ases"` and `"all"` are reserved presets; use `./ases` or
-`./all` for files with those names.
-`transcript_query` runtime depends heavily on the number of species it has to
-download, so runs can be faster when you provide a small curated `specieslist`.
+Smaller curated species lists can make the ThorAxe input step faster.
+
+### Select Seeds
+
+Iduna tests several ThorAxe percent identity (PID) thresholds and selects a seed
+alignment. Set `pid_sample_count=0` to keep every eligible PID candidate instead
+of selecting only one.
+
+### Save Extra Files
+
+Set `centroids=true` in Julia or `--centroids` in the app to also save a
+centroid-level MSA. This is an extra output; the regular expanded MSA remains
+the main result.
 
 If a complete ThorAxe `transcript_query` bundle is already available, pass it as
 `thoraxe_input_dir`; Iduna copies it into the work directory and still runs the
-ThorAxe MSA stage. Unless `no_expansion=true`, it then continues with the
-MMseqs/HMMER expansion stages normally. Copied or previously generated
-`thoraxe_input/Ensembl` bundles are fingerprinted and reused on later reruns
-when the target, species list, orthology, and filter options match.
+ThorAxe MSA stage.
+
+## Documentation
+
+Read the [stable documentation](https://diegozea.github.io/Iduna.jl/stable/) or
+the [development documentation](https://diegozea.github.io/Iduna.jl/dev/) for
+the full API, output layout, species filtering, seed selection, and reuse
+behavior.

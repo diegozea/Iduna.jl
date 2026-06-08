@@ -22,8 +22,7 @@ Markdown, wrap lines at 92 characters, document exported functions and public
 types, and prefer the standard type/function sections (`# Fields`, `# Arguments`,
 `# Keywords`, `# Returns`, `# Throws`) when they help. Write docstrings and
 documentation in simple plain English. Avoid computer-science jargon unless the
-term is necessary, and prefer wording that is clear to readers coming from life
-sciences.
+term is necessary.
 
 ## Tests
 

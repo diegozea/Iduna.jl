@@ -4,16 +4,27 @@ CurrentModule = Iduna
 
 # Iduna
 
-Iduna builds one ThorAxe-based multiple sequence alignment and, by default,
-expands it with MMseqs2/HMMER. The public API is centered on [`iduna`](@ref),
-which accepts one UniProt accession or Ensembl transcript ID and writes a
-reproducible work directory.
+## Overview
+
+Iduna builds one ThorAxe-based multiple sequence alignment (MSA). By default, it
+then expands that alignment with MMseqs2 and HMMER. The public API is centered
+on [`iduna`](@ref), which accepts one UniProt accession or Ensembl transcript ID
+and writes a reproducible work directory.
 
 The package is file-first. External tools write logs and intermediate files
 under the chosen `workdir`, and the returned result stores paths plus the
 resolved identifiers, selected seed, expansion outputs, validation statistics,
 warnings, and status. `result.workdir` is absolute in memory; saved metadata
 uses relative paths for artifacts under `workdir`.
+
+For an Ensembl transcript input, Iduna resolves the parent Ensembl gene ID and
+species needed by ThorAxe. It does not require UniProt mapping on that path.
+
+Rerunning with `overwrite=false` reuses matching completed stages. This includes
+copied or previously generated `transcript_query` bundles. Iduna rebuilds a
+stage when it is missing, stale, failed, or incomplete.
+
+## Julia API
 
 ```julia
 using Iduna
@@ -29,16 +40,20 @@ result = iduna(
 expanded = load_expanded_msa(result)
 ```
 
+`mmseqs_db` is required for the default full run. Set `no_expansion=true` when
+only the ThorAxe MSA stage is needed.
+
+## Command Line
+
 The same entry point is available as a Julia 1.12 app:
 
 ```bash
 julia --project=. -m Iduna P20963 --mmseqs-db /path/to/mmseqs/uniref_db
 ```
 
-Add `--centroids` (or `centroids=true` in Julia) to also save a
-centroid-level MSA. This is a side output built from MMseqs2 centroid or
-consensus hits before cluster expansion; the regular expanded MSA remains the
-main result used by validation.
+The installed `iduna` app accepts the same Iduna options.
+
+## ThorAxe-Only Runs
 
 Use `no_expansion=true` in Julia, or `--no-expansion` in the app, to stop after
 the ThorAxe MSA stage. In that mode `mmseqs_db` is not required,
@@ -61,8 +76,17 @@ thoraxe_only.thoraxe_msa.seeds[1].stockholm_path
 julia --project=. -m Iduna ENST00000362089.10 --no-expansion
 ```
 
-For an Ensembl transcript input, Iduna resolves the parent Ensembl gene ID and
-species needed by ThorAxe. It does not require UniProt mapping on that path.
+## Centroid-Level MSA
+
+Add `--centroids` (or `centroids=true` in Julia) to also save a
+centroid-level MSA. This is a side output built from MMseqs2 centroid or
+consensus hits before cluster expansion; the regular expanded MSA remains the
+main result used by validation.
+
+If an earlier cached expansion lacks the requested centroid files, Iduna warns
+and rebuilds that PID expansion.
+
+## Choosing Species
 
 Iduna starts from `specieslist="ases"` by default, the curated set used on the
 Ases webserver, filters it with Ensembl homology using `orthology="1:1"`, then
@@ -85,6 +109,8 @@ download, so runs can be faster when you provide a small curated `specieslist`.
 Use `thoraxe_input_dir` to reuse an existing complete `transcript_query` bundle
 instead of fetching it again.
 
+## Seed Selection
+
 Seed selection is per percent identity (PID) threshold. Iduna runs
 `transcript_query` once and builds one full-species candidate `msa_0` at each
 PID threshold. Each candidate is validated: indels versus UniProt exclude that
@@ -105,6 +131,8 @@ candidate forward. In that mode `result.thoraxe_msa.seeds`,
 `result.expansions` is indexed like `result.thoraxe_msa.seeds` and can contain
 `missing` for an unavailable expansion result; use `pid=` or `index=` with
 `load_seed_msa` and `load_expanded_msa` to select one.
+
+## Threads
 
 The repeated ThorAxe runs used for PID sample scoring can run at the same time.
 For an installed `iduna` app, set Julia threads with an environment variable:
@@ -130,6 +158,8 @@ different: it controls MMseqs2 during the expansion step. Do not put
 `--threads` after the Iduna arguments; it is a Julia runtime flag, not an Iduna
 option.
 
+## Reusing ThorAxe Input
+
 If the ThorAxe `transcript_query` bundle has already been created, pass it with
 `thoraxe_input_dir`. Iduna copies that bundle into `workdir/thoraxe_input` and
 continues with the same ThorAxe MSA and percent identity (PID) seed stages. The
@@ -137,6 +167,12 @@ copied bundle is fingerprinted in a `thoraxe_input` stage manifest and reused on
 `overwrite=false` reruns when the target, species list, orthology, and filter
 options match. Unless `no_expansion=true`, Iduna also runs expansion and
 expanded-MSA validation.
+
+## Output Details
+
+The work directory contains ThorAxe outputs, PID seed MSAs, expansion outputs,
+logs, validation statistics, and stage manifests. See [Output Layout](@ref) for
+the full layout, path rules, and cache reuse details.
 
 ```@index
 ```
