@@ -4,9 +4,9 @@ import HMMER_jll
 import MMseqs2_jll
 
 using Dates: UTC, now
-using MIToS.MSA: A3M, AbstractMultipleSequenceAlignment, FASTA, Stockholm,
-                 getannotcolumn, ncolumns, nsequences, read_file, sequencenames,
-                 write_file
+using MIToS.MSA: A3M, AbstractMultipleSequenceAlignment, FASTASequences, Stockholm,
+                 getannotcolumn, ncolumns, nsequences, read_file, sequence_id,
+                 sequencenames, write_file
 
 using ..Utils: ExpansionResult, ResolvedTarget, SeedSelection, _resolve_artifact_path,
                ensure_mmseqs_db, format_pid, format_pid_dir, run_logged, safe_rm,
@@ -551,10 +551,10 @@ function _cached_hit_counts(hits_fasta::AbstractString, seed_set::Set{String})
     if filesize(hits_fasta) == 0
         return (; n_hits = 0, n_new_hits = 0)
     end
-    hits_msa = read_file(hits_fasta, FASTA)
-    hit_names = _normalize_id.(String.(sequencenames(hits_msa)))
+    hits = read_file(hits_fasta, FASTASequences)
+    hit_names = _normalize_id.(sequence_id.(hits))
     return (;
-        n_hits = nsequences(hits_msa),
+        n_hits = length(hit_names),
         n_new_hits = count(name -> !(name in seed_set), hit_names)
     )
 end
