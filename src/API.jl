@@ -5,46 +5,49 @@ import JSON
     iduna(; id, mmseqs_db=nothing, no_expansion=false, kwargs...) -> IdunaResult
     iduna(id; mmseqs_db=nothing, no_expansion=false, kwargs...) -> IdunaResult
 
-Build one ThorAxe-based MSA from a UniProt accession or an Ensembl transcript
-ID and, by default, expand it with MMseqs2/HMMER. Set `no_expansion=true` to
-stop after the ThorAxe MSA stage without requiring an MMseqs2 database.
+Build one ThorAxe-based MSA from a UniProt accession or Ensembl transcript ID.
+By default, Iduna then expands the MSA with MMseqs2 and HMMER and validates the
+result.
 
-The function is file-first: every external tool writes its inputs, outputs, and
-logs under `workdir`, and the returned [`IdunaResult`](@ref) stores paths plus
-the resolved identifiers and validation statistics.
+Iduna is file-first: external tools write inputs, outputs, and logs under
+`workdir`. The returned [`IdunaResult`](@ref) stores paths, resolved IDs,
+selected seeds, validation statistics, warnings, and status.
 
-`orthology` controls the ThorAxe relationship filter (`"1:1"`, `"1:n"`, or
-`"m:n"`). By default, Iduna starts from `specieslist="ases"`, the Ases
-webserver's 12-species list. Set `specieslist="all"` or `specieslist=""` for
-unrestricted ThorAxe species selection, or pass a comma-separated species list,
-file path, or single species name. The lowercase strings `"ases"` and `"all"`
-are reserved presets; use `./ases` or `./all` for files with those names. Iduna
-filters the requested species with Ensembl homology and then filters against
-currently available BioMart Ensembl Gene datasets before `transcript_query`.
-That step can be slow, especially for broad species lists; runs are often faster
-when a small curated `specieslist` is provided. `pid_sample_count` controls how
-many PID-specific species samples are drawn from each candidate `msa_0` and
-scored against that PID's full-species MSA; the default is 45.
-`pid_sample_fraction` controls the fraction of non-reference species retained in
-each sample, and `pid_sample_seed` can make the sampling reproducible. If
-omitted, a random seed is recorded with the result. `sampling_strategy` controls
-how species samples are shared across PID thresholds; the default `:common`
-uses one shared set of species samples for all eligible PID candidates.
-Candidate `msa_0`
-reconstructions with indels versus UniProt are reported and excluded from seed
-selection; substitution-only differences are warnings. Seed selection uses
-highest median identity, then highest mean identity, then the largest candidate
-`msa_0` species count, then the first PID in `pid_thresholds` order. Set
-`pid_sample_count=0` to skip seed selection and carry every eligible PID
-candidate forward. Pass `thoraxe_input_dir` to reuse a complete
-transcript_query bundle instead of fetching it again. Set `centroids=true` to
-also save the centroid-level MSA before MMseqs2 expands centroid hits to cluster
-members; the main expansion and validation still use the full expanded MSA.
-`centroids=true` requires expansion and cannot be combined with
-`no_expansion=true`. To run the repeated ThorAxe sample runs faster, start Julia
-with more than one Julia thread, for example `julia --threads 4`; Iduna uses
-those threads automatically during PID sample scoring. The `mmseqs_threads`
-keyword controls MMseqs2 expansion only.
+# Arguments
+
+- `id`: UniProt accession or Ensembl transcript ID. It can be passed as the first
+  positional argument or as a keyword.
+
+# Keywords
+
+- `mmseqs_db`: MMseqs2 database prefix used for expansion.
+- `no_expansion::Bool = false`: stop after the ThorAxe MSA stage.
+- `workdir`: output directory. Defaults to a directory named after the input ID.
+- `overwrite::Bool = false`: rebuild package-owned stage outputs.
+- `pid_thresholds`: ThorAxe percent identity (PID) thresholds to test.
+- `specieslist::AbstractString = "ases"`: species preset, list, file, or name.
+- `orthology::AbstractString = "1:1"`: Ensembl homology relationship filter.
+- `specieslist_filter::Bool = true`: filter requested species by Ensembl homology.
+- `biomart_datasets_filter::Bool = true`: keep species with BioMart datasets.
+- `thoraxe_input_dir`: complete transcript-query bundle to copy and reuse.
+- `pid_sample_count::Integer = 45`: number of species samples per PID candidate.
+- `pid_sample_fraction::Real = 0.8`: fraction of non-reference species per sample.
+- `pid_sample_seed`: random seed for reproducible PID sampling.
+- `sampling_strategy::Symbol = :common`: how species samples are shared across
+  PID candidates.
+- `centroids::Bool = false`: also save a centroid-level MSA during expansion.
+- `mmseqs_threads`: number of threads passed to MMseqs2.
+
+# Returns
+
+- An [`IdunaResult`](@ref) with paths and summaries for each completed stage.
+
+# Notes
+
+Set `no_expansion=true` when only the ThorAxe seed MSA is needed; then
+`mmseqs_db` is not required. Set `pid_sample_count=0` to carry every eligible PID
+candidate forward instead of selecting one seed. `centroids=true` requires
+expansion and cannot be combined with `no_expansion=true`.
 """
 function iduna(; id::Union{Nothing, AbstractString} = nothing,
         uniprot_id::Union{Nothing, AbstractString} = nothing,
@@ -581,10 +584,19 @@ end
 """
     load_result(workdir) -> IdunaResult
 
-Reconstruct an [`IdunaResult`](@ref) from an existing Iduna output directory
-without running pipeline stages or writing files. The loader expects the current
-move-safe result schema, where `result.json` contains structured ThorAxe seed
-records and artifact paths are relative to `workdir`.
+Rebuild an [`IdunaResult`](@ref) from an existing Iduna output directory.
+
+This reads `result.json` and related stage outputs. It does not run pipeline
+stages or write files.
+
+# Arguments
+
+- `workdir::AbstractString`: Iduna output directory to load.
+
+# Returns
+
+- An [`IdunaResult`](@ref). Paths inside the result are resolved against
+  `workdir`.
 """
 function load_result(workdir::AbstractString)
     root = abspath(String(workdir))
@@ -951,6 +963,12 @@ end
     load_seed_msa(result; keepinserts=true, pid=nothing, index=nothing)
 
 Load a selected ThorAxe seed MSA from an [`IdunaResult`](@ref) as a MIToS MSA.
+
+# Keywords
+
+- `keepinserts::Bool = true`: keep insertion columns when reading the MSA.
+- `pid`: choose the seed with this percent identity threshold.
+- `index`: choose the seed by position in `result.thoraxe_msa.seeds`.
 """
 function load_seed_msa(result::Utils.IdunaResult; keepinserts::Bool = true,
         pid::Union{Nothing, Real} = nothing,
@@ -966,6 +984,17 @@ end
     load_expanded_msa(result; keepinserts=true, pid=nothing, index=nothing)
 
 Load an expanded match-column MSA from an [`IdunaResult`](@ref) as a MIToS MSA.
+
+# Keywords
+
+- `keepinserts::Bool = true`: keep insertion columns when reading the MSA.
+- `pid`: choose the expansion linked to this percent identity threshold.
+- `index`: choose the expansion by position in `result.expansions`.
+
+# Throws
+
+- `ErrorException`: if the result was run with `no_expansion=true` or the chosen
+  expansion is not available.
 """
 function load_expanded_msa(result::Utils.IdunaResult; keepinserts::Bool = true,
         pid::Union{Nothing, Real} = nothing,

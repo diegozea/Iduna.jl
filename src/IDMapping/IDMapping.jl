@@ -1,3 +1,8 @@
+"""
+    IDMapping
+
+Resolve UniProt and Ensembl IDs into the target information needed by Iduna.
+"""
 module IDMapping
 
 import JSON
@@ -19,6 +24,21 @@ const _ENSEMBL_REST_BASE = "https://rest.ensembl.org"
 const _JSON_HEADERS = ["Accept" => "application/json"]
 const _FASTA_HEADERS = ["Accept" => "text/x-fasta"]
 
+"""
+    EnsemblCandidate
+
+One possible Ensembl transcript match for a UniProt entry.
+
+# Fields
+
+- `transcript_id::String`: Ensembl transcript ID.
+- `ensembl_gene_id`: Ensembl gene ID for the transcript.
+- `ensembl_protein_id`: Ensembl protein ID for the transcript.
+- `isoform_id`: UniProt isoform ID linked to this transcript.
+- `species`: Species name from UniProt or Ensembl.
+- `sequence_validated::Bool`: Whether the protein sequence matched UniProt.
+- `mapping_confirmed`: Whether the mapping was confirmed by sequence or metadata.
+"""
 Base.@kwdef struct EnsemblCandidate
     transcript_id::String
     ensembl_gene_id::Union{Nothing, String} = nothing
@@ -60,6 +80,19 @@ function _http_get(url::AbstractString,
     return nothing
 end
 
+"""
+    fetch_uniprot_entry(uniprot_id)
+
+Fetch UniProt metadata and linked Ensembl transcript IDs for one accession.
+
+# Returns
+
+- An internal record with species, sequence, gene IDs, and transcript mappings.
+
+# Throws
+
+- `ErrorException`: if UniProt metadata cannot be fetched.
+"""
 function fetch_uniprot_entry(uniprot_id::AbstractString;
         _http_get_fn::Function = _http_get)::_UniProtEntry
     url = "$(_UNIPROT_BASE)/uniprotkb/$(strip(String(uniprot_id))).json"
@@ -179,6 +212,12 @@ function _fetch_uniprot_fasta_sequence(uniprot_id::AbstractString;
     return seq
 end
 
+"""
+    sequences_match(uniprot_seq, ensembl_seq) -> Bool
+
+Return `true` when two protein sequences are the same after FASTA parsing and
+case normalization.
+"""
 function sequences_match(uniprot_seq::AbstractString, ensembl_seq::AbstractString)::Bool
     protein_alignment_stats(ensembl_seq, uniprot_seq).identical
 end
@@ -263,6 +302,15 @@ function _resolve_transcript_metadata(transcript_id::AbstractString;
     return _parse_transcript_lookup(data, transcript_id)
 end
 
+"""
+    resolve_transcript_gene(transcript_id) -> String
+
+Look up the parent Ensembl gene ID for an Ensembl transcript.
+
+# Throws
+
+- `ErrorException`: if Ensembl metadata cannot be fetched or parsed.
+"""
 function resolve_transcript_gene(transcript_id::AbstractString)::String
     return _resolve_transcript_metadata(transcript_id).ensembl_gene_id
 end
@@ -334,6 +382,26 @@ function _resolve_transcript_target(input_id::AbstractString,
     )
 end
 
+"""
+    resolve_target(input_id; workdir, kwargs...) -> ResolvedTarget
+
+Resolve one UniProt accession or Ensembl transcript ID into the IDs Iduna needs
+for ThorAxe and validation.
+
+# Keywords
+
+- `workdir::AbstractString`: Iduna work directory where fetched sequences are
+  saved.
+- `uniprot_id`: UniProt accession to record when the main input is a transcript.
+- `ensembl_gene_id`: Ensembl gene ID to use instead of a fetched value.
+- `ensembl_protein_id`: Ensembl protein ID to use instead of a fetched value.
+- `transcript_id`: Ensembl transcript ID to prefer when resolving a UniProt ID.
+- `species`: Species name to use instead of a fetched value.
+
+# Returns
+
+- A [`ResolvedTarget`](@ref) with resolved IDs, saved sequence paths, and warnings.
+"""
 function resolve_target(input_id::AbstractString;
         workdir::AbstractString,
         uniprot_id::Union{Nothing, AbstractString} = nothing,

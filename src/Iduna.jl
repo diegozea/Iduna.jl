@@ -1,3 +1,9 @@
+"""
+    Iduna
+
+Build, expand, validate, and reload ThorAxe-based multiple sequence alignments
+from UniProt accessions or Ensembl transcript IDs.
+"""
 module Iduna
 
 export IDMapping,

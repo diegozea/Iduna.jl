@@ -43,7 +43,7 @@ main result used by validation.
 Use `no_expansion=true` in Julia, or `--no-expansion` in the app, to stop after
 the ThorAxe MSA stage. In that mode `mmseqs_db` is not required,
 `isempty(result.expansions)`, and `load_seed_msa(result)` loads the selected
-ThorAxe PID seed.
+ThorAxe percent identity (PID) seed.
 
 ```julia
 thoraxe_only = iduna(
@@ -85,10 +85,11 @@ download, so runs can be faster when you provide a small curated `specieslist`.
 Use `thoraxe_input_dir` to reuse an existing complete `transcript_query` bundle
 instead of fetching it again.
 
-Seed selection is per PID threshold. Iduna runs `transcript_query` once and
-builds one full-species candidate `msa_0` at each PID threshold. Each candidate
-is validated: indels versus UniProt exclude that PID from selection, while
-substitutions are reported as warnings. By default, `sampling_strategy=:common`
+Seed selection is per percent identity (PID) threshold. Iduna runs
+`transcript_query` once and builds one full-species candidate `msa_0` at each
+PID threshold. Each candidate is validated: indels versus UniProt exclude that
+PID from selection, while substitutions are reported as warnings. By default,
+`sampling_strategy=:common`
 draws one shared set of species samples from the species common to all eligible
 `msa_0` candidates; each PID then runs ThorAxe with the same sampled species
 lists and is scored by HHsuite against its own full `msa_0`. Use
@@ -131,8 +132,8 @@ option.
 
 If the ThorAxe `transcript_query` bundle has already been created, pass it with
 `thoraxe_input_dir`. Iduna copies that bundle into `workdir/thoraxe_input` and
-continues with the same ThorAxe MSA and PID seed stages. The copied bundle is
-fingerprinted in a `thoraxe_input` stage manifest and reused on later
+continues with the same ThorAxe MSA and percent identity (PID) seed stages. The
+copied bundle is fingerprinted in a `thoraxe_input` stage manifest and reused on later
 `overwrite=false` reruns when the target, species list, orthology, and filter
 options match. Unless `no_expansion=true`, Iduna also runs expansion and
 expanded-MSA validation.

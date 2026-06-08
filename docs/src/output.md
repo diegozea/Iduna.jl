@@ -84,12 +84,12 @@ identity hash, declared outputs, warnings, and exception summary when a stage
 fails. `result.json` includes a compact `"stages"` list copied from these
 manifests, making reruns auditable without using it as the source of truth.
 
-`thoraxe_msa/runs/` keeps the raw ThorAxe output for each PID candidate and its
-species samples. `thoraxe_msa/candidates/` stores each PID's full-species
-candidate `msa_0`, sampled species list paths, gap-free sequence files, and
-per-PID score CSV. With `sampling_strategy=:common` or `:input`, shared sampled
-species lists live in `thoraxe_msa/samples/species/` and each PID-local sampled
-species path is a symlink to the matching shared file.
+`thoraxe_msa/runs/` keeps the raw ThorAxe output for each percent identity (PID)
+candidate and its species samples. `thoraxe_msa/candidates/` stores each PID's
+full-species candidate `msa_0`, sampled species list paths, gap-free sequence
+files, and per-PID score CSV. With `sampling_strategy=:common` or `:input`,
+shared sampled species lists live in `thoraxe_msa/samples/species/` and each
+PID-local sampled species path is a symlink to the matching shared file.
 `thoraxe_msa/candidate_summary.csv` records validation status, eligibility,
 sample identity statistics, candidate size, and the selected seed rows.
 
@@ -124,8 +124,9 @@ ThorAxe MSA stage. `isempty(result.expansions)`, `result.json` contains an empty
 writes seed statistics to `validation/pid_<value>/stats.csv`, with expanded-MSA
 fields left missing.
 
-By default, Iduna selects one PID seed. Set `pid_sample_count=0` to skip seed
-selection and carry every eligible PID candidate forward, producing one
+By default, Iduna selects one percent identity (PID) seed. Set
+`pid_sample_count=0` to skip seed selection and carry every eligible PID
+candidate forward, producing one
 validation directory and, unless `no_expansion=true`, one expansion directory
 per selected PID. `result.expansions` is seed-indexed and may contain `nothing`
 for a seed whose expansion is unavailable.
@@ -166,7 +167,7 @@ with the same s-exon ID:
 | column | meaning |
 |:---|:---|
 | `alignment` | which alignment the row describes, for example `seed`, `match`, or `full` |
-| `pid` | the ThorAxe PID threshold used for that seed |
+| `pid` | the ThorAxe percent identity (PID) threshold used for that seed |
 | `code` | the short one-character symbol stored in the MSA |
 | `s_exon_id` | the original ThorAxe s-exon ID, such as `12_2` or `0_1` |
 | `start_col` | first MSA column in the block, using 1-based numbering |
@@ -211,9 +212,9 @@ Some details are important when reading these annotations:
 - A `0_` s-exon with no protein sequence adds no MSA columns, so it does not
   appear as a block in `*_s_exon_blocks.tsv`.
 
-Each expansion PID directory also has `stage_state.json`, which records the
-input identity used for safe cache reuse. If the seed MSA, expansion parameters,
-or centroid request change, Iduna treats the cached expansion as stale, warns,
-and rebuilds that PID directory. Validation directories use the same manifest
-format and are reused when the seed, expansion, target, and UniProt comparison
-inputs are unchanged.
+Each expansion percent identity (PID) directory also has `stage_state.json`,
+which records the input identity used for safe cache reuse. If the seed MSA,
+expansion parameters, or centroid request change, Iduna treats the cached
+expansion as stale, warns, and rebuilds that PID directory. Validation
+directories use the same manifest format and are reused when the seed,
+expansion, target, and UniProt comparison inputs are unchanged.

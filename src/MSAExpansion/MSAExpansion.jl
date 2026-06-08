@@ -1,3 +1,9 @@
+"""
+    MSAExpansion
+
+Expand a ThorAxe seed MSA with MMseqs2 and HMMER, then write expanded alignment
+files for validation.
+"""
 module MSAExpansion
 
 import HMMER_jll
@@ -157,6 +163,14 @@ function _is_s_exon_provenance_stockholm_line(line::AbstractString)
            startswith(line, "#=GF SExonCodeMap")
 end
 
+"""
+    prepare_stockholm_for_mmseqs(source, dest) -> String
+
+Copy a Stockholm MSA to a form that MMseqs2 can read.
+
+Iduna removes its s-exon provenance annotations from this temporary copy because
+MMseqs2 does not need them. The original file is not changed.
+"""
 function prepare_stockholm_for_mmseqs(source::AbstractString, dest::AbstractString)
     mkpath(dirname(dest))
     lines = readlines(source)
@@ -298,6 +312,12 @@ function _write_normalized_stockholm(path::AbstractString, records)
     return path
 end
 
+"""
+    normalize_stockholm_annotations!(path) -> String
+
+Rewrite a Stockholm file so split annotations and sequence fragments are stored
+in a stable order.
+"""
 function normalize_stockholm_annotations!(path::AbstractString)
     lines = readlines(path)
     isempty(lines) && return path
@@ -938,6 +958,25 @@ function _finished_expansion_result(ctx,
     )
 end
 
+"""
+    expand_msa(target, seed, workdir; mmseqs_db, kwargs...) -> ExpansionResult
+
+Expand one selected seed MSA against an MMseqs2 database.
+
+# Keywords
+
+- `mmseqs_db::AbstractString`: MMseqs2 database prefix.
+- `overwrite::Bool = false`: rebuild package-owned expansion outputs.
+- `match_mode::Integer = 1`: MMseqs2 profile matching mode.
+- `match_ratio`: optional MMseqs2 match-ratio setting.
+- `hmmbuild_symfrac::Real = 0.0`: HMMER `hmmbuild` symbol fraction.
+- `centroids::Bool = false`: also save a centroid-level MSA.
+- `mmseqs_threads`: number of threads passed to MMseqs2.
+
+# Returns
+
+- An [`ExpansionResult`](@ref) with paths to the expanded MSA and logs.
+"""
 function expand_msa(target::ResolvedTarget,
         seed::SeedSelection,
         workdir::AbstractString;

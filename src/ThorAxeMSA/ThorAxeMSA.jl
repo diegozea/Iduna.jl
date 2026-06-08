@@ -1,3 +1,9 @@
+"""
+    ThorAxeMSA
+
+Build ThorAxe-based seed MSAs and choose the percent identity (PID) threshold
+used by later Iduna stages.
+"""
 module ThorAxeMSA
 
 import CSV
@@ -1357,6 +1363,21 @@ function _transcript_msa_species(thoraxe_dir::AbstractString,
     return [get(lookup, String(name), "unknown") for name in sequencenames(transcript_msa)]
 end
 
+"""
+    assemble_transcript_msa(thoraxe_dir, gene_id, transcript_id)
+
+Rebuild the transcript-level MSA for one transcript from ThorAxe s-exon outputs.
+
+# Returns
+
+- A tuple `(msa, species)`, where `msa` is the reconstructed MSA and `species`
+  gives one species label per sequence.
+
+# Throws
+
+- `ErrorException`: if the transcript path, s-exons, or reference sequence cannot
+  be found.
+"""
 function assemble_transcript_msa(thoraxe_dir::AbstractString,
         gene_id::AbstractString,
         transcript_id::AbstractString)
@@ -1508,6 +1529,20 @@ function _identity_from_codes(positions::Vector{Int}, codes::Vector{Char})
     return 100 * count(identity, values(seen)) / length(seen)
 end
 
+"""
+    compute_identity_against_reference(reference_fasta, sample_fasta; kwargs...)
+
+Compare a sampled MSA with its full reference MSA using HHsuite.
+
+# Keywords
+
+- `logs_dir`: directory where the HHalign output should be copied.
+- `label::AbstractString = "seed"`: label used in the copied log file name.
+
+# Returns
+
+- Percent identity as a `Float64`.
+"""
 function compute_identity_against_reference(reference_fasta::AbstractString,
         sample_fasta::AbstractString;
         logs_dir::Union{Nothing, AbstractString} = nothing,
@@ -2392,6 +2427,15 @@ function _row_seed(row, summary_path::AbstractString)
     )
 end
 
+"""
+    select_best_seed(summary_path) -> SeedSelection
+
+Choose the best eligible percent identity (PID) candidate from a ThorAxe
+candidate summary table.
+
+Candidates are ranked by median identity, mean identity, candidate MSA size, and
+then the original PID order.
+"""
 function select_best_seed(summary_path::AbstractString)
     df = _candidate_summary_dataframe(summary_path)
     isempty(df) && error("Cannot select a seed from an empty candidate summary.")
@@ -2983,6 +3027,27 @@ function _select_scored_candidate_seeds(summary_path::AbstractString,
     return [select_best_seed(summary_path)]
 end
 
+"""
+    build_thoraxe_msa(target, workdir; kwargs...) -> ThorAxeMSAResult
+
+Run or reuse the ThorAxe input and MSA stages for one resolved target.
+
+# Keywords
+
+- `pid_thresholds`: ThorAxe percent identity (PID) thresholds to test.
+- `specieslist::AbstractString = "ases"`: species preset, list, file, or name.
+- `cached_thoraxe_input_dir`: existing transcript-query bundle to copy and reuse.
+- `overwrite::Bool = false`: rebuild package-owned stage outputs.
+- `orthology::AbstractString = "1:1"`: Ensembl homology relationship filter.
+- `specieslist_filter::Bool = true`: filter requested species by Ensembl homology.
+- `biomart_datasets_filter::Bool = true`: keep species with BioMart datasets.
+- `transcript_query_retries::Integer = 2`: retry count for transcript-query runs.
+- `pid_sample_count::Integer = 45`: number of species samples per PID candidate.
+- `pid_sample_fraction::Real = 0.8`: fraction of non-reference species per sample.
+- `pid_sample_seed`: random seed for reproducible PID sampling.
+- `sampling_strategy::Symbol = :common`: how species samples are shared across
+  PID candidates.
+"""
 function build_thoraxe_msa(target::ResolvedTarget, workdir::AbstractString;
         pid_thresholds::AbstractVector{<:Real} = DEFAULT_PID_THRESHOLDS,
         specieslist::AbstractString = "ases",

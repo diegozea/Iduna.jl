@@ -1,3 +1,9 @@
+"""
+    Utils
+
+Shared helpers for IDs, files, alignment checks, stage summaries, and s-exon
+annotations used by Iduna.
+"""
 module Utils
 
 using BioAlignments: AffineGapScoreModel, BLOSUM62, GlobalAlignment, alignment,
@@ -51,9 +57,34 @@ export DEFAULT_PID_THRESHOLDS,
        set_s_exon_annotations!,
        write_s_exon_blocks_tsv
 
+"""
+    DEFAULT_PID_THRESHOLDS
+
+Default ThorAxe percent identity (PID) thresholds tested during seed selection.
+"""
 const DEFAULT_PID_THRESHOLDS = Float64[10, 20, 30, 60, 80]
+
+"""
+    S_EXON_CODE_FEATURE
+
+Stockholm column annotation name used to store one short s-exon code per MSA
+column.
+"""
 const S_EXON_CODE_FEATURE = "SExonCode"
+
+"""
+    S_EXON_CODE_MAP_FEATURE
+
+Stockholm file annotation name used to map short s-exon codes back to ThorAxe
+s-exon IDs.
+"""
 const S_EXON_CODE_MAP_FEATURE = "SExonCodeMap"
+
+"""
+    S_EXON_MISSING_CODE
+
+Column code used when an MSA column has no assigned s-exon.
+"""
 const S_EXON_MISSING_CODE = '.'
 const _STAGE_STATE_SCHEMA_VERSION = 1
 const _STAGE_STATE_FILE = "stage_state.json"
@@ -97,6 +128,11 @@ function _http_get_with_retries(url::AbstractString,
     end
 end
 
+"""
+    strip_ensembl_version(id) -> String
+
+Remove the version suffix from an Ensembl ID.
+"""
 strip_ensembl_version(id::AbstractString)::String = String(split(String(id), '.'; limit = 2)[1])
 
 function _strip_numeric_prefix(id::AbstractString)
@@ -104,6 +140,12 @@ function _strip_numeric_prefix(id::AbstractString)
     return length(parts) == 2 && all(isdigit, parts[1]) ? String(parts[2]) : String(id)
 end
 
+"""
+    sequence_name_variants(id) -> Vector{String}
+
+Return common sequence-name forms for an ID, including version-stripped Ensembl
+names and names without numeric prefixes.
+"""
 function sequence_name_variants(id::AbstractString)
     variants = String[]
     for base in (String(id), _strip_numeric_prefix(id))
@@ -114,6 +156,19 @@ function sequence_name_variants(id::AbstractString)
     return unique(variants)
 end
 
+"""
+    resolve_sequence_name(msa, ids; fallback=false)
+
+Find the first sequence name in `msa` that matches one of the requested IDs.
+
+# Keywords
+
+- `fallback::Bool = false`: return the first sequence name when no ID matches.
+
+# Returns
+
+- The matching sequence name, or `nothing` when no match is found.
+"""
 function resolve_sequence_name(msa::AbstractMultipleSequenceAlignment,
         ids;
         fallback::Bool = false)
@@ -135,6 +190,20 @@ function resolve_sequence_name(msa::AbstractMultipleSequenceAlignment,
     return fallback && !isempty(names) ? first(names) : nothing
 end
 
+"""
+    protein_alignment_stats(query_seq, reference_seq; include_alignment=false)
+
+Align two protein sequences and count mismatches, insertions, and deletions.
+
+# Keywords
+
+- `include_alignment::Bool = false`: include the BioAlignments alignment object
+  in the returned value.
+
+# Returns
+
+- A named tuple with `identical`, `mismatches`, `insertions`, and `deletions`.
+"""
 function protein_alignment_stats(query_seq::AbstractString,
         reference_seq::AbstractString;
         include_alignment::Bool = false)
@@ -153,22 +222,52 @@ function protein_alignment_stats(query_seq::AbstractString,
     return include_alignment ? merge((; aln), stats) : stats
 end
 
+"""
+    is_ensembl_transcript_id(id) -> Bool
+
+Return `true` when `id` looks like an Ensembl transcript ID.
+"""
 is_ensembl_transcript_id(id::AbstractString)::Bool = occursin(r"^ENS[A-Z]*T[0-9]+(\.[0-9]+)?$", String(id))
 
 # UniProt documents accessions as either [OPQ][0-9][A-Z0-9]{3}[0-9] or
 # [A-NR-Z][0-9]([A-Z][A-Z0-9]{2}[0-9]){1,2}. The optional suffix accepts
 # UniProt isoform IDs, which are written as accession-number plus "-<number>".
+"""
+    is_uniprot_id(id) -> Bool
+
+Return `true` when `id` looks like a UniProt accession or isoform accession.
+"""
 is_uniprot_id(id::AbstractString)::Bool = occursin(
     r"^([OPQ][0-9][A-Z0-9]{3}[0-9]|[A-NR-Z][0-9][A-Z][A-Z0-9]{2}[0-9]|[A-NR-Z][0-9][A-Z][A-Z0-9]{2}[0-9][A-Z][A-Z0-9]{2}[0-9])(-[0-9]+)?$",
     String(id))
 
+"""
+    id_kind(id) -> Symbol
+
+Classify an input ID as `:uniprot` or `:ensembl_transcript`.
+
+# Throws
+
+- `ErrorException`: if the ID does not look like either supported ID type.
+"""
 function id_kind(id::AbstractString)::Symbol
     is_ensembl_transcript_id(id) && return :ensembl_transcript
     is_uniprot_id(id) && return :uniprot
     error("Input ID $(id) is not recognized as a UniProt accession or Ensembl transcript ID.")
 end
 
+"""
+    format_pid(pid) -> String
+
+Format a percent identity value for user-facing tables and messages.
+"""
 format_pid(pid::Real) = @sprintf("%.1f", Float64(pid))
+
+"""
+    format_pid_dir(pid) -> String
+
+Format a percent identity value as a stable directory name.
+"""
 format_pid_dir(pid::Real) = "pid_$(@sprintf("%.2f", Float64(pid)))"
 
 function _body_bytes(body)::Vector{UInt8}
@@ -176,6 +275,11 @@ function _body_bytes(body)::Vector{UInt8}
     return Vector{UInt8}(codeunits(String(body)))
 end
 
+"""
+    decode_body(resp) -> String
+
+Read an HTTP response body as text, including gzipped response bodies.
+"""
 function decode_body(resp::HTTP.Response)::String
     body = _body_bytes(resp.body)
     if length(body) >= 2 && body[1] == 0x1f && body[2] == 0x8b
@@ -184,6 +288,22 @@ function decode_body(resp::HTTP.Response)::String
     return String(body)
 end
 
+"""
+    prepare_output_dir(input_id; workdir=nothing, output_dir=nothing, overwrite=false)
+
+Choose and create the Iduna work directory.
+
+# Keywords
+
+- `workdir`: preferred name for the output directory.
+- `output_dir`: older name for the same setting.
+- `overwrite::Bool = false`: accepted for caller consistency; stage cleanup is
+  handled by each stage.
+
+# Returns
+
+- The absolute path to the work directory.
+"""
 function prepare_output_dir(input_id::AbstractString;
         workdir::Union{Nothing, AbstractString} = nothing,
         output_dir::Union{Nothing, AbstractString} = nothing,
@@ -204,6 +324,15 @@ function prepare_output_dir(input_id::AbstractString;
     return root
 end
 
+"""
+    safe_rm(path, root)
+
+Remove a path only when it is inside the active work directory.
+
+# Throws
+
+- `ErrorException`: if `path` is outside `root`.
+"""
 function safe_rm(path::AbstractString, root::AbstractString)
     abs_path = abspath(path)
     abs_root = abspath(root)
@@ -216,6 +345,18 @@ function safe_rm(path::AbstractString, root::AbstractString)
     return nothing
 end
 
+"""
+    run_logged(cmd; stdout_path, stderr_path, workdir=nothing)
+
+Run an external command and write its standard output and standard error to
+files.
+
+# Keywords
+
+- `stdout_path::AbstractString`: file for standard output.
+- `stderr_path::AbstractString`: file for standard error.
+- `workdir`: directory where the command should run.
+"""
 function run_logged(cmd::Cmd;
         stdout_path::AbstractString,
         stderr_path::AbstractString,
@@ -236,6 +377,11 @@ function run_logged(cmd::Cmd;
     return nothing
 end
 
+"""
+    fasta_sequence(content) -> Union{Nothing, String}
+
+Extract the sequence from FASTA text and return it in upper case.
+"""
 function fasta_sequence(content::AbstractString)::Union{Nothing, String}
     seq = String[]
     for line in split(content, '\n')
@@ -259,9 +405,24 @@ function _wrap_sequence(seq::AbstractString; width::Int = 60)
     return String(take!(io))
 end
 
+"""
+    format_fasta(id, seq) -> String
+
+Format one protein sequence as FASTA text.
+"""
 format_fasta(id::AbstractString,
     seq::AbstractString)::String = string(">", id, "\n", _wrap_sequence(uppercase(String(seq))))
 
+"""
+    write_fasta(path, records) -> String
+
+Write named sequences to a FASTA file.
+
+# Arguments
+
+- `path::AbstractString`: output file path.
+- `records`: iterable of `(name, sequence)` pairs.
+"""
 function write_fasta(path::AbstractString, records)
     mkpath(dirname(path))
     open(path, "w") do io
@@ -273,6 +434,11 @@ function write_fasta(path::AbstractString, records)
     return path
 end
 
+"""
+    write_text(path, text) -> String
+
+Write text to a file and create parent directories when needed.
+"""
 function write_text(path::AbstractString, text::AbstractString)
     mkpath(dirname(path))
     open(path, "w") do io
@@ -281,6 +447,11 @@ function write_text(path::AbstractString, text::AbstractString)
     return path
 end
 
+"""
+    write_json(path, obj) -> String
+
+Write an object as pretty JSON and create parent directories when needed.
+"""
 function write_json(path::AbstractString, obj)
     mkpath(dirname(path))
     open(path, "w") do io
@@ -298,11 +469,21 @@ function _identity_hash(identity)
     return bytes2hex(SHA.sha256(JSON.json(identity)))
 end
 
+"""
+    _pipeline_stage_dir(workdir, stage_key) -> String
+
+Return the package-owned directory used to store state for one pipeline stage.
+"""
 function _pipeline_stage_dir(workdir::AbstractString, stage_key::AbstractString)
     safe_key = replace(String(stage_key), ':' => "__", '/' => "__", '\\' => "__")
     return joinpath(workdir, ".iduna", "stages", safe_key)
 end
 
+"""
+    _stage_state_path(stage_dir) -> String
+
+Return the path to the JSON state file stored inside a stage directory.
+"""
 _stage_state_path(stage_dir::AbstractString) = joinpath(stage_dir, _STAGE_STATE_FILE)
 
 _stage_output_exists(::Nothing) = true
@@ -362,6 +543,14 @@ function _stage_existing_started_at(stage_dir::AbstractString, identity_hash::Ab
     return started isa AbstractString ? String(started) : nothing
 end
 
+"""
+    _write_stage_state(stage_dir; stage, stage_key, status, identity, outputs, kwargs...)
+
+Write the JSON state file that lets Iduna decide whether a stage can be reused.
+
+This is an internal contract shared by pipeline stages. Paths under `workdir`
+are stored as relative paths so a result directory can be moved.
+"""
 function _write_stage_state(stage_dir::AbstractString;
         stage::AbstractString,
         stage_key::AbstractString,
@@ -406,6 +595,16 @@ function _write_stage_state(stage_dir::AbstractString;
     return state_path
 end
 
+"""
+    _classify_stage_state(stage_dir, identity, outputs; stage_label="stage")
+
+Compare a saved stage state with the requested inputs and outputs.
+
+# Returns
+
+- A named tuple describing whether the cached stage is reusable, missing, stale,
+  incomplete, or unreadable.
+"""
 function _classify_stage_state(stage_dir::AbstractString,
         identity,
         required_outputs;
@@ -464,11 +663,25 @@ function _classify_stage_state(stage_dir::AbstractString,
     return (; reusable = true, status = :done, warning = nothing)
 end
 
+"""
+    s_exon_blocks_path(stockholm_path) -> String
+
+Return the default TSV path for s-exon column blocks next to a Stockholm MSA.
+"""
 function s_exon_blocks_path(stockholm_path::AbstractString)
     root, _ = splitext(String(stockholm_path))
     return string(root, "_s_exon_blocks.tsv")
 end
 
+"""
+    s_exon_codes(msa; feature=S_EXON_CODE_FEATURE)
+
+Read the per-column s-exon codes from an MSA.
+
+# Throws
+
+- `ErrorException`: if the MSA does not contain the requested annotation.
+"""
 function s_exon_codes(msa::AbstractMultipleSequenceAlignment;
         feature::AbstractString = S_EXON_CODE_FEATURE)
     codes = getannotcolumn(msa, String(feature), "")
@@ -480,12 +693,22 @@ function s_exon_codes(msa::AbstractMultipleSequenceAlignment;
     return String(codes)
 end
 
+"""
+    has_s_exon_annotations(msa; feature=S_EXON_CODE_FEATURE) -> Bool
+
+Return `true` when an MSA has Iduna s-exon column annotations.
+"""
 function has_s_exon_annotations(msa::AbstractMultipleSequenceAlignment;
         feature::AbstractString = S_EXON_CODE_FEATURE)
     codes = getannotcolumn(msa, String(feature), "")
     return !isempty(codes) && length(codes) == ncolumns(msa)
 end
 
+"""
+    s_exon_code_map(msa; feature=S_EXON_CODE_MAP_FEATURE)
+
+Read the map from short s-exon codes to ThorAxe s-exon IDs.
+"""
 function s_exon_code_map(msa::AbstractMultipleSequenceAlignment;
         feature::AbstractString = S_EXON_CODE_MAP_FEATURE)
     raw = getannotfile(msa, String(feature), "")
@@ -513,6 +736,17 @@ function _format_s_exon_code_map(code_map)
     return join(entries, ',')
 end
 
+"""
+    set_s_exon_annotations!(msa, codes, code_map; kwargs...)
+
+Store Iduna s-exon annotations on an MSA.
+
+# Arguments
+
+- `msa`: MSA to annotate.
+- `codes::AbstractString`: one short code for each MSA column.
+- `code_map`: map from each short code to its ThorAxe s-exon ID.
+"""
 function set_s_exon_annotations!(msa::AbstractMultipleSequenceAlignment,
         codes::AbstractString,
         code_map;
@@ -566,6 +800,17 @@ function _write_s_exon_block_rows(io,
     return nothing
 end
 
+"""
+    write_s_exon_blocks_tsv(path, msa; alignment, pid=nothing, append=false, kwargs...)
+
+Write a TSV table that groups neighboring MSA columns with the same s-exon.
+
+# Keywords
+
+- `alignment::AbstractString`: label for the MSA being written.
+- `pid`: percent identity threshold to record in the table.
+- `append::Bool = false`: append rows to an existing table.
+"""
 function write_s_exon_blocks_tsv(path::AbstractString,
         msa::AbstractMultipleSequenceAlignment;
         alignment::AbstractString,
@@ -585,6 +830,15 @@ function write_s_exon_blocks_tsv(path::AbstractString,
     return path
 end
 
+"""
+    ensure_mmseqs_db(db)
+
+Check that an MMseqs2 database prefix has the files Iduna needs.
+
+# Throws
+
+- `ErrorException`: if the database looks incomplete.
+"""
 function ensure_mmseqs_db(db::AbstractString)
     for db_path in (String(db), string(db, "_aln"), string(db, "_seq"))
         dbtype = string(db_path, ".dbtype")
@@ -771,6 +1025,11 @@ function _push_stage_state_paths!(paths::Vector{String}, root::AbstractString)
     return paths
 end
 
+"""
+    collect_stage_summaries(workdir; stage_keys=nothing)
+
+Read stage summaries from an Iduna work directory.
+"""
 function collect_stage_summaries(workdir::AbstractString; stage_keys = nothing)
     paths = String[]
     _push_stage_state_paths!(paths, joinpath(workdir, ".iduna", "stages"))
@@ -847,6 +1106,11 @@ function _validation_summary(validation::ValidationResult)
     )
 end
 
+"""
+    result_summary(result) -> NamedTuple
+
+Return a compact, JSON-friendly summary of an [`IdunaResult`](@ref).
+"""
 function result_summary(result::IdunaResult)
     result = _relative_result_paths(result)
     return (;

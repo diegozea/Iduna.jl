@@ -1,3 +1,8 @@
+"""
+    ResultsValidation
+
+Load MSAs and summarize seed and expanded alignment quality for Iduna results.
+"""
 module ResultsValidation
 
 import CSV
@@ -25,6 +30,16 @@ export alignment_stats,
        load_msa,
        validate_results
 
+"""
+    load_msa(path; keepinserts=true)
+
+Load an MSA from Stockholm, A3M, FASTA, or `.fa` input.
+
+# Keywords
+
+- `keepinserts::Bool = true`: keep insertion columns when reading formats that
+  support this choice.
+"""
 function load_msa(path::AbstractString; keepinserts::Bool = true)
     lower = lowercase(path)
     if endswith(lower, ".sto") || endswith(lower, ".stockholm")
@@ -37,6 +52,11 @@ function load_msa(path::AbstractString; keepinserts::Bool = true)
     error("Cannot infer MSA format from $(path).")
 end
 
+"""
+    load_seed_msa(seed; keepinserts=true, workdir=seed.workdir)
+
+Load the selected ThorAxe seed MSA described by a [`SeedSelection`](@ref).
+"""
 function load_seed_msa(seed::SeedSelection; keepinserts::Bool = true,
         workdir::Union{Nothing, AbstractString} = seed.workdir)
     path = workdir === nothing ? seed.stockholm_path :
@@ -44,6 +64,11 @@ function load_seed_msa(seed::SeedSelection; keepinserts::Bool = true,
     load_msa(path; keepinserts)
 end
 
+"""
+    load_expanded_msa(expansion; keepinserts=true, workdir=expansion.workdir)
+
+Load the match-column expanded MSA described by an [`ExpansionResult`](@ref).
+"""
 function load_expanded_msa(expansion::ExpansionResult; keepinserts::Bool = true,
         workdir::Union{Nothing, AbstractString} = expansion.workdir)
     path = workdir === nothing ? expansion.match_stockholm :
@@ -51,6 +76,21 @@ function load_expanded_msa(expansion::ExpansionResult; keepinserts::Bool = true,
     load_msa(path; keepinserts)
 end
 
+"""
+    alignment_stats(path; cluster_threshold=62.0, neff_threshold=80.0)
+
+Load one MSA and compute simple size and diversity statistics.
+
+# Keywords
+
+- `cluster_threshold::Real = 62.0`: identity threshold for Hobohm clustering.
+- `neff_threshold::Real = 80.0`: identity threshold for effective sequence count.
+
+# Returns
+
+- A named tuple with the MSA, number of sequences, number of columns, number of
+  clusters, and effective sequence count.
+"""
 function alignment_stats(path::AbstractString; cluster_threshold::Real = 62.0, neff_threshold::Real = 80.0)
     msa = load_msa(path; keepinserts = true)
     # Hobohm clustering gives a compact diversity summary for the alignment.
@@ -381,6 +421,20 @@ function _validation_result(stats_path::AbstractString, stats, comparison, warni
     )
 end
 
+"""
+    validate_results(target, seed, expansion, workdir; overwrite=false)
+
+Compute validation statistics for one seed and its optional expansion.
+
+# Keywords
+
+- `overwrite::Bool = false`: rebuild package-owned validation outputs.
+
+# Returns
+
+- A [`ValidationResult`](@ref) with MSA statistics and optional UniProt comparison
+  details.
+"""
 function validate_results(target::ResolvedTarget,
         seed::SeedSelection,
         expansion::_MaybeExpansion,
