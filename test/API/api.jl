@@ -118,7 +118,12 @@ import Logging
         db_dir = "db",
         hmm_dir = "hmm",
         logs_dir = "logs/expansion")
-    validation = Iduna.ValidationResult(; stats_path = "stats.csv")
+    validation = Iduna.ValidationResult(;
+        stats_path = "stats.csv",
+        seed_nseq = 100,
+        seed_ncol = 1000,
+        expanded_nseq = 250,
+        expanded_ncol = 1000)
     result = Iduna.IdunaResult(;
         input_id = "Q13148",
         workdir = "workdir",
@@ -872,8 +877,12 @@ import Logging
         end
         @test occursin("ResolvedTarget, ENSG00000120948.20, ENST00000240185.8",
             result_text)
-        @test occursin("ThorAxeMSAResult, 1 seed, selected PIDs 10.0", result_text)
-        @test occursin("1 slot, 1 completed, 0 hits", result_text)
+        @test occursin(
+            "ThorAxeMSAResult, 1 seed, selected PID 10.0 (100 seqs, 1000 cols)",
+            result_text)
+        @test occursin(
+            "1 slot, 1 completed, 0 hits, selected MSA (250 seqs, 1000 cols)",
+            result_text)
         @test occursin("1 result, ok", result_text)
         @test occursin("0 stages, empty", result_text)
         @test occursin("1 warning", result_text)
@@ -953,8 +962,52 @@ import Logging
             status = :warn)
         warn_count_text = repr("text/plain", warn_count_result)
         @test occursin("1 slot, 1 warn, 0 hits", warn_count_text)
+        @test occursin("ThorAxeMSAResult, 1 seed, selected PID 10.0",
+            warn_count_text)
+        @test !occursin("(seqs, cols)", warn_count_text)
         @test occursin("1 result, warn", warn_count_text)
         @test occursin("1 stage, 1 warn", warn_count_text)
+
+        second_seed = Iduna.SeedSelection(;
+            pid = 80.0,
+            median_identity = 0.8,
+            mean_identity = 0.82,
+            stockholm_path = "seed80.sto",
+            summary_path = "candidate_summary.csv")
+        multi_thoraxe = Iduna.ThorAxeMSAResult(;
+            input_dir = "thoraxe_input",
+            thoraxe_dirs = ["thoraxe10", "thoraxe80"],
+            msa_dir = "thoraxe_msa",
+            baseline_fastas = ["msa10.fasta", "msa80.fasta"],
+            baseline_stockholms = ["msa10.sto", "msa80.sto"],
+            sequence_fastas = ["msa10_sequences.fasta", "msa80_sequences.fasta"],
+            species_files = ["species10.txt", "species80.txt"],
+            pid_summary = "candidate_summary.csv",
+            seeds = [best_seed, second_seed],
+            logs_dir = "logs/thoraxe")
+        multi_result = Iduna.IdunaResult(;
+            input_id = "Q13148",
+            workdir = "workdir",
+            target,
+            thoraxe_msa = multi_thoraxe,
+            expansions = [expansion, _display_expansion("expansion80")],
+            validations = [
+                validation,
+                Iduna.ValidationResult(;
+                    stats_path = "stats80.csv",
+                    seed_nseq = 95,
+                    seed_ncol = 900,
+                    expanded_nseq = 275,
+                    expanded_ncol = 900)
+            ],
+            status = :ok)
+        multi_result_text = repr("text/plain", multi_result)
+        @test occursin(
+            "ThorAxeMSAResult, 2 seeds, selected PIDs (seqs, cols) 10.0 (100, 1000), 80.0 (95, 900)",
+            multi_result_text)
+        @test occursin(
+            "2 slots, 2 completed, 0 hits, selected MSAs (seqs, cols) 10.0 (250, 1000), 80.0 (275, 900)",
+            multi_result_text)
 
         unknown_status_result = Iduna.IdunaResult(;
             input_id = "Q13148",

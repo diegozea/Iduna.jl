@@ -205,19 +205,76 @@ function _iduna_target_summary(target::ResolvedTarget)
     ]
 end
 
-function _iduna_thoraxe_msa_summary(thoraxe_msa::ThorAxeMSAResult)
+function _iduna_dimension_label(count::Integer, singular::AbstractString,
+        plural::AbstractString)
+    return count == 1 ? singular : plural
+end
+
+function _iduna_msa_dimensions(nseq::Union{Nothing, Integer},
+        ncol::Union{Nothing, Integer}; compact::Bool = false)
+    (nseq === nothing || ncol === nothing) && return nothing
+    if compact
+        return "($(nseq), $(ncol))"
+    end
+    seq_label = _iduna_dimension_label(nseq, "seq", "seqs")
+    col_label = _iduna_dimension_label(ncol, "col", "cols")
+    return "($(nseq) $(seq_label), $(ncol) $(col_label))"
+end
+
+function _iduna_validation_at(validations::AbstractVector, index::Integer)
+    1 <= index <= length(validations) ? validations[index] : nothing
+end
+
+function _iduna_seed_dimensions(validations::AbstractVector, index::Integer;
+        compact::Bool = false)
+    validation = _iduna_validation_at(validations, index)
+    validation === nothing && return nothing
+    return _iduna_msa_dimensions(validation.seed_nseq, validation.seed_ncol; compact)
+end
+
+function _iduna_expanded_dimensions(expansions::AbstractVector,
+        validations::AbstractVector, index::Integer; compact::Bool = false)
+    1 <= index <= length(expansions) || return nothing
+    expansions[index] === nothing && return nothing
+    validation = _iduna_validation_at(validations, index)
+    validation === nothing && return nothing
+    return _iduna_msa_dimensions(validation.expanded_nseq, validation.expanded_ncol;
+        compact)
+end
+
+function _iduna_seed_pid_dimensions(seeds::AbstractVector{SeedSelection},
+        validations::AbstractVector, index::Integer; compact::Bool = false)
+    text = format_pid(seeds[index].pid)
+    dimensions = _iduna_seed_dimensions(validations, index; compact)
+    dimensions === nothing && return text
+    return "$(text) $(dimensions)"
+end
+
+function _iduna_thoraxe_msa_summary(thoraxe_msa::ThorAxeMSAResult,
+        validations::AbstractVector)
+    n_seeds = length(thoraxe_msa.seeds)
+    pid_label = n_seeds == 1 ? "selected PID " : "selected PIDs "
     segments = [
         _iduna_segment("ThorAxeMSAResult"),
         _iduna_segment(", "),
-        _iduna_count_segment(length(thoraxe_msa.seeds), "seed"),
-        _iduna_segment(", selected PIDs ")
+        _iduna_count_segment(n_seeds, "seed"),
+        _iduna_segment(", "),
+        _iduna_segment(pid_label)
     ]
     if isempty(thoraxe_msa.seeds)
         push!(segments, _iduna_segment("unknown"; color = :light_black))
     else
+        compact = length(thoraxe_msa.seeds) > 1
+        has_dimensions = any(
+            index -> _iduna_seed_dimensions(validations, index;
+                compact) !== nothing,
+            eachindex(thoraxe_msa.seeds))
+        compact && has_dimensions && push!(segments, _iduna_segment("(seqs, cols) "))
         push!(segments,
-            _iduna_segment(join((format_pid(seed.pid) for seed in thoraxe_msa.seeds),
-                ", ")))
+            _iduna_segment(join(
+                (_iduna_seed_pid_dimensions(thoraxe_msa.seeds, validations, index;
+                     compact)
+                for index in eachindex(thoraxe_msa.seeds)), ", ")))
     end
     return segments
 end
@@ -244,7 +301,37 @@ function _iduna_expansion_hits(expansion)
     return expansion.n_hits
 end
 
-function _iduna_expansions_summary(expansions::AbstractVector)
+function _iduna_expansion_dimension_entries(seeds::AbstractVector,
+        expansions::AbstractVector, validations::AbstractVector)
+    entries = String[]
+    for index in eachindex(expansions)
+        dimensions = _iduna_expanded_dimensions(expansions, validations, index;
+            compact = true)
+        dimensions === nothing && continue
+        label = 1 <= index <= length(seeds) ? format_pid(seeds[index].pid) : string(index)
+        push!(entries, "$(label) $(dimensions)")
+    end
+    return entries
+end
+
+function _iduna_append_expansion_dimensions!(segments, expansions::AbstractVector,
+        seeds::AbstractVector, validations::AbstractVector)
+    n_slots = length(expansions)
+    if n_slots == 1
+        dimensions = _iduna_expanded_dimensions(expansions, validations, 1)
+        dimensions === nothing ||
+            _iduna_push_summary_part!(segments, _iduna_segment("selected MSA $(dimensions)"))
+    elseif n_slots > 1
+        entries = _iduna_expansion_dimension_entries(seeds, expansions, validations)
+        isempty(entries) ||
+            _iduna_push_summary_part!(segments,
+                _iduna_segment("selected MSAs (seqs, cols) $(join(entries, ", "))"))
+    end
+    return segments
+end
+
+function _iduna_expansions_summary(expansions::AbstractVector,
+        seeds::AbstractVector, validations::AbstractVector)
     n_slots = length(expansions)
     completed = count(expansion -> _iduna_expansion_status(expansion) === :ok, expansions)
     warned = count(expansion -> _iduna_expansion_status(expansion) === :warn, expansions)
@@ -278,6 +365,7 @@ function _iduna_expansions_summary(expansions::AbstractVector)
     end
     _iduna_push_summary_part!(segments,
         _iduna_count_segment(n_hits, "hit"; color = nothing, zero_color = :light_black))
+    _iduna_append_expansion_dimensions!(segments, expansions, seeds, validations)
     return segments
 end
 
@@ -361,8 +449,11 @@ function _iduna_result_rows(result::IdunaResult)
         ("input_id", [_iduna_segment(result.input_id)]),
         ("workdir", [_iduna_segment(result.workdir)]),
         ("target", _iduna_target_summary(result.target)),
-        ("thoraxe_msa", _iduna_thoraxe_msa_summary(result.thoraxe_msa)),
-        ("expansions", _iduna_expansions_summary(result.expansions)),
+        ("thoraxe_msa", _iduna_thoraxe_msa_summary(result.thoraxe_msa,
+            result.validations)),
+        ("expansions",
+            _iduna_expansions_summary(result.expansions,
+                result.thoraxe_msa.seeds, result.validations)),
         ("validations", _iduna_validations_summary(result.validations)),
         ("stages", _iduna_stages_summary(result.stages)),
         ("warnings",
