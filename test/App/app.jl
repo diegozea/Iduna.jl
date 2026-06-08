@@ -54,8 +54,33 @@ import JSON
         @test occursin("JULIA_NUM_THREADS=4 iduna", help)
         @test occursin("iduna --threads=4 --", help)
         @test occursin("julia --threads 4 --project=. -m Iduna", help)
+        @test occursin(r"ases\s+\(default\), all, empty", help)
         @test occursin(r"Threads for MMseqs2 expansion\s+only\.", help)
         @test !occursin("Start Julia with --threads N", help)
+    end
+
+    @testset "specieslist CLI values" begin
+        @test !haskey(
+            Iduna._parse_app_args(["P20963", "--mmseqs-db", "db"]), :specieslist)
+        @test Iduna._parse_app_args([
+            "P20963", "--mmseqs-db", "db", "--specieslist", "ases"])[:specieslist] ==
+              "ases"
+        @test Iduna._parse_app_args([
+            "P20963", "--mmseqs-db", "db", "--specieslist", "all"])[:specieslist] ==
+              "all"
+        @test Iduna._parse_app_args([
+            "P20963", "--mmseqs-db", "db", "--specieslist", ""])[:specieslist] ==
+              ""
+        @test Iduna._parse_app_args([
+            "P20963",
+            "--mmseqs-db",
+            "db",
+            "--specieslist",
+            "homo_sapiens,gorilla_gorilla"])[:specieslist] ==
+              "homo_sapiens,gorilla_gorilla"
+        @test Iduna._parse_app_args([
+            "P20963", "--mmseqs-db", "db", "--specieslist", "./species.txt"])[
+            :specieslist] == "./species.txt"
     end
 
     @testset "custom value parsing" begin

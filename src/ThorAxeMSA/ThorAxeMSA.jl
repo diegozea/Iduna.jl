@@ -63,6 +63,21 @@ const _TRANSCRIPT_QUERY_METADATA_FILE = "iduna_transcript_query.json"
 const _SAMPLING_STRATEGIES = Set([:independent, :common, :input])
 const _LOW_COMMON_SPECIES_THRESHOLD = 6
 const _TRANSCRIPT_QUERY_SPINNER_INTERVAL_SECONDS = 1 / 3
+const _ASES_DEFAULT_SPECIES = [
+    "homo_sapiens",
+    "gorilla_gorilla",
+    "macaca_mulatta",
+    "monodelphis_domestica",
+    "rattus_norvegicus",
+    "mus_musculus",
+    "bos_taurus",
+    "sus_scrofa",
+    "ornithorhynchus_anatinus",
+    "xenopus_tropicalis",
+    "danio_rerio",
+    "caenorhabditis_elegans"
+]
+const _ASES_DEFAULT_SPECIESLIST = join(_ASES_DEFAULT_SPECIES, ",")
 
 _normalize_species_name(species::Nothing) = nothing
 function _normalize_species_name(species::AbstractString)
@@ -394,6 +409,44 @@ function _normalized_specieslist(specieslist::Union{Nothing, AbstractString})
     specieslist === nothing && return nothing
     stripped = strip(String(specieslist))
     return isempty(stripped) ? nothing : stripped
+end
+
+function _resolve_specieslist_preset(specieslist::AbstractString)
+    stripped = strip(String(specieslist))
+    if stripped == "ases"
+        return (;
+            specieslist = _ASES_DEFAULT_SPECIESLIST,
+            mode = :ases,
+            input = stripped)
+    elseif isempty(stripped) || stripped == "all"
+        return (;
+            specieslist = nothing,
+            mode = :all,
+            input = stripped)
+    end
+    return (;
+        specieslist = stripped,
+        mode = :explicit,
+        input = stripped)
+end
+
+function _log_specieslist_choice(resolved)
+    specieslist = resolved.specieslist
+    if resolved.mode === :ases
+        @info "Using Ases default ThorAxe species list." n_species=length(_ASES_DEFAULT_SPECIES) specieslist
+    elseif resolved.mode === :all
+        @info "Using unrestricted ThorAxe species selection." specieslist=resolved.input
+    elseif occursin(',', specieslist)
+        summary = _specieslist_log_summary(specieslist)
+        @info "Using explicit ThorAxe species list." n_species=summary.n_species specieslist_preview=summary.specieslist_preview
+    elseif isfile(specieslist)
+        summary = _specieslist_log_summary(specieslist)
+        @info "Using ThorAxe species list file." specieslist_path=specieslist n_species=summary.n_species specieslist_preview=summary.specieslist_preview
+    else
+        species = only(_parse_specieslist(specieslist))
+        @info "Using explicit ThorAxe species." species
+    end
+    return nothing
 end
 
 function _orthology_relationships(orthology::AbstractString)
@@ -2932,7 +2985,7 @@ end
 
 function build_thoraxe_msa(target::ResolvedTarget, workdir::AbstractString;
         pid_thresholds::AbstractVector{<:Real} = DEFAULT_PID_THRESHOLDS,
-        specieslist::Union{Nothing, AbstractString} = nothing,
+        specieslist::AbstractString = "ases",
         cached_thoraxe_input_dir::Union{Nothing, AbstractString} = nothing,
         overwrite::Bool = false,
         orthology::AbstractString = "1:1",
@@ -2950,8 +3003,11 @@ function build_thoraxe_msa(target::ResolvedTarget, workdir::AbstractString;
     sample_seed = pid_sample_seed === nothing ? UInt64(rand(UInt32)) :
                   _normalize_pid_sample_seed(pid_sample_seed)
     # Species filters run only when transcript_query will create new input.
-    requested_species_summary = _specieslist_log_summary(specieslist)
-    filters = _resolve_thoraxe_species_filters(target, specieslist, orthology,
+    resolved_specieslist = _resolve_specieslist_preset(specieslist)
+    _log_specieslist_choice(resolved_specieslist)
+    requested_species_summary = _specieslist_log_summary(resolved_specieslist.specieslist)
+    filters = _resolve_thoraxe_species_filters(
+        target, resolved_specieslist.specieslist, orthology,
         cached_thoraxe_input_dir, specieslist_filter, biomart_datasets_filter)
     effective_species_summary = _specieslist_log_summary(filters.effective_specieslist)
     species_details = (;

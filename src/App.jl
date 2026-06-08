@@ -96,7 +96,7 @@ The Iduna option --mmseqs-threads controls MMseqs2 expansion only.
         arg_type = String
 
         "--specieslist"
-        help = "Species list passed to ThorAxe."
+        help = "ThorAxe species list: ases (default), all, empty, path, comma list, or one species."
         metavar = "path-or-list"
         arg_type = String
 

@@ -1744,14 +1744,86 @@
         mktempdir() do tmp
             species_file = joinpath(tmp, "species.txt")
             write(species_file, "Mus musculus\n\nDanio rerio\n")
+            ases_specieslist = Iduna.ThorAxeMSA._ASES_DEFAULT_SPECIESLIST
+            ases_resolved = Iduna.ThorAxeMSA._resolve_specieslist_preset("ases")
+            @test ases_resolved.specieslist == ases_specieslist
+            @test ases_resolved.mode === :ases
+            @test Iduna.ThorAxeMSA._resolve_specieslist_preset(" ases ").specieslist ==
+                  ases_specieslist
+            @test Iduna.ThorAxeMSA._resolve_specieslist_preset("all").specieslist ===
+                  nothing
+            @test Iduna.ThorAxeMSA._resolve_specieslist_preset("").specieslist ===
+                  nothing
+            @test Iduna.ThorAxeMSA._resolve_specieslist_preset("   ").specieslist ===
+                  nothing
+            @test Iduna.ThorAxeMSA._resolve_specieslist_preset(
+                "Homo sapiens, Mus musculus").specieslist ==
+                  "Homo sapiens, Mus musculus"
             @test Iduna.ThorAxeMSA._parse_specieslist(nothing) === nothing
             @test Iduna.ThorAxeMSA._parse_specieslist(
                 "Homo sapiens,mus_musculus, Mus musculus ") ==
                   ["homo_sapiens", "mus_musculus"]
+            @test Iduna.ThorAxeMSA._parse_specieslist(ases_specieslist) ==
+                  Iduna.ThorAxeMSA._ASES_DEFAULT_SPECIES
             @test Iduna.ThorAxeMSA._parse_specieslist(species_file) ==
                   ["mus_musculus", "danio_rerio"]
             @test Iduna.ThorAxeMSA._parse_specieslist("Canis lupus") ==
                   ["canis_lupus"]
+
+            ases_logs,
+            _ = Test.collect_test_logs() do
+                Iduna.ThorAxeMSA._log_specieslist_choice(ases_resolved)
+            end
+            ases_log = only(ases_logs)
+            @test ases_log.message == "Using Ases default ThorAxe species list."
+            ases_kwargs = Dict(ases_log.kwargs)
+            @test ases_kwargs[:n_species] == 12
+            @test ases_kwargs[:specieslist] == ases_specieslist
+
+            all_logs,
+            _ = Test.collect_test_logs() do
+                Iduna.ThorAxeMSA._log_specieslist_choice(
+                    Iduna.ThorAxeMSA._resolve_specieslist_preset("all"))
+            end
+            @test only(all_logs).message ==
+                  "Using unrestricted ThorAxe species selection."
+            empty_logs,
+            _ = Test.collect_test_logs() do
+                Iduna.ThorAxeMSA._log_specieslist_choice(
+                    Iduna.ThorAxeMSA._resolve_specieslist_preset(""))
+            end
+            @test only(empty_logs).message ==
+                  "Using unrestricted ThorAxe species selection."
+
+            list_logs,
+            _ = Test.collect_test_logs() do
+                Iduna.ThorAxeMSA._log_specieslist_choice(
+                    Iduna.ThorAxeMSA._resolve_specieslist_preset(
+                    "Homo sapiens,Mus musculus"))
+            end
+            list_log = only(list_logs)
+            @test list_log.message == "Using explicit ThorAxe species list."
+            @test Dict(list_log.kwargs)[:n_species] == 2
+
+            file_logs,
+            _ = Test.collect_test_logs() do
+                Iduna.ThorAxeMSA._log_specieslist_choice(
+                    Iduna.ThorAxeMSA._resolve_specieslist_preset(species_file))
+            end
+            file_log = only(file_logs)
+            @test file_log.message == "Using ThorAxe species list file."
+            file_kwargs = Dict(file_log.kwargs)
+            @test file_kwargs[:specieslist_path] == species_file
+            @test file_kwargs[:n_species] == 2
+
+            single_logs,
+            _ = Test.collect_test_logs() do
+                Iduna.ThorAxeMSA._log_specieslist_choice(
+                    Iduna.ThorAxeMSA._resolve_specieslist_preset("Canis lupus"))
+            end
+            single_log = only(single_logs)
+            @test single_log.message == "Using explicit ThorAxe species."
+            @test Dict(single_log.kwargs)[:species] == "canis_lupus"
         end
 
         target = Iduna.ResolvedTarget(;
@@ -1762,10 +1834,17 @@
             species = "Homo sapiens")
         fetcher = (target, orthology) -> ["mus_musculus", "danio_rerio"]
 
-        default = Iduna.ThorAxeMSA._resolve_effective_specieslist(
+        all_species = Iduna.ThorAxeMSA._resolve_effective_specieslist(
             target, nothing, "1:1"; homology_species_fetcher = fetcher)
-        @test default.specieslist == "homo_sapiens,mus_musculus,danio_rerio"
-        @test isempty(default.warnings)
+        @test all_species.specieslist == "homo_sapiens,mus_musculus,danio_rerio"
+        @test isempty(all_species.warnings)
+
+        ases_default = Iduna.ThorAxeMSA._resolve_effective_specieslist(
+            target, Iduna.ThorAxeMSA._ASES_DEFAULT_SPECIESLIST, "1:1";
+            homology_species_fetcher = fetcher)
+        @test ases_default.specieslist == "homo_sapiens,mus_musculus,danio_rerio"
+        @test length(ases_default.warnings) == 1
+        @test occursin("gorilla_gorilla", only(ases_default.warnings))
 
         filtered = Iduna.ThorAxeMSA._resolve_effective_specieslist(
             target, "Mus musculus,Canis lupus", "1:1";
@@ -2361,6 +2440,7 @@ TableSet\tptroglodytes_gene_ensembl\tChimpanzee genes (Pan_tro_3.0)\t1
             scored_result = Test.collect_test_logs() do
                 Iduna.ThorAxeMSA.build_thoraxe_msa(target, scored_workdir;
                     pid_thresholds = [20.0, 30.0],
+                    specieslist = "all",
                     cached_thoraxe_input_dir = source,
                     specieslist_filter = false,
                     biomart_datasets_filter = false,

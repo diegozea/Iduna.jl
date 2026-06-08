@@ -91,13 +91,18 @@ is a side output; the regular `expanded_msa/` files remain the main result.
 If an earlier cached expansion lacks the requested centroid files, Iduna warns
 and rebuilds that PID expansion.
 
-By default, Iduna filters the ThorAxe species list with Ensembl homology using
-`orthology="1:1"`, then checks BioMart Ensembl Gene dataset availability with
+By default, Iduna starts from `specieslist="ases"`, the Ases webserver's
+12-species list, filters it with Ensembl homology using `orthology="1:1"`, then
+checks BioMart Ensembl Gene dataset availability with
 `biomart_datasets_filter=true`. BioMart dataset names are only used internally;
-ThorAxe still receives species names. Use `orthology="1:n"` or `"m:n"` to keep
-broader ortholog relationships, set `specieslist_filter=false` to skip the
-Ensembl step, or set `biomart_datasets_filter=false` to skip the BioMart
-dataset preflight.
+ThorAxe still receives species names. Use `specieslist="all"` or
+`specieslist=""` for unrestricted ThorAxe species selection, pass a
+comma-separated species list, file path, or single species name for an explicit
+selection, use `orthology="1:n"` or `"m:n"` to keep broader ortholog
+relationships, set `specieslist_filter=false` to skip the Ensembl step, or set
+`biomart_datasets_filter=false` to skip the BioMart dataset preflight. The
+lowercase strings `"ases"` and `"all"` are reserved presets; use `./ases` or
+`./all` for files with those names.
 `transcript_query` runtime depends heavily on the number of species it has to
 download, so runs can be faster when you provide a small curated `specieslist`.
 
