@@ -20,6 +20,9 @@ Breaking changes:
   `IdunaResult.workdir` remains absolute.
 - `IdunaResult.expansions` can contain `nothing` for a seed whose expansion is
   unavailable, while still remaining indexed like `result.thoraxe_msa.seeds`.
+- Renamed Iduna's MMseqs2 thread controls from `threads` and `--threads` to
+  `mmseqs_threads` and `--mmseqs-threads` to avoid confusion with Julia's
+  runtime `--threads` flag.
 
 Added:
 
@@ -40,8 +43,9 @@ Added:
   for shared sampling strategies, plus `sampling_strategy` metadata in
   ThorAxe MSA results and candidate summaries.
 - Parallelized ThorAxe PID sample scoring across Julia threads. Start Julia
-  with `--threads` or set `JULIA_NUM_THREADS` to speed up the repeated ThorAxe
-  sample runs; `--mmseqs-threads` still controls only MMseqs2 expansion.
+  with the runtime `--threads` flag before the app separator, or set
+  `JULIA_NUM_THREADS`, to speed up the repeated ThorAxe sample runs;
+  `--mmseqs-threads` still controls only MMseqs2 expansion.
 - Improved `IdunaResult` text display with a compact summary of pipeline
   status, selected seeds, expansion slots, validations, warnings, and errors.
 - Expanded progress logging for ThorAxe transcript_query preparation, PID
