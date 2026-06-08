@@ -10,8 +10,27 @@ Breaking changes:
 
 Changed:
 
-- Renamed expansion display wording from slots to expansions, and reports
-  unavailable expansion results as `missing` instead of `nothing`.
+- Improved `IdunaResult` display summaries for ThorAxe MSA and expansion results.
+  They now include validation-backed MSA dimensions, clearer selected PID labels,
+  and `expansion`/`missing` wording instead of `slot`/`nothing`.
+
+Fixed:
+
+- Fixed cached expansion hit counting so reused raw hit FASTA files are counted as
+  sequences and new-hit counts are computed against normalized seed IDs.
+
+Documentation and tests:
+
+- Expanded public docstrings for the main API, target resolution, ThorAxe MSA
+  assembly, MSA expansion, validation, utility functions, and result types.
+- Updated README and documentation examples, including API and output
+  documentation.
+- Added tests for README snippets, documentation examples, example fixtures,
+  display summaries, app help output, and cached expansion hit counting.
+
+Internal changes:
+
+- Updated `codecov/codecov-action` from v6 to v7.
 
 ### Changes from v0.7.0 to v0.8.0
 
