@@ -39,13 +39,22 @@ Added:
 - Added shared PID sample species files under `thoraxe_msa/samples/species/`
   for shared sampling strategies, plus `sampling_strategy` metadata in
   ThorAxe MSA results and candidate summaries.
+- Parallelized ThorAxe PID sample scoring across Julia threads. Start Julia
+  with `--threads` or set `JULIA_NUM_THREADS` to speed up the repeated ThorAxe
+  sample runs; `--mmseqs-threads` still controls only MMseqs2 expansion.
+- Improved `IdunaResult` text display with a compact summary of pipeline
+  status, selected seeds, expansion slots, validations, warnings, and errors.
+- Expanded progress logging for ThorAxe transcript_query preparation, PID
+  candidate generation, sample scoring, cache reuse, and retry/failure paths.
 
 Internal changes:
 
-- Migrated HTTP usage to HTTP.jl v2 and added explicit CodecZlib-based gzip
-  response decoding.
+- Kept HTTP.jl v1 compatibility because HTTP.jl v2 interrupts
+  JuliaRegistrator AutoMerge, and added explicit CodecZlib-based gzip response
+  decoding.
 - Added tests for stage resumability, move-safe result loading, partial result
-  round-tripping, sampling strategies, and fallback/error paths.
+  round-tripping, sampling strategies, threaded PID scoring, display output, and
+  fallback/error paths.
 - Updated CI and documentation dependencies, including `codecov/codecov-action`
   v6, `julia-actions/cache` v3, and Documenter compatibility for 1.17.0.
 - Added the WIP repository status badge.
