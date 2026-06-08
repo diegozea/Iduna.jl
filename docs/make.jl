@@ -30,6 +30,6 @@ makedocs(;
 )
 
 deploydocs(;
-    repo = "github.com/diegozea/Iduna.jl",
+    repo = "github.com/diegozea/Iduna.jl.git",
     devbranch = "main"
 )
