@@ -1,11 +1,13 @@
 @testset "EPLI" begin
-    function copy_aligner(input_fasta, output_fasta; logs_dir = nothing, sample_label = "sample")
+    function copy_aligner(input_fasta, output_fasta; logs_dir = nothing,
+            run_label = "run", aligner_args = Cmd(String[]))
         mkpath(dirname(output_fasta))
         cp(input_fasta, output_fasta; force = true)
         return output_fasta
     end
 
-    function padded_aligner(input_fasta, output_fasta; logs_dir = nothing, sample_label = "sample")
+    function padded_aligner(input_fasta, output_fasta; logs_dir = nothing,
+            run_label = "run", aligner_args = Cmd(String[]))
         records = Tuple{String, String}[]
         current_name = nothing
         current_seq = String[]
@@ -34,6 +36,11 @@
             end
         end
         return output_fasta
+    end
+
+    function jll_extension_test_dependencies_available()
+        return Base.find_package("MAFFT_jll") !== nothing &&
+               Base.find_package("ClustalO_jll") !== nothing
     end
 
     mktempdir() do tmp
@@ -70,11 +77,13 @@
             sample_count = 3,
             sample_fraction = 0.5,
             sample_seed = 7,
+            aligner_args = `--example-arg`,
             progress_enabled = false)
 
         @test result.epli == 31.0
         @test result.n_samples == 3
         @test result.sample_seed == UInt64(7)
+        @test result.aligner_args == string(`--example-arg`)
         @test sort(calls) == ["sequence_subset_001", "sequence_subset_002",
             "sequence_subset_003"]
         @test isfile(result.scores_path)
@@ -83,6 +92,8 @@
         scores = Iduna.EPLI.DataFrame(Iduna.EPLI.CSV.File(result.scores_path))
         @test scores.epli_component == fill(31.0, 3)
         @test scores.normalization_score == fill(-1.0, 3)
+        summary = Iduna.EPLI.DataFrame(Iduna.EPLI.CSV.File(result.summary_path))
+        @test only(summary.aligner_args) == string(`--example-arg`)
 
         sample_fasta = joinpath(tmp, "run", "samples", "sequence_subset_001_sequences.fasta")
         @test startswith(read(sample_fasta, String), ">ref\n")
@@ -101,6 +112,36 @@
                 String)
         end
         @test repeat_result.epli == result.epli
+    end
+
+    mktempdir() do tmp
+        input = joinpath(tmp, "sequences.fasta")
+        write(input, ">ref\nAAAA\n>seq2\nAAAT\n")
+        seen_labels = String[]
+        seen_args = String[]
+        strict_aligner = (input_fasta, output_fasta; logs_dir = nothing,
+            run_label::AbstractString, aligner_args::Cmd) -> begin
+            push!(seen_labels, String(run_label))
+            push!(seen_args, string(aligner_args))
+            return copy_aligner(input_fasta, output_fasta;
+                logs_dir, run_label, aligner_args)
+        end
+        score_fn = (reference_msa, sample_msa; logs_dir = nothing,
+            label = "sample") -> (; raw_score = 1.0)
+        normalization_fn = (score; reference_score = nothing) -> score.raw_score
+
+        result = Iduna.EPLI.epli_score(input, joinpath(tmp, "strict"),
+            strict_aligner;
+            score_fn,
+            normalization_fn,
+            sample_count = 1,
+            sample_fraction = 1.0,
+            sample_seed = 17,
+            progress_enabled = false)
+
+        @test result.aligner_args == string(Cmd(String[]))
+        @test seen_labels == ["full", "sequence_subset_001"]
+        @test seen_args == fill(string(Cmd(String[])), 2)
     end
 
     mktempdir() do tmp
@@ -144,7 +185,7 @@
             label = "sample") -> (; raw_score = 7.0)
         scalar_normalization = (score; reference_score = nothing) -> score.raw_score
         namedtuple_aligner = (input_fasta, output_fasta; logs_dir = nothing,
-            sample_label = "sample") -> begin
+            run_label = "run", aligner_args = Cmd(String[])) -> begin
             mkpath(dirname(output_fasta))
             cp(input_fasta, output_fasta; force = true)
             return (; fasta_path = output_fasta)
@@ -165,7 +206,7 @@
         @test startswith(read(sample_fasta, String), ">seq2\n")
 
         bad_aligner = (input_fasta, output_fasta; logs_dir = nothing,
-            sample_label = "sample") -> 42
+            run_label = "run", aligner_args = Cmd(String[])) -> 42
         @test_throws ErrorException Iduna.EPLI.epli_score(input, joinpath(tmp, "bad"),
             bad_aligner;
             score_fn,
@@ -191,10 +232,10 @@
         write(input, ">ref\nAAAA\n>seq2\nAAAT\n>seq3\nAATT\n>seq4\nTTTT\n")
         calls = String[]
         cached_aligner = (input_fasta, output_fasta; logs_dir = nothing,
-            sample_label = "sample") -> begin
-            push!(calls, String(sample_label))
+            run_label = "run", aligner_args = Cmd(String[])) -> begin
+            push!(calls, String(run_label))
             return copy_aligner(input_fasta, output_fasta;
-                logs_dir, sample_label)
+                logs_dir, run_label, aligner_args)
         end
         score_fn = (reference_msa, sample_msa; logs_dir = nothing,
             label = "sample") -> (; raw_score = 1.0)
@@ -227,12 +268,46 @@
             progress_enabled = false)
         @test calls == ["full", "sequence_subset_001", "sequence_subset_001"]
 
+        arg_result = Iduna.EPLI.epli_score(input, workdir, cached_aligner;
+            score_fn,
+            normalization_fn,
+            sample_count = 1,
+            sample_fraction = 0.5,
+            sample_seed = 3,
+            aligner_args = `--alpha`,
+            progress_enabled = false)
+        @test arg_result.aligner_args == string(`--alpha`)
+        @test calls == ["full", "sequence_subset_001", "sequence_subset_001",
+            "full", "sequence_subset_001"]
+
+        Iduna.EPLI.epli_score(input, workdir, cached_aligner;
+            score_fn,
+            normalization_fn,
+            sample_count = 1,
+            sample_fraction = 0.5,
+            sample_seed = 3,
+            aligner_args = `--alpha`,
+            progress_enabled = false)
+        @test calls == ["full", "sequence_subset_001", "sequence_subset_001",
+            "full", "sequence_subset_001"]
+
+        Iduna.EPLI.epli_score(input, workdir, cached_aligner;
+            score_fn,
+            normalization_fn,
+            sample_count = 1,
+            sample_fraction = 0.5,
+            sample_seed = 3,
+            aligner_args = `--beta`,
+            progress_enabled = false)
+        @test calls == ["full", "sequence_subset_001", "sequence_subset_001",
+            "full", "sequence_subset_001", "full", "sequence_subset_001"]
+
         changed_calls = String[]
         changed_aligner = (input_fasta, output_fasta; logs_dir = nothing,
-            sample_label = "sample") -> begin
-            push!(changed_calls, String(sample_label))
+            run_label = "run", aligner_args = Cmd(String[])) -> begin
+            push!(changed_calls, String(run_label))
             return copy_aligner(input_fasta, output_fasta;
-                logs_dir, sample_label)
+                logs_dir, run_label, aligner_args)
         end
         Iduna.EPLI.epli_score(input, workdir, changed_aligner;
             score_fn,
@@ -343,7 +418,8 @@
             aligner = "/tmp/ProGraphMSA",
             runner,
             logs_dir,
-            sample_label = "probe")
+            run_label = "probe",
+            aligner_args = `--extra-flag`)
 
         @test path == output
         @test isfile(joinpath(logs_dir, "probe_prographmsa_stdout.log"))
@@ -352,6 +428,7 @@
         @test occursin("--input_order", command_text)
         @test occursin("--fasta", command_text)
         @test occursin("--output", command_text)
+        @test occursin("--extra-flag", command_text)
         @test occursin(output, command_text)
         @test occursin(input, command_text)
 
@@ -364,5 +441,152 @@
         @test Iduna.EPLI.prographmsa_aligner(input, plain_output;
             aligner = "/tmp/ProGraphMSA",
             runner = plain_runner) == plain_output
+    end
+
+    @testset "JLL aligner extensions" begin
+        @test isdefined(Iduna.EPLI, :mafft_aligner)
+        @test isdefined(Iduna.EPLI, :clustalo_aligner)
+        @test !(:mafft_aligner in names(Iduna.EPLI))
+        @test !(:clustalo_aligner in names(Iduna.EPLI))
+
+        if jll_extension_test_dependencies_available()
+            @test Base.get_extension(Iduna, :IdunaMAFFTExt) === nothing
+            @eval using MAFFT_jll
+            @test Base.get_extension(Iduna, :IdunaMAFFTExt) !== nothing
+
+            @test Base.get_extension(Iduna, :IdunaClustalOExt) === nothing
+            @eval using ClustalO_jll
+            @test Base.get_extension(Iduna, :IdunaClustalOExt) !== nothing
+
+            mktempdir() do tmp
+                input = joinpath(tmp, "input.fasta")
+                output = joinpath(tmp, "mafft_output.fasta")
+                logs_dir = joinpath(tmp, "logs")
+                write(input, ">ref\nAA\n")
+                captured = Ref{Any}()
+                runner = command -> begin
+                    captured[] = command
+                    write(output, ">ref\nAA\n")
+                    return nothing
+                end
+
+                path = Iduna.EPLI.mafft_aligner(input, output;
+                    aligner = "/tmp/mafft",
+                    runner,
+                    logs_dir,
+                    run_label = "probe",
+                    aligner_args = `--maxiterate 1000 --localpair`)
+
+                @test path == output
+                @test isfile(output)
+                @test isfile(joinpath(logs_dir, "probe_mafft_stderr.log"))
+                command_text = string(captured[])
+                @test occursin("--quiet", command_text)
+                @test occursin("--inputorder", command_text)
+                @test occursin("--maxiterate", command_text)
+                @test occursin("1000", command_text)
+                @test occursin("--localpair", command_text)
+                @test occursin(input, command_text)
+                @test occursin(output, command_text)
+
+                plain_output = joinpath(tmp, "mafft_plain_output.fasta")
+                plain_runner = command -> begin
+                    captured[] = command
+                    write(plain_output, ">ref\nAA\n")
+                    return nothing
+                end
+                @test Iduna.EPLI.mafft_aligner(input, plain_output;
+                    aligner = "/tmp/mafft",
+                    runner = plain_runner) == plain_output
+            end
+
+            mktempdir() do tmp
+                input = joinpath(tmp, "input.fasta")
+                output = joinpath(tmp, "clustalo_output.fasta")
+                logs_dir = joinpath(tmp, "logs")
+                write(input, ">ref\nAA\n")
+                captured = Ref{Any}()
+                runner = command -> begin
+                    captured[] = command
+                    write(output, ">ref\nAA\n")
+                    return nothing
+                end
+
+                path = Iduna.EPLI.clustalo_aligner(input, output;
+                    aligner = "/tmp/clustalo",
+                    runner,
+                    logs_dir,
+                    run_label = "probe",
+                    aligner_args = `--threads=4 --auto`)
+
+                @test path == output
+                @test isfile(output)
+                @test isfile(joinpath(logs_dir, "probe_clustalo_stdout.log"))
+                @test isfile(joinpath(logs_dir, "probe_clustalo_stderr.log"))
+                command_text = string(captured[])
+                @test occursin("--infile", command_text)
+                @test occursin("--outfile", command_text)
+                @test occursin("--outfmt=fasta", command_text)
+                @test occursin("--force", command_text)
+                @test occursin("--output-order=input-order", command_text)
+                @test occursin("--threads=4", command_text)
+                @test occursin("--auto", command_text)
+                @test occursin(input, command_text)
+                @test occursin(output, command_text)
+
+                plain_output = joinpath(tmp, "clustalo_plain_output.fasta")
+                plain_runner = command -> begin
+                    captured[] = command
+                    write(plain_output, ">ref\nAA\n")
+                    return nothing
+                end
+                @test Iduna.EPLI.clustalo_aligner(input, plain_output;
+                    aligner = "/tmp/clustalo",
+                    runner = plain_runner) == plain_output
+            end
+
+            mktempdir() do tmp
+                input = joinpath(tmp, "sequences.fasta")
+                write(input,
+                    ">ref\nAAAA\n" *
+                    ">seq2\nAAAT\n" *
+                    ">seq3\nAATT\n")
+                mafft_copy_aligner = (input_fasta, output_fasta;
+                    logs_dir = nothing,
+                    run_label = "run",
+                    aligner_args = Cmd(String[])) -> begin
+                    runner = command -> begin
+                        padded_aligner(input_fasta, output_fasta;
+                            logs_dir, run_label, aligner_args)
+                        return nothing
+                    end
+                    return Iduna.EPLI.mafft_aligner(input_fasta, output_fasta;
+                        logs_dir,
+                        run_label,
+                        aligner_args,
+                        runner,
+                        aligner = "/tmp/mafft")
+                end
+                score_fn = (reference_msa, sample_msa; logs_dir = nothing,
+                    label = "sample") -> (; raw_score = 3.0)
+
+                result = Iduna.EPLI.epli_score(input, joinpath(tmp, "mafft_epli"),
+                    mafft_copy_aligner;
+                    score_fn,
+                    normalization_fn = Iduna.EPLI.no_normalization,
+                    sample_count = 1,
+                    sample_fraction = 1.0,
+                    sample_seed = 5,
+                    aligner_args = `--thread 1`,
+                    progress_enabled = false)
+
+                @test isfinite(result.epli)
+                @test isfile(result.scores_path)
+                @test isfile(result.summary_path)
+                @test result.aligner_args == string(`--thread 1`)
+            end
+        else
+            @info "Skipping optional JLL aligner extension tests; MAFFT_jll and ClustalO_jll are not available in this environment."
+        end
     end
 end

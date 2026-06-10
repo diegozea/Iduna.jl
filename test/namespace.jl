@@ -21,7 +21,11 @@
     @test isdefined(Iduna, :EPLI)
     @test isdefined(Iduna.EPLI, :epli_score)
     @test isdefined(Iduna.EPLI, :hhsuite_identity_score)
+    @test isdefined(Iduna.EPLI, :mafft_aligner)
+    @test isdefined(Iduna.EPLI, :clustalo_aligner)
     @test isdefined(Iduna.EPLI, :prographmsa_aligner)
+    @test !(:mafft_aligner in names(Iduna.EPLI))
+    @test !(:clustalo_aligner in names(Iduna.EPLI))
     @test !(:prographmsa_aligner in names(Iduna.EPLI))
 
     @test isdefined(Iduna.ThorAxeMSA, :build_thoraxe_msa)

@@ -134,7 +134,7 @@ function _score_alignment_samples(reference_msa_fasta::AbstractString,
 end
 
 """
-    epli_score(input_fasta, workdir, aligner_fn; kwargs...)
+    epli_score(input_fasta, workdir, aligner_fn; aligner_args=Cmd(String[]))
 
 Compute EPLI for an aligner over sequence-row subsamples from an unaligned FASTA.
 
@@ -143,11 +143,13 @@ Compute EPLI for an aligner over sequence-row subsamples from an unaligned FASTA
 - `input_fasta::AbstractString`: unaligned FASTA with the full sequence set.
 - `workdir::AbstractString`: output directory for inputs, MSAs, logs, and tables.
 - `aligner_fn::Function`: callable that writes an aligned FASTA from an input FASTA.
+  It must accept `logs_dir`, `run_label`, and `aligner_args` keywords.
 
 # Keywords
 
 - `score_fn = hhsuite_identity_score`: pairwise profile score function.
 - `normalization_fn = comparable_positions_normalization`: score normalization.
+- `aligner_args::Cmd = Cmd(String[])`: extra command arguments passed to `aligner_fn`.
 - `sample_count::Integer = 45`: number of sequence-row samples.
 - `sample_fraction::Real = 0.8`: fraction of non-reference rows per sample.
 - `sample_seed = nothing`: random seed; `nothing` records a generated seed.
@@ -159,6 +161,7 @@ function epli_score(input_fasta::AbstractString,
         aligner_fn::Function;
         score_fn::Function = hhsuite_identity_score,
         normalization_fn::Function = comparable_positions_normalization,
+        aligner_args::Cmd = Cmd(String[]),
         sample_count::Integer = 45,
         sample_fraction::Real = 0.8,
         sample_seed::Union{Nothing, Integer} = nothing,
@@ -181,8 +184,9 @@ function epli_score(input_fasta::AbstractString,
     write_fasta(full_input, fasta.records)
     reference_msa = _run_aligner(aligner_fn, full_input, reference_msa;
         logs_dir = joinpath(logs_dir, "aligner"),
-        sample_label = "full",
-        overwrite)
+        run_label = "full",
+        overwrite,
+        aligner_args)
     sample_specs = NamedTuple[]
     for sample_idx in 1:Int(sample_count)
         label = _sample_label(sample_idx)
@@ -203,8 +207,9 @@ function epli_score(input_fasta::AbstractString,
                     overwrite = false) -> _run_aligner(
                     aligner_fn, spec.sample_sequence_fasta, spec.sample_msa_fasta;
                     logs_dir = joinpath(logs_dir, "aligner"),
-                    sample_label = spec.sample_label,
-                    overwrite)))
+                    run_label = spec.sample_label,
+                    overwrite,
+                    aligner_args)))
     end
     scored = _score_alignment_samples(reference_msa, sample_specs;
         score_fn,
@@ -224,6 +229,7 @@ function epli_score(input_fasta::AbstractString,
         sample_seed = seed,
         score_function = _function_label(score_fn),
         normalization_function = _function_label(normalization_fn),
+        aligner_args = string(aligner_args),
         input_fasta = String(input_fasta),
         reference_msa_fasta = reference_msa,
         scores_path)
