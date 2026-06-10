@@ -18,6 +18,12 @@
     @test !isdefined(Iduna.IDMapping, :parse_transcript_lookup)
     @test !isdefined(Iduna.IDMapping, :UNIPROT_BASE)
 
+    @test isdefined(Iduna, :EPLI)
+    @test isdefined(Iduna.EPLI, :epli_score)
+    @test isdefined(Iduna.EPLI, :hhsuite_identity_score)
+    @test isdefined(Iduna.EPLI, :prographmsa_aligner)
+    @test !(:prographmsa_aligner in names(Iduna.EPLI))
+
     @test isdefined(Iduna.ThorAxeMSA, :build_thoraxe_msa)
     @test !isdefined(Iduna.ThorAxeMSA, :REQUIRED_ENSEMBL_FILES)
 

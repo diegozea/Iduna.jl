@@ -91,7 +91,7 @@ files, and per-PID score CSV. With `sampling_strategy=:common` or `:input`,
 shared sampled species lists live in `thoraxe_msa/samples/species/` and each
 PID-local sampled species path is a symlink to the matching shared file.
 `thoraxe_msa/candidate_summary.csv` records validation status, eligibility,
-sample identity statistics, candidate size, and the selected seed rows.
+EPLI scores, candidate size, and the selected seed rows.
 
 MSA paths are also available from the returned [`IdunaResult`](@ref):
 

@@ -13,7 +13,7 @@ using Documenter
 DocMeta.setdocmeta!(Iduna, :DocTestSetup, :(using Iduna); recursive = true)
 
 makedocs(;
-    modules = [Iduna, Iduna.IDMapping, Iduna.ThorAxeMSA,
+    modules = [Iduna, Iduna.IDMapping, Iduna.EPLI, Iduna.ThorAxeMSA,
         Iduna.MSAExpansion, Iduna.ResultsValidation, Iduna.Utils],
     authors = "Diego Javier Zea <diegozea@gmail.com> and contributors",
     sitename = "Iduna.jl",
@@ -24,6 +24,7 @@ makedocs(;
     ),
     pages = [
         "Home" => "index.md",
+        "EPLI Score" => "epli.md",
         "API" => "api.md",
         "Output Layout" => "output.md"
     ]

@@ -121,10 +121,11 @@ draws one shared set of species samples from the species common to all eligible
 lists and is scored by HHsuite against its own full `msa_0`. Use
 `sampling_strategy=:independent` for the previous PID-local sampling behavior,
 or `sampling_strategy=:input` to sample from the effective input species list.
-Iduna chooses the highest median identity, highest mean identity, largest
-candidate `msa_0` species count, and finally the first PID in `pid_thresholds`
-order. By default Iduna uses 45 samples, retains 80% of non-reference species
-per sample, and records a random `pid_sample_seed` unless one is supplied.
+Iduna chooses the highest EPLI score, largest candidate `msa_0` species count,
+and finally the first PID in `pid_thresholds` order. EPLI is the median of
+normalized profile-level scores across the samples. By default Iduna uses 45
+samples, retains 80% of non-reference species per sample, and records a random
+`pid_sample_seed` unless one is supplied.
 Set `pid_sample_count=0` to skip seed selection and carry every eligible PID
 candidate forward. In that mode `result.thoraxe_msa.seeds`,
 `result.expansions`, and `result.validations` can contain multiple entries.

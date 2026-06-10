@@ -50,13 +50,12 @@ function _thoraxe_msa(_target, workdir::AbstractString; kwargs...)
     write(blocks_path,
         "alignment\tpid\tcode\ts_exon_id\tstart_col\tend_col\tn_columns\n")
     write(summary_path,
-        "pid,selected,median_identity,mean_identity,stockholm_path,fasta_path\n" *
-        "$(pid),true,1.0,1.0,$(seed_stockholm),$(seed_fasta)\n")
+        "pid,selected,epli,stockholm_path,fasta_path\n" *
+        "$(pid),true,1.0,$(seed_stockholm),$(seed_fasta)\n")
 
     seed = Iduna.SeedSelection(;
         pid,
-        median_identity = 1.0,
-        mean_identity = 1.0,
+        epli = 1.0,
         stockholm_path = seed_stockholm,
         fasta_path = seed_fasta,
         s_exon_blocks_tsv = blocks_path,
@@ -132,7 +131,8 @@ end
 
 function iduna_stage_kwargs(; fail_on_expansion::Bool = false)
     return (;
-        _resolve_target = (input_id; workdir, kwargs...) -> _resolved_target(
+        _resolve_target = (
+            input_id; workdir, kwargs...) -> _resolved_target(
             input_id, workdir),
         _build_thoraxe_msa = _thoraxe_msa,
         _expand_msa = fail_on_expansion ? _forbidden_expansion : _expansion,

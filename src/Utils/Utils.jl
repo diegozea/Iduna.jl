@@ -13,10 +13,12 @@ import CodecZlib
 using Dates: UTC, now
 import HTTP
 import JSON
+using Random: MersenneTwister
 import SHA
 using MIToS.MSA: AbstractMultipleSequenceAlignment, getannotcolumn, getannotfile,
                  ncolumns, sequencenames, setannotcolumn!, setannotfile!
 using Printf: @sprintf
+using StatsBase: sample
 
 include("Types.jl")
 
@@ -94,6 +96,32 @@ const _TRANSIENT_HTTP_STATUSES = Set([429, 500, 502, 503, 504])
 
 struct _RetryableHTTPStatus <: Exception
     response::HTTP.Response
+end
+
+_io_is_tty(io) = io isa Base.TTY
+_io_is_tty(io::IOContext) = _io_is_tty(getfield(io, :io))
+
+function _env_truthy(name::AbstractString)
+    value = lowercase(strip(get(ENV, name, "")))
+    return value in ("1", "true", "yes", "on")
+end
+
+function _terminal_progress_enabled(output = stderr)
+    (_env_truthy("CI") || _env_truthy("GITHUB_ACTIONS")) && return false
+    return _io_is_tty(output)
+end
+
+function _sample_rng(seed::UInt64, sample_idx::Integer)
+    mixed = xor(seed, UInt64(sample_idx) * 0xbf58476d1ce4e5b9)
+    return MersenneTwister(Int(mod(mixed, UInt64(typemax(Int)))))
+end
+
+function _sample_indices(n_total::Integer, reference_idx::Integer,
+        fraction::Real, rng::MersenneTwister)
+    selectable = [i for i in 1:n_total if i != reference_idx]
+    isempty(selectable) && return [reference_idx]
+    n_keep = clamp(round(Int, Float64(fraction) * length(selectable)), 1, length(selectable))
+    return vcat(reference_idx, sample(rng, selectable, n_keep; replace = false))
 end
 
 # Julia's retry helper retries exceptions, so transient statuses are wrapped.
@@ -1064,8 +1092,7 @@ end
 function _relative_seed_paths(seed::SeedSelection, workdir::AbstractString)
     return SeedSelection(;
         pid = seed.pid,
-        median_identity = seed.median_identity,
-        mean_identity = seed.mean_identity,
+        epli = seed.epli,
         stockholm_path = _relative_artifact_path(seed.stockholm_path, workdir),
         fasta_path = _relative_artifact_path(seed.fasta_path, workdir),
         s_exon_blocks_tsv = _relative_artifact_path(seed.s_exon_blocks_tsv, workdir),
@@ -1247,9 +1274,7 @@ end
 function _seed_summary(seed::SeedSelection)
     return (;
         pid = seed.pid,
-        median_identity = seed.median_identity === missing ? nothing :
-                          seed.median_identity,
-        mean_identity = seed.mean_identity === missing ? nothing : seed.mean_identity,
+        epli = seed.epli === missing ? nothing : seed.epli,
         stockholm_path = seed.stockholm_path,
         fasta_path = seed.fasta_path,
         s_exon_blocks_tsv = seed.s_exon_blocks_tsv,

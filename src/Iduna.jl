@@ -7,6 +7,7 @@ from UniProt accessions or Ensembl transcript IDs.
 module Iduna
 
 export IDMapping,
+       EPLI,
        MSAExpansion,
        ResultsValidation,
        ThorAxeMSA,
@@ -24,6 +25,7 @@ export IDMapping,
 
 include("Utils/Utils.jl")
 include("IDMapping/IDMapping.jl")
+include("EPLI/EPLI.jl")
 include("ThorAxeMSA/ThorAxeMSA.jl")
 include("MSAExpansion/MSAExpansion.jl")
 include("ResultsValidation/ResultsValidation.jl")

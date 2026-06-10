@@ -171,8 +171,7 @@
         write(seed_sto, "# STOCKHOLM 1.0\nseed ACDE\n//\n")
         seed = Iduna.SeedSelection(;
             pid = 10.0,
-            median_identity = 100.0,
-            mean_identity = 100.0,
+            epli = 100.0,
             stockholm_path = seed_sto,
             summary_path = joinpath(tmp, "seed_summary.csv")
         )
@@ -341,8 +340,7 @@
         centroids_dir = joinpath(tmp, "expansion", gene_id, transcript_id, "pid_20.00")
         centroids_seed = Iduna.SeedSelection(;
             pid = 20.0,
-            median_identity = 100.0,
-            mean_identity = 100.0,
+            epli = 100.0,
             stockholm_path = seed_sto,
             summary_path = joinpath(tmp, "seed_summary.csv")
         )
@@ -373,8 +371,7 @@
             missing_centroid_dir, transcript_id; centroids = true))
         missing_centroid_seed = Iduna.SeedSelection(;
             pid = 30.0,
-            median_identity = 100.0,
-            mean_identity = 100.0,
+            epli = 100.0,
             stockholm_path = seed_sto,
             summary_path = joinpath(tmp, "seed_summary.csv")
         )
@@ -427,8 +424,7 @@
             Iduna.MSAExpansion._expansion_output_paths(legacy_dir, transcript_id))
         legacy_seed = Iduna.SeedSelection(;
             pid = 40.0,
-            median_identity = 100.0,
-            mean_identity = 100.0,
+            epli = 100.0,
             stockholm_path = seed_sto,
             summary_path = joinpath(tmp, "seed_summary.csv")
         )
@@ -449,8 +445,7 @@
             Iduna.MSAExpansion._expansion_output_paths(stale_failure_dir, transcript_id))
         stale_failure_seed = Iduna.SeedSelection(;
             pid = 50.0,
-            median_identity = 100.0,
-            mean_identity = 100.0,
+            epli = 100.0,
             stockholm_path = seed_sto,
             summary_path = joinpath(tmp, "seed_summary.csv")
         )
@@ -469,8 +464,7 @@
         write(success_seed_sto, "# STOCKHOLM 1.0\nseed ACDEFGHIKLMNPQRSTVWY\n//\n")
         success_seed = Iduna.SeedSelection(;
             pid = 60.0,
-            median_identity = 100.0,
-            mean_identity = 100.0,
+            epli = 100.0,
             stockholm_path = success_seed_sto,
             summary_path = joinpath(tmp, "seed_summary.csv")
         )

@@ -8,7 +8,6 @@ module ThorAxeMSA
 
 import CSV
 import Dates
-import HHsuite_jll
 import JSON
 import ProgressMeter
 import Scratch
@@ -21,12 +20,13 @@ using MIToS.MSA: AbstractMultipleSequenceAlignment, FASTA, PIRSequences, Stockho
                  getannotsequence, join_msas, nsequences, read_file, sequence_id,
                  sequencenames, setreference!, stringsequence, write_file
 using Random: MersenneTwister
-using Statistics: mean, median
 using StatsBase: sample
 
+using ..EPLI
 using ..Utils: DEFAULT_PID_THRESHOLDS, ResolvedTarget, SeedSelection, ThorAxeMSAResult,
                _http_get_request, _http_get_with_retries, _relative_artifact_path,
-               _resolve_artifact_path,
+               _resolve_artifact_path, _sample_indices, _sample_rng,
+               _terminal_progress_enabled,
                decode_body,
                fasta_sequence, format_pid, format_pid_dir, protein_alignment_stats,
                resolve_sequence_name, safe_rm,
@@ -290,19 +290,6 @@ function _missing_transcript_query_outputs(tmp_gene_dir::AbstractString)
         append!(missing, _REQUIRED_ENSEMBL_FILES)
     end
     return missing
-end
-
-_io_is_tty(io) = io isa Base.TTY
-_io_is_tty(io::IOContext) = _io_is_tty(getfield(io, :io))
-
-function _env_truthy(name::AbstractString)
-    value = lowercase(strip(get(ENV, name, "")))
-    return value in ("1", "true", "yes", "on")
-end
-
-function _terminal_progress_enabled(output = stderr)
-    (_env_truthy("CI") || _env_truthy("GITHUB_ACTIONS")) && return false
-    return _io_is_tty(output)
 end
 
 function _open_logs(f::Function, stdout_path::AbstractString, stderr_path::AbstractString)
@@ -1461,78 +1448,27 @@ function _validate_transcript_translation(target::ResolvedTarget,
 end
 
 function _hhsuite_query_indices(seq::AbstractString, start::Integer, stop::Integer)
-    indices = Int[]
-    current = Int(start)
-    for residue in seq
-        if residue == '-'
-            push!(indices, 0)
-        else
-            push!(indices, current)
-            current += 1
-        end
-    end
-    current - 1 == stop || error("Could not parse HHsuite alignment positions.")
-    return indices
+    return EPLI._hhsuite_query_indices(seq, start, stop)
 end
 
 function _parse_hhsuite_query_segment(line::AbstractString)
-    m = match(r"\S+\s+(\d+)\s+(\S+)\s+(\d+)", line)
-    m === nothing && return nothing
-
-    start = parse(Int, m.captures[1])
-    seq = m.captures[2]
-    stop = parse(Int, m.captures[3])
-    return (;
-        cols = findfirst(seq, line), indices = _hhsuite_query_indices(seq, start, stop))
+    return EPLI._parse_hhsuite_query_segment(line)
 end
 
 function _append_hhsuite_code_line!(positions, codes, line::AbstractString, cols, indices)
-    occursin(r"^\s", line) || return nothing
-    isempty(indices) && return nothing
-    (cols === nothing || isempty(cols)) && return nothing
-    append!(positions, indices)
-    append!(codes, collect(line[cols]))
-    return nothing
+    return EPLI._append_hhsuite_code_line!(positions, codes, line, cols, indices)
 end
 
 function _get_codes(output::AbstractString)
-    in_alignment = false
-    query_line = true
-    cols = 1:0
-    indices = Int[]
-    positions = Int[]
-    codes = Char[]
-    for line in split(output, '\n')
-        if startswith(line, "Probab=")
-            in_alignment = true
-            continue
-        end
-        in_alignment || continue
-        isempty(line) && continue
-        if query_line
-            parsed = _parse_hhsuite_query_segment(line)
-            if parsed !== nothing
-                cols = parsed.cols
-                indices = parsed.indices
-            end
-            query_line = false
-        elseif startswith(line, "Confidence")
-            query_line = true
-        else
-            _append_hhsuite_code_line!(positions, codes, line, cols, indices)
-        end
-    end
-    return positions, codes
+    return EPLI._get_codes(output)
 end
 
 function _identity_from_codes(positions::Vector{Int}, codes::Vector{Char})
-    seen = Dict{Int, Bool}()
-    for (pos, code) in zip(positions, codes)
-        pos == 0 && continue
-        seen[pos] = get(seen, pos, false) || code == '|'
-    end
-    isempty(seen) && return 0.0
-    return 100 * count(identity, values(seen)) / length(seen)
+    counts = EPLI._identity_counts_from_codes(positions, codes)
+    score = (;
+        matched_positions = counts.matched_positions,
+        comparable_positions = counts.comparable_positions)
+    return EPLI.comparable_positions_normalization(score).normalized_score
 end
 
 """
@@ -1560,27 +1496,9 @@ function compute_identity_against_reference(reference_fasta::AbstractString,
         sample_fasta::AbstractString;
         logs_dir::Union{Nothing, AbstractString} = nothing,
         label::AbstractString = "seed")
-    mktempdir() do tmp
-        ref_hhm = joinpath(tmp, "reference.hhm")
-        sample_hhm = joinpath(tmp, "sample.hhm")
-        out_path = joinpath(tmp, "hhalign.out")
-        run(pipeline(
-            `$(HHsuite_jll.hhmake()) -add_cons -M 100 -i $reference_fasta -o $ref_hhm`,
-            stdout = devnull, stderr = devnull))
-        run(pipeline(
-            `$(HHsuite_jll.hhmake()) -add_cons -M 100 -i $sample_fasta -o $sample_hhm`,
-            stdout = devnull, stderr = devnull))
-        run(pipeline(
-            `$(HHsuite_jll.hhalign()) -glob -M 100 -i $ref_hhm -t $sample_hhm -o $out_path`,
-            stdout = devnull, stderr = devnull))
-        output = read(out_path, String)
-        if logs_dir !== nothing
-            mkpath(logs_dir)
-            cp(out_path, joinpath(logs_dir, "$(label)_hhalign.out"); force = true)
-        end
-        positions, codes = _get_codes(output)
-        return _identity_from_codes(positions, codes)
-    end
+    score = EPLI.hhsuite_identity_score(reference_fasta, sample_fasta;
+        logs_dir, label)
+    return EPLI.comparable_positions_normalization(score).normalized_score
 end
 
 function _candidate_pid_dir(workdir::AbstractString, pid::Real)
@@ -1723,19 +1641,6 @@ function _reference_index(msa::AbstractMultipleSequenceAlignment,
         idx === nothing || return idx
     end
     error("Could not find a reference sequence for $(gene_id) / $(transcript_id).")
-end
-
-function _sample_rng(seed::UInt64, sample_idx::Integer)
-    mixed = xor(seed, UInt64(sample_idx) * 0xbf58476d1ce4e5b9)
-    return MersenneTwister(Int(mod(mixed, UInt64(typemax(Int)))))
-end
-
-function _sample_indices(n_total::Integer, reference_idx::Integer,
-        fraction::Real, rng::MersenneTwister)
-    selectable = [i for i in 1:n_total if i != reference_idx]
-    isempty(selectable) && return [reference_idx]
-    n_keep = clamp(round(Int, Float64(fraction) * length(selectable)), 1, length(selectable))
-    return vcat(reference_idx, sample(rng, selectable, n_keep; replace = false))
 end
 
 function _species_sample(species::AbstractVector{<:AbstractString},
@@ -2021,8 +1926,7 @@ function _candidate_summary_row(target::ResolvedTarget,
         sample_fraction::Real,
         sample_seed::UInt64,
         metadata,
-        mean_identity = missing,
-        median_identity = missing,
+        epli = missing,
         n_samples::Integer = 0)
     return (;
         gene_id = target.ensembl_gene_id,
@@ -2033,8 +1937,7 @@ function _candidate_summary_row(target::ResolvedTarget,
         selected = false,
         msa0_status = String(validation.status),
         msa0_issue = validation.issue,
-        mean_identity,
-        median_identity,
+        epli,
         n_samples = Int(n_samples),
         n_sequences_msa0 = nsequences(candidate.msa),
         pid_sample_count = Int(sample_count),
@@ -2070,7 +1973,8 @@ function _score_pid_candidate(target::ResolvedTarget,
         metadata,
         overwrite::Bool = false,
         thoraxe_fn::Function = ThorAxe.thoraxe,
-        identity_fn::Function = compute_identity_against_reference)
+        score_fn::Function = EPLI.hhsuite_identity_score,
+        normalization_fn::Function = EPLI.comparable_positions_normalization)
     @debug "Scoring ThorAxe PID candidate." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id pid pid_order sample_count
     candidate = merge(
         _generate_pid_candidate(target, input_dir, workdir, pid, specieslist;
@@ -2099,19 +2003,17 @@ function _score_pid_candidate(target::ResolvedTarget,
         gene_id = target.ensembl_gene_id,
         transcript_id = target.transcript_id)
 
-    score_rows = _score_pid_samples(
+    scored = _score_pid_samples(
         target, input_dir, workdir, candidate, pid, pid_order;
         sample_count,
         overwrite,
         thoraxe_fn,
-        identity_fn)
-    CSV.write(_pid_scores_path(workdir, pid), DataFrame(score_rows))
-    identities = [row.identity for row in score_rows]
+        score_fn,
+        normalization_fn)
     return _candidate_summary_row(
         target, candidate, pid, pid_order, validation;
-        mean_identity = mean(identities),
-        median_identity = median(identities),
-        n_samples = length(identities),
+        epli = scored.epli,
+        n_samples = length(scored.rows),
         sample_count,
         sample_fraction,
         sample_seed,
@@ -2424,14 +2326,12 @@ function _candidate_summary_matches(df::DataFrame, metadata)
 end
 
 function _row_seed(row, summary_path::AbstractString)
-    median_identity = ismissing(row.median_identity) ? missing :
-                      Float64(row.median_identity)
-    mean_identity = ismissing(row.mean_identity) ? missing : Float64(row.mean_identity)
+    epli = :epli in propertynames(row) && !ismissing(row.epli) ?
+           Float64(row.epli) : missing
     workdir = abspath(_candidate_summary_workdir(summary_path))
     return SeedSelection(;
         pid = Float64(row.pid),
-        median_identity,
-        mean_identity,
+        epli,
         stockholm_path = String(row.stockholm_path),
         fasta_path = row.fasta_path === missing ? nothing : String(row.fasta_path),
         s_exon_blocks_tsv = s_exon_blocks_path(String(row.stockholm_path)),
@@ -2446,8 +2346,8 @@ end
 Choose the best eligible percent identity (PID) candidate from a ThorAxe
 candidate summary table.
 
-Candidates are ranked by median identity, mean identity, candidate MSA size, and
-then the original PID order.
+Candidates are ranked by EPLI, candidate MSA size, and then the original PID
+order.
 
 # Arguments
 
@@ -2459,12 +2359,8 @@ function select_best_seed(summary_path::AbstractString)
     if :eligible in propertynames(df)
         df = df[[!ismissing(value) && _truthy(value) for value in df.eligible], :]
     end
-    if :median_identity in propertynames(df)
-        df = df[[!ismissing(value) for value in df.median_identity], :]
-    end
-    if :mean_identity in propertynames(df)
-        df = df[[!ismissing(value) for value in df.mean_identity], :]
-    end
+    :epli in propertynames(df) || error("Candidate summary has no epli column.")
+    df = df[[!ismissing(value) for value in df.epli], :]
     isempty(df) && error("No eligible PID candidates are available for seed selection.")
     df.__row_order = 1:nrow(df)
     order_col = :pid_order in propertynames(df) ? :pid_order : :__row_order
@@ -2474,8 +2370,7 @@ function select_best_seed(summary_path::AbstractString)
         df.__n_sequences_msa0 = zeros(Int, nrow(df))
         :__n_sequences_msa0
     end
-    sort!(df, [:median_identity, :mean_identity, nseq_col, order_col];
-        rev = [true, true, true, false])
+    sort!(df, [:epli, nseq_col, order_col]; rev = [true, true, false])
     row = first(eachrow(df))
     return _row_seed(row, summary_path)
 end
@@ -2575,6 +2470,7 @@ function _has_current_candidate_summary(df::DataFrame)
         :selected,
         :msa0_status,
         :msa0_issue,
+        :epli,
         :n_sequences_msa0,
         :pid_thresholds_key,
         :sampling_strategy,
@@ -2854,7 +2750,7 @@ function _prepare_candidate_species_samples!(target::ResolvedTarget,
     return nothing
 end
 
-function _score_pid_sample(target::ResolvedTarget,
+function _pid_sample_spec(target::ResolvedTarget,
         input_dir::AbstractString,
         workdir::AbstractString,
         candidate,
@@ -2862,21 +2758,10 @@ function _score_pid_sample(target::ResolvedTarget,
         pid_order::Integer,
         sample_idx::Integer,
         n_sequences_reference::Integer;
-        overwrite::Bool = false,
-        thoraxe_fn::Function = ThorAxe.thoraxe,
-        identity_fn::Function = compute_identity_against_reference)
+        thoraxe_fn::Function = ThorAxe.thoraxe)
     sample_paths = _pid_sample_paths(workdir, pid, sample_idx)
     species_file = sample_paths.species_file
     isfile(species_file) || return nothing
-    _run_thoraxe_pid_msa(
-        target, input_dir, workdir, pid, species_file, sample_idx;
-        overwrite, thoraxe_fn)
-    isfile(sample_paths.fasta_path) || return nothing
-    identity = identity_fn(
-        candidate.fasta_path, sample_paths.fasta_path;
-        logs_dir = joinpath(_thoraxe_logs_dir(workdir), "hhalign",
-            format_pid_dir(pid)),
-        label = "sample$(sample_idx)")
     return (;
         gene_id = target.ensembl_gene_id,
         transcript_id = target.transcript_id,
@@ -2884,11 +2769,17 @@ function _score_pid_sample(target::ResolvedTarget,
         pid_order,
         sample = sample_idx,
         sample_label = _candidate_sample_label(sample_idx),
-        identity,
+        sample_msa_fasta = sample_paths.fasta_path,
+        species_file,
         n_sequences_reference,
-        n_sequences_sample = read_file(sample_paths.fasta_path, FASTA) |>
-                             nsequences
-    )
+        n_sequences_sample = nothing,
+        build_sample_msa = (spec;
+            overwrite = false) -> begin
+            _run_thoraxe_pid_msa(
+                target, input_dir, workdir, pid, spec.species_file, sample_idx;
+                overwrite, thoraxe_fn)
+            return spec.sample_msa_fasta
+        end)
 end
 
 function _score_pid_samples(target::ResolvedTarget,
@@ -2900,55 +2791,29 @@ function _score_pid_samples(target::ResolvedTarget,
         sample_count::Integer,
         overwrite::Bool = false,
         thoraxe_fn::Function = ThorAxe.thoraxe,
-        identity_fn::Function = compute_identity_against_reference,
+        score_fn::Function = EPLI.hhsuite_identity_score,
+        normalization_fn::Function = EPLI.comparable_positions_normalization,
         progress_output::IO = stderr,
         progress_enabled::Bool = _terminal_progress_enabled(progress_output))
     sample_total = Int(sample_count)
     n_sequences_reference = nsequences(candidate.msa)
-    score_rows = Vector{Union{Nothing, NamedTuple}}(nothing, sample_total)
-    run_in_parallel = sample_total > 1 && Threads.threadpoolsize() > 1
-    if run_in_parallel
-        @debug "Scoring ThorAxe PID samples in parallel." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id pid sample_count=sample_total julia_threads=Threads.threadpoolsize()
+    sample_specs = NamedTuple[]
+    for sample_idx in 1:sample_total
+        spec = _pid_sample_spec(
+            target, input_dir, workdir, candidate, pid, pid_order, sample_idx,
+            n_sequences_reference; thoraxe_fn)
+        spec === nothing || push!(sample_specs, spec)
     end
-    progress = ProgressMeter.Progress(
-        sample_total;
-        desc = "Scoring ThorAxe PID $(format_pid(pid)) samples: ",
-        output = progress_output,
-        enabled = progress_enabled)
-    ProgressMeter.update!(progress, 0; force = true)
-    progress_lock = ReentrantLock()
-    function advance_progress!()
-        lock(progress_lock) do
-            ProgressMeter.next!(progress)
-        end
-        return nothing
-    end
-
-    if !run_in_parallel
-        for sample_idx in 1:sample_total
-            score_rows[sample_idx] = _score_pid_sample(
-                target, input_dir, workdir, candidate, pid, pid_order, sample_idx,
-                n_sequences_reference;
-                overwrite,
-                thoraxe_fn,
-                identity_fn)
-            advance_progress!()
-        end
-    else
-        Threads.@threads :greedy for sample_idx in 1:sample_total
-            score_rows[sample_idx] = _score_pid_sample(
-                target, input_dir, workdir, candidate, pid, pid_order, sample_idx,
-                n_sequences_reference;
-                overwrite,
-                thoraxe_fn,
-                identity_fn)
-            advance_progress!()
-        end
-    end
-
-    rows = [row for row in score_rows if row !== nothing]
-    isempty(rows) && error("No PID sample scores were computed for PID $(pid).")
-    return rows
+    isempty(sample_specs) && error("No PID sample scores were computed for PID $(pid).")
+    return EPLI._score_alignment_samples(candidate.fasta_path, sample_specs;
+        score_fn,
+        normalization_fn,
+        scores_path = _pid_scores_path(workdir, pid),
+        logs_dir = joinpath(_thoraxe_logs_dir(workdir), format_pid_dir(pid)),
+        overwrite,
+        progress_desc = "Scoring ThorAxe PID $(format_pid(pid)) samples: ",
+        progress_output,
+        progress_enabled)
 end
 
 function _score_validated_pid_candidate(target::ResolvedTarget,
@@ -2961,7 +2826,8 @@ function _score_validated_pid_candidate(target::ResolvedTarget,
         metadata,
         overwrite::Bool = false,
         thoraxe_fn::Function = ThorAxe.thoraxe,
-        identity_fn::Function = compute_identity_against_reference)
+        score_fn::Function = EPLI.hhsuite_identity_score,
+        normalization_fn::Function = EPLI.comparable_positions_normalization)
     candidate = record.candidate
     validation = record.validation
     pid = record.pid
@@ -2979,19 +2845,17 @@ function _score_validated_pid_candidate(target::ResolvedTarget,
             sample_count, sample_fraction, sample_seed, metadata)
     end
 
-    score_rows = _score_pid_samples(
+    scored = _score_pid_samples(
         target, input_dir, workdir, candidate, pid, pid_order;
         sample_count,
         overwrite,
         thoraxe_fn,
-        identity_fn)
-    CSV.write(_pid_scores_path(workdir, pid), DataFrame(score_rows))
-    identities = [row.identity for row in score_rows]
+        score_fn,
+        normalization_fn)
     return _candidate_summary_row(
         target, candidate, pid, pid_order, validation;
-        mean_identity = mean(identities),
-        median_identity = median(identities),
-        n_samples = length(identities),
+        epli = scored.epli,
+        n_samples = length(scored.rows),
         sample_count,
         sample_fraction,
         sample_seed,
@@ -3009,7 +2873,8 @@ function _score_pid_candidates(target::ResolvedTarget,
         sample_seed::UInt64,
         overwrite::Bool,
         thoraxe_fn::Function = ThorAxe.thoraxe,
-        identity_fn::Function = compute_identity_against_reference)
+        score_fn::Function = EPLI.hhsuite_identity_score,
+        normalization_fn::Function = EPLI.comparable_positions_normalization)
     sampling_strategy = metadata.sampling_strategy
     candidate_records = NamedTuple[]
     for (pid_order, pid) in enumerate(Float64.(pid_thresholds))
@@ -3034,7 +2899,8 @@ function _score_pid_candidates(target::ResolvedTarget,
                 metadata,
                 overwrite,
                 thoraxe_fn,
-                identity_fn)
+                score_fn,
+                normalization_fn)
             for record in candidate_records]
 end
 

@@ -216,31 +216,31 @@
     mktempdir() do tmp
         summary = joinpath(tmp, "candidate_summary.csv")
         write(summary,
-            "pid,pid_order,eligible,median_identity,mean_identity,n_sequences_msa0,stockholm_path,fasta_path\n" *
-            "30.0,1,false,90.0,90.0,20,pid30.sto,pid30.fa\n" *
-            "10.0,2,true,70.0,80.0,10,pid10.sto,pid10.fa\n" *
-            "80.0,3,true,60.0,90.0,30,pid80.sto,pid80.fa\n")
+            "pid,pid_order,eligible,epli,n_sequences_msa0,stockholm_path,fasta_path\n" *
+            "30.0,1,false,90.0,20,pid30.sto,pid30.fa\n" *
+            "10.0,2,true,70.0,10,pid10.sto,pid10.fa\n" *
+            "80.0,3,true,60.0,30,pid80.sto,pid80.fa\n")
         seed = Iduna.ThorAxeMSA.select_best_seed(summary)
         @test seed.pid == 10.0
-        @test seed.median_identity == 70.0
+        @test seed.epli == 70.0
         @test seed.workdir == abspath(tmp)
 
         write(summary,
-            "pid,pid_order,eligible,median_identity,mean_identity,n_sequences_msa0,stockholm_path,fasta_path\n" *
-            "10.0,1,true,70.0,80.0,10,pid10.sto,pid10.fa\n" *
-            "80.0,2,true,70.0,80.0,20,pid80.sto,pid80.fa\n")
+            "pid,pid_order,eligible,epli,n_sequences_msa0,stockholm_path,fasta_path\n" *
+            "10.0,1,true,70.0,10,pid10.sto,pid10.fa\n" *
+            "80.0,2,true,70.0,20,pid80.sto,pid80.fa\n")
         larger_msa_seed = Iduna.ThorAxeMSA.select_best_seed(summary)
         @test larger_msa_seed.pid == 80.0
 
         write(summary,
-            "pid,pid_order,eligible,median_identity,mean_identity,n_sequences_msa0,stockholm_path,fasta_path\n" *
-            "10.0,2,true,70.0,80.0,20,pid10.sto,pid10.fa\n" *
-            "80.0,1,true,70.0,80.0,20,pid80.sto,pid80.fa\n")
+            "pid,pid_order,eligible,epli,n_sequences_msa0,stockholm_path,fasta_path\n" *
+            "10.0,2,true,70.0,20,pid10.sto,pid10.fa\n" *
+            "80.0,1,true,70.0,20,pid80.sto,pid80.fa\n")
         ordered_seed = Iduna.ThorAxeMSA.select_best_seed(summary)
         @test ordered_seed.pid == 80.0
         Iduna.ThorAxeMSA._mark_selected_candidate!(summary, ordered_seed)
         selected_lines = read(summary, String)
-        @test occursin("80.0,1,true,70.0,80.0,20,pid80.sto,pid80.fa,true",
+        @test occursin("80.0,1,true,70.0,20,pid80.sto,pid80.fa,true",
             selected_lines)
         all_candidate_seeds = Iduna.ThorAxeMSA._select_scored_candidate_seeds(summary, 0)
         @test [seed.pid for seed in all_candidate_seeds] == [80.0, 10.0]
@@ -248,15 +248,15 @@
         @test sampled_seed.pid == 80.0
 
         write(summary,
-            "pid,median_identity,mean_identity,stockholm_path,fasta_path\n" *
-            "80.0,70.0,80.0,pid80.sto,pid80.fa\n" *
-            "10.0,70.0,80.0,pid10.sto,pid10.fa\n")
+            "pid,epli,stockholm_path,fasta_path\n" *
+            "80.0,70.0,pid80.sto,pid80.fa\n" *
+            "10.0,70.0,pid10.sto,pid10.fa\n")
         tied_seed = Iduna.ThorAxeMSA.select_best_seed(summary)
         @test tied_seed.pid == 80.0
 
         write(summary,
-            "pid,eligible,median_identity,mean_identity,stockholm_path,fasta_path\n" *
-            "30.0,false,90.0,90.0,pid30.sto,pid30.fa\n")
+            "pid,eligible,epli,stockholm_path,fasta_path\n" *
+            "30.0,false,90.0,pid30.sto,pid30.fa\n")
         @test_throws ErrorException Iduna.ThorAxeMSA.select_best_seed(summary)
     end
 
@@ -274,8 +274,8 @@
         write(seed_path, "# STOCKHOLM 1.0\nseed AC\n//\n")
         write(seed_fasta, ">seed\nAC\n")
         write(summary,
-            "pid,pid_order,eligible,median_identity,mean_identity,n_sequences_msa0,stockholm_path,fasta_path\n" *
-            "10.0,1,true,70.0,80.0,1,$(seed_rel),$(seed_fasta_rel)\n")
+            "pid,pid_order,eligible,epli,n_sequences_msa0,stockholm_path,fasta_path\n" *
+            "10.0,1,true,70.0,1,$(seed_rel),$(seed_fasta_rel)\n")
 
         seed = Iduna.ThorAxeMSA.select_best_seed(summary)
         @test seed.workdir == abspath(workdir)
@@ -661,8 +661,7 @@
                 selected = true,
                 msa0_status = "ok",
                 msa0_issue = missing,
-                mean_identity = 70.0,
-                median_identity = 70.0,
+                epli = 70.0,
                 n_samples = 2,
                 n_sequences_msa0 = 4,
                 pid_sample_count = metadata.pid_sample_count,
@@ -691,8 +690,7 @@
                 selected = false,
                 msa0_status = "invalid_msa0",
                 msa0_issue = "indels",
-                mean_identity = missing,
-                median_identity = missing,
+                epli = missing,
                 n_samples = 0,
                 n_sequences_msa0 = 3,
                 pid_sample_count = metadata.pid_sample_count,
@@ -817,8 +815,7 @@
         decimal_pid_rows = [
             Iduna.ThorAxeMSA._candidate_summary_row(
             metadata_target, candidate, 12.34, 1, validation;
-            mean_identity = 70.0,
-            median_identity = 70.0,
+            epli = 70.0,
             n_samples = 2,
             sample_count = decimal_pid_metadata.pid_sample_count,
             sample_fraction = decimal_pid_metadata.pid_sample_fraction,
@@ -942,12 +939,12 @@
         @test isempty(read(joinpath(tmp, "query_spinner_command_stderr.log"), String))
 
         withenv("CI" => "true", "GITHUB_ACTIONS" => nothing) do
-            @test !Iduna.ThorAxeMSA._terminal_progress_enabled(IOBuffer())
+            @test !Iduna.Utils._terminal_progress_enabled(IOBuffer())
         end
         withenv("CI" => nothing, "GITHUB_ACTIONS" => nothing) do
-            @test !Iduna.ThorAxeMSA._terminal_progress_enabled(IOBuffer())
+            @test !Iduna.Utils._terminal_progress_enabled(IOBuffer())
         end
-        @test !Iduna.ThorAxeMSA._io_is_tty(IOContext(IOBuffer()))
+        @test !Iduna.Utils._io_is_tty(IOContext(IOBuffer()))
 
         hidden_progress_path = joinpath(tmp, "hidden_progress.log")
         open(hidden_progress_path, "w") do progress_io
@@ -1398,8 +1395,7 @@
                 pid_sample_fraction = 1.0,
                 sample_seed = UInt64(14),
                 overwrite = true,
-                thoraxe_fn = invalid_two_step_thoraxe,
-                identity_fn = (args...; kwargs...) -> 0.0)
+                thoraxe_fn = invalid_two_step_thoraxe)
             invalid_two_step_row = only(invalid_two_step_rows)
             @test invalid_two_step_calls[] == 1
             @test invalid_two_step_row.pid == invalid_two_step_pid
@@ -1415,14 +1411,14 @@
                 write_fake_thoraxe_dir(joinpath(run_root, "thoraxe"))
                 nothing
             end
-            sampled_identity = (reference_fasta, sample_fasta; logs_dir,
+            sampled_score = (reference_fasta, sample_fasta; logs_dir,
                 label) -> begin
                 @test isfile(reference_fasta)
                 @test isfile(sample_fasta)
-                @test label == "sample1"
+                @test label == "species_subset_001"
                 mkpath(logs_dir)
                 write(joinpath(logs_dir, "$(label)_hhalign.out"), "fake\n")
-                88.0
+                (; raw_score = 88.0, matched_positions = 88, comparable_positions = 100)
             end
             sampled_metadata = Iduna.ThorAxeMSA._candidate_run_metadata(
                 scoring_input, scoring_target, [sampled_pid];
@@ -1447,7 +1443,7 @@
                             sample_seed = UInt64(12),
                             metadata = sampled_metadata,
                             thoraxe_fn = sampled_thoraxe,
-                            identity_fn = sampled_identity)
+                            score_fn = sampled_score)
                     end
                 end
             end
@@ -1458,8 +1454,7 @@
                 sampled_logs)
             @test isempty(read(sampled_progress_stderr, String))
             @test sampled_calls[] == 2
-            @test sampled_row.mean_identity == 88.0
-            @test sampled_row.median_identity == 88.0
+            @test sampled_row.epli == 88.0
             @test sampled_row.n_samples == 1
             @test isfile(Iduna.ThorAxeMSA._pid_scores_path(tmp, sampled_pid))
 
@@ -1486,7 +1481,7 @@
                     progress_pid, 1;
                     sample_count = 2,
                     thoraxe_fn = progress_thoraxe,
-                    identity_fn = sampled_identity,
+                    score_fn = sampled_score,
                     progress_output,
                     progress_enabled = true)
             end
@@ -1496,14 +1491,14 @@
             @test !occursin("Scoring ThorAxe PID samples in parallel", progress_text)
             @test !any(log -> log.message == "Scoring ThorAxe PID samples in parallel.",
                 progress_logs)
-            @test length(progress_rows) == 1
+            @test length(progress_rows.rows) == 1
 
             parallel_pid = 53.5
             parallel_lock = ReentrantLock()
             parallel_write_lock = ReentrantLock()
             parallel_call_kinds = Symbol[]
             parallel_sample_threads = Int[]
-            parallel_identity_labels = String[]
+            parallel_score_labels = String[]
             function record_parallel_call!(kind::Symbol)
                 lock(parallel_lock)
                 try
@@ -1527,17 +1522,18 @@
                 end
                 nothing
             end
-            parallel_identity = (reference_fasta, sample_fasta; logs_dir,
+            parallel_score = (reference_fasta, sample_fasta; logs_dir,
                 label) -> begin
                 lock(parallel_lock)
                 try
-                    push!(parallel_identity_labels, String(label))
+                    push!(parallel_score_labels, String(label))
                 finally
                     unlock(parallel_lock)
                 end
                 mkpath(logs_dir)
                 write(joinpath(logs_dir, "$(label)_hhalign.out"), "fake\n")
-                parse(Float64, replace(String(label), "sample" => ""))
+                value = parse(Float64, last(split(String(label), '_')))
+                (; raw_score = value, matched_positions = value, comparable_positions = 100)
             end
             parallel_metadata = Iduna.ThorAxeMSA._candidate_run_metadata(
                 scoring_input, scoring_target, [parallel_pid];
@@ -1557,16 +1553,15 @@
                 sample_seed = UInt64(16),
                 metadata = parallel_metadata,
                 thoraxe_fn = parallel_thoraxe,
-                identity_fn = parallel_identity)
+                score_fn = parallel_score)
             @test count(==(:full), parallel_call_kinds) == 1
             @test count(==(:sample), parallel_call_kinds) == 4
-            @test sort(parallel_identity_labels) == ["sample1", "sample2", "sample3",
-                "sample4"]
+            @test sort(parallel_score_labels) == ["species_subset_001",
+                "species_subset_002", "species_subset_003", "species_subset_004"]
             if Base.Threads.threadpoolsize() > 1
                 @test length(unique(parallel_sample_threads)) > 1
             end
-            @test parallel_row.mean_identity == 2.5
-            @test parallel_row.median_identity == 2.5
+            @test parallel_row.epli == 2.5
             @test parallel_row.n_samples == 4
             parallel_scores = Iduna.ThorAxeMSA.DataFrame(
                 Iduna.ThorAxeMSA.CSV.File(
@@ -1602,7 +1597,7 @@
                     sample_seed = UInt64(15),
                     overwrite = true,
                     thoraxe_fn = common_thoraxe,
-                    identity_fn = sampled_identity)
+                    score_fn = sampled_score)
             end
             @test isempty([log
                            for log in common_logs
@@ -1632,8 +1627,7 @@
                 pid_sample_fraction = 1.0,
                 sample_seed = UInt64(13),
                 overwrite = false,
-                thoraxe_fn = sampled_thoraxe,
-                identity_fn = sampled_identity)
+                thoraxe_fn = sampled_thoraxe)
             @test [row.pid for row in scored_rows] == [62.0, 63.0]
             @test all(row -> row.selection_mode == "all_candidates", scored_rows)
 
@@ -2315,8 +2309,7 @@ TableSet\tptroglodytes_gene_ensembl\tChimpanzee genes (Pan_tro_3.0)\t1
                   relpath(Iduna.ThorAxeMSA._pid_scores_path(workdir, 10.0), workdir)
             seed = Iduna.SeedSelection(;
                 pid = 10.0,
-                median_identity = missing,
-                mean_identity = missing,
+                epli = missing,
                 stockholm_path = paths.stockholm_path,
                 fasta_path = paths.fasta_path,
                 summary_path)

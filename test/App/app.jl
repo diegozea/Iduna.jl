@@ -112,8 +112,7 @@ import JSON
     @testset "run app writes JSON summary" begin
         seed = Iduna.SeedSelection(;
             pid = 10.0,
-            median_identity = 1.0,
-            mean_identity = 1.0,
+            epli = 1.0,
             stockholm_path = "seed.sto",
             summary_path = "candidate_summary.csv")
         thoraxe = Iduna.ThorAxeMSAResult(;

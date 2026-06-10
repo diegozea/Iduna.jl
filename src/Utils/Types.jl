@@ -55,10 +55,8 @@ A ThorAxe percent identity (PID) seed selected for later steps.
 # Fields
 
 - `pid::Float64`: Percent identity threshold used to build this seed.
-- `median_identity::Union{Missing, Float64}`: Median identity score used during
-  seed selection. `missing` means the score was unavailable.
-- `mean_identity::Union{Missing, Float64}`: Mean identity score used during seed
-  selection. `missing` means the score was unavailable.
+- `epli::Union{Missing, Float64}`: Estimated Profile-Level Identities score used
+  during seed selection. `missing` means the score was unavailable.
 - `stockholm_path::String`: Path to the selected seed MSA in Stockholm format.
 - `fasta_path::Union{Nothing, String} = nothing`: Path to the selected seed MSA
   in FASTA format. `nothing` means no FASTA copy is available.
@@ -72,8 +70,7 @@ A ThorAxe percent identity (PID) seed selected for later steps.
 """
 Base.@kwdef struct SeedSelection
     pid::Float64
-    median_identity::Union{Missing, Float64}
-    mean_identity::Union{Missing, Float64}
+    epli::Union{Missing, Float64}
     stockholm_path::String
     fasta_path::Union{Nothing, String} = nothing
     s_exon_blocks_tsv::Union{Nothing, String} = nothing
