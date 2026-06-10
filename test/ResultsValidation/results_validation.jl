@@ -29,8 +29,7 @@
 
         seed = Iduna.SeedSelection(;
             pid = 10.0,
-            median_identity = 100.0,
-            mean_identity = 100.0,
+            epli = 100.0,
             stockholm_path = sto,
             summary_path = joinpath(tmp, "seed_summary.csv")
         )
@@ -102,8 +101,7 @@
 
         relative_seed = Iduna.SeedSelection(;
             pid = 10.0,
-            median_identity = 100.0,
-            mean_identity = 100.0,
+            epli = 100.0,
             stockholm_path = "tiny.sto",
             summary_path = "seed_summary.csv",
             workdir = tmp)
@@ -191,8 +189,7 @@
 
         missing_seed = Iduna.SeedSelection(;
             pid = 20.0,
-            median_identity = 100.0,
-            mean_identity = 100.0,
+            epli = 100.0,
             stockholm_path = joinpath(tmp, "missing_seed.sto"),
             summary_path = joinpath(tmp, "missing_summary.csv"))
         failure_workdir = joinpath(tmp, "validation_failure")

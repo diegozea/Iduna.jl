@@ -35,6 +35,7 @@ IdunaResult
 ```@autodocs
 Modules = [
     Iduna.IDMapping,
+    Iduna.EPLI,
     Iduna.ThorAxeMSA,
     Iduna.MSAExpansion,
     Iduna.ResultsValidation,

@@ -767,8 +767,7 @@ function _load_result_seed_record(data, workdir::AbstractString)
     data isa AbstractDict || error("ThorAxe seed record is not an object.")
     return Utils.SeedSelection(;
         pid = Float64(data["pid"]),
-        median_identity = _missing_or_float_result(get(data, "median_identity", nothing)),
-        mean_identity = _missing_or_float_result(get(data, "mean_identity", nothing)),
+        epli = _missing_or_float_result(get(data, "epli", nothing)),
         stockholm_path = String(data["stockholm_path"]),
         fasta_path = get(data, "fasta_path", nothing) === nothing ? nothing :
                      String(data["fasta_path"]),

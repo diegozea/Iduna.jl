@@ -13,6 +13,7 @@ using TestItemRunner
     include("docs_examples.jl")
     include("Utils/utils.jl")
     include("IDMapping/id_mapping.jl")
+    include("EPLI/epli.jl")
     include("ThorAxeMSA/thoraxe_msa.jl")
     include("MSAExpansion/msa_expansion.jl")
     include("ResultsValidation/results_validation.jl")

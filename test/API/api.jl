@@ -85,8 +85,7 @@ import Logging
 
     best_seed = Iduna.SeedSelection(;
         pid = 10.0,
-        median_identity = 1.0,
-        mean_identity = 1.0,
+        epli = 1.0,
         stockholm_path = "seed.sto",
         summary_path = "candidate_summary.csv")
     thoraxe = Iduna.ThorAxeMSAResult(;
@@ -208,19 +207,18 @@ import Logging
             write(sequence_fasta, ">seed\nAC\n")
             write(species_file, "homo_sapiens\n")
             push!(summary_rows,
-                "$(pid),true,1.0,1.0,$(relpath(seed_sto, workdir)),$(relpath(seed_fasta, workdir)),$(relpath(sequence_fasta, workdir)),$(relpath(species_file, workdir))")
+                "$(pid),true,1.0,$(relpath(seed_sto, workdir)),$(relpath(seed_fasta, workdir)),$(relpath(sequence_fasta, workdir)),$(relpath(species_file, workdir))")
             push!(fixture_seeds,
                 Iduna.SeedSelection(;
                     pid = Float64(pid),
-                    median_identity = 1.0,
-                    mean_identity = 1.0,
+                    epli = 1.0,
                     stockholm_path = seed_sto,
                     fasta_path = seed_fasta,
                     s_exon_blocks_tsv = seed_blocks,
                     summary_path))
         end
         write(summary_path,
-            "pid,selected,median_identity,mean_identity,stockholm_path,fasta_path,sequence_fasta,species_file\n" *
+            "pid,selected,epli,stockholm_path,fasta_path,sequence_fasta,species_file\n" *
             join(summary_rows, "\n") * "\n")
         fixture_thoraxe = Iduna.ThorAxeMSAResult(;
             input_dir = joinpath(workdir, "thoraxe_input"),
@@ -655,8 +653,7 @@ import Logging
             write(sto, "# STOCKHOLM 1.0\nseq1 ACDE\n//\n")
             seed = Iduna.SeedSelection(;
                 pid = 10.0,
-                median_identity = 1.0,
-                mean_identity = 1.0,
+                epli = 1.0,
                 stockholm_path = sto,
                 summary_path = joinpath(tmp, "summary.csv"))
             validation_target = Iduna.ResolvedTarget(;
@@ -970,8 +967,7 @@ import Logging
 
         second_seed = Iduna.SeedSelection(;
             pid = 80.0,
-            median_identity = 0.8,
-            mean_identity = 0.82,
+            epli = 0.8,
             stockholm_path = "seed80.sto",
             summary_path = "candidate_summary.csv")
         multi_thoraxe = Iduna.ThorAxeMSAResult(;
@@ -1104,8 +1100,7 @@ import Logging
                     workdir, "sequences", "ensembl_proteins", "ENSP00000240185.fasta"))
             abs_seed = Iduna.SeedSelection(;
                 pid = 10.0,
-                median_identity = 1.0,
-                mean_identity = 1.0,
+                epli = 1.0,
                 stockholm_path = joinpath(workdir, "thoraxe_msa", "candidates",
                     "pid_10.00", "candidate_msa_full.sto"),
                 fasta_path = joinpath(workdir, "thoraxe_msa", "candidates", "pid_10.00",
@@ -1303,14 +1298,12 @@ import Logging
         mktempdir() do tmp
             seed1 = Iduna.SeedSelection(;
                 pid = 10.0,
-                median_identity = missing,
-                mean_identity = missing,
+                epli = missing,
                 stockholm_path = "seed10.sto",
                 summary_path = "candidate_summary.csv")
             seed2 = Iduna.SeedSelection(;
                 pid = 80.0,
-                median_identity = missing,
-                mean_identity = missing,
+                epli = missing,
                 stockholm_path = "seed80.sto",
                 summary_path = "candidate_summary.csv")
             multi_thoraxe = Iduna.ThorAxeMSAResult(;
@@ -1546,14 +1539,12 @@ import Logging
             workdir = joinpath(tmp, "expansion_failure")
             seed1 = Iduna.SeedSelection(;
                 pid = 10.0,
-                median_identity = missing,
-                mean_identity = missing,
+                epli = missing,
                 stockholm_path = "seed10.sto",
                 summary_path = "candidate_summary.csv")
             seed2 = Iduna.SeedSelection(;
                 pid = 80.0,
-                median_identity = missing,
-                mean_identity = missing,
+                epli = missing,
                 stockholm_path = "seed80.sto",
                 summary_path = "candidate_summary.csv")
             multi_thoraxe = Iduna.ThorAxeMSAResult(;
