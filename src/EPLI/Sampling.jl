@@ -14,12 +14,22 @@ function _normalize_sample_seed(seed::Integer)::UInt64
     return UInt64(seed)
 end
 
-function _fasta_records(path::AbstractString)
+_ungapped_sequence(sequence) = replace(String(sequence), '-' => "", '.' => "")
+
+function _sequence_records(path::AbstractString)
     sequences = read_file(path, FASTASequences)
-    records = [(String(sequence_id(seq)),
-                   replace(String(stringsequence(seq)), '-' => "", '.' => ""))
+    records = [(String(sequence_id(seq)), _ungapped_sequence(stringsequence(seq)))
                for seq in sequences]
     isempty(records) && error("Input FASTA has no sequences: $(path).")
+    names = [name for (name, _seq) in records]
+    return (; names, records)
+end
+
+function _sequence_records(msa::AbstractMultipleSequenceAlignment)
+    sequence_names = collect(sequencenames(msa))
+    records = [(String(name), _ungapped_sequence(stringsequence(msa, name)))
+               for name in sequence_names]
+    isempty(records) && error("Input MSA has no sequences.")
     names = [name for (name, _seq) in records]
     return (; names, records)
 end
@@ -29,6 +39,6 @@ function _reference_index(names::AbstractVector{<:AbstractString}, reference_seq
     reference = String(reference_sequence)
     idx = findfirst(==(reference), String.(names))
     idx === nothing &&
-        error("Reference sequence $(reference) was not found in the input FASTA.")
+        error("Reference sequence $(reference) was not found in the input sequences.")
     return idx
 end
