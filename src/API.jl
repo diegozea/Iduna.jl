@@ -1,6 +1,9 @@
 using Base.Threads
 import JSON
 
+# Pipeline Entry Point
+# --------------------
+
 """
     iduna(; id=nothing) -> IdunaResult
     iduna(id) -> IdunaResult
@@ -256,6 +259,9 @@ end
 
 iduna(id::AbstractString; kwargs...) = iduna(; id, kwargs...)
 
+# Pipeline State Helpers
+# ----------------------
+
 function _validate_expansion_options(; mmseqs_db, no_expansion::Bool, centroids::Bool)
     if no_expansion && centroids
         error("centroids=true requires MMseqs expansion; use no_expansion=false.")
@@ -339,6 +345,9 @@ function _current_stage_keys(target,
     return unique(keys)
 end
 
+# Failure Result Summaries
+# ------------------------
+
 function _write_failure_result(input_id::AbstractString, workdir::AbstractString,
         failed_stage::AbstractString, err; target = nothing, thoraxe = nothing,
         expansions = Union{Missing, Utils.ExpansionResult}[],
@@ -419,6 +428,9 @@ function _exception_summary(err, _workdir::Union{Nothing, AbstractString} = noth
     )
 end
 
+# Input Normalization
+# -------------------
+
 function _provided_primary_ids(; id, uniprot_id, ensembl_transcript_id)
     provided_primary = Pair{Symbol, String}[]
     id !== nothing && push!(provided_primary, :id => String(id))
@@ -465,6 +477,9 @@ function _normalize_primary_input(; id, uniprot_id, ensembl_transcript_id, trans
                        (uniprot_id === nothing ? nothing : String(uniprot_id))
     return first_value, disambiguating_transcript, supplied_uniprot
 end
+
+# Target Resolution Cache
+# -----------------------
 
 function _target_identity(primary::AbstractString;
         supplied_uniprot,
@@ -635,6 +650,9 @@ function _target_summary(target::Utils.ResolvedTarget,
         warnings = target.warnings
     )
 end
+
+# Result Loading
+# --------------
 
 """
     load_result(workdir) -> IdunaResult
@@ -1014,6 +1032,9 @@ function _load_result_validations(summary, thoraxe::Utils.ThorAxeMSAResult,
     end
     return validations
 end
+
+# MSA Loading
+# -----------
 
 """
     load_seed_msa(result; keepinserts=true, pid=nothing, index=nothing)

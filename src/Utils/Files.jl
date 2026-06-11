@@ -1,3 +1,6 @@
+# Formatting and Response Decoding
+# --------------------------------
+
 """
     format_pid(pid) -> String
 

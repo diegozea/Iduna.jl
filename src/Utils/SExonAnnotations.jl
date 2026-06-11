@@ -1,3 +1,6 @@
+# Annotation Access
+# -----------------
+
 """
     s_exon_blocks_path(stockholm_path) -> String
 
@@ -140,6 +143,9 @@ function set_s_exon_annotations!(msa::AbstractMultipleSequenceAlignment,
     setannotfile!(msa, String(map_feature), _format_s_exon_code_map(code_map))
     return msa
 end
+
+# Block Table Writing
+# -------------------
 
 function _write_s_exon_block_line(io,
         alignment::AbstractString,

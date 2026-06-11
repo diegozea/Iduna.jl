@@ -24,6 +24,9 @@ export expand_msa,
        normalize_stockholm_annotations!,
        prepare_stockholm_for_mmseqs
 
+# Output Paths and Identity
+# -------------------------
+
 _normalize_id(s::AbstractString) = String(split(String(s))[1])
 
 const _STEP_STATE_FILE = "stage_state.json"
@@ -105,6 +108,9 @@ function _expansion_identity(target::ResolvedTarget,
     )
 end
 
+# Cache State
+# -----------
+
 function _exception_summary(err)
     return (;
         type = string(typeof(err)),
@@ -158,6 +164,9 @@ function _write_cache_warning(logs_dir::AbstractString, warning::AbstractString)
     end
     return nothing
 end
+
+# Stockholm Preparation
+# ---------------------
 
 function _is_s_exon_provenance_stockholm_line(line::AbstractString)
     return startswith(line, "#=GC SExonCode") ||
@@ -341,6 +350,9 @@ function normalize_stockholm_annotations!(path::AbstractString)
     return _write_normalized_stockholm(path, records)
 end
 
+# Command Execution
+# -----------------
+
 function _run_labeled(cmd::Cmd, label::AbstractString, logs_dir::AbstractString)
     mkpath(logs_dir)
     @debug "Running MSA expansion command." label
@@ -396,6 +408,9 @@ function _mmseqs_search(seed_msa_sto::AbstractString,
     return (; seed_db, profile_db, seq_db, search_result_db,
         expanded_result_db, realigned_result_db)
 end
+
+# Alignment Projection
+# --------------------
 
 function _reorder_alignment(msa::AbstractMultipleSequenceAlignment, priority::Vector{String})
     name_to_idx = Dict(String(name) => idx for (idx, name) in enumerate(sequencenames(msa)))
@@ -546,6 +561,9 @@ function _ensure_expansion_s_exon_blocks(outputs::NamedTuple, pid::Real)
     return outputs.s_exon_blocks_tsv
 end
 
+# Hit and Centroid Outputs
+# ------------------------
+
 function _collect_hits(hits_tsv::AbstractString, seed_set::Set{String})
     all_hits = Tuple{String, String}[]
     filtered_hits = Tuple{String, String}[]
@@ -663,6 +681,9 @@ function _write_centroid_msa(transcript_id::AbstractString,
     end
     return nothing
 end
+
+# Expansion Workflow
+# ------------------
 
 function _expansion_context(target::ResolvedTarget,
         seed::SeedSelection,
@@ -971,6 +992,9 @@ function _finished_expansion_result(ctx,
         workdir = String(workdir)
     )
 end
+
+# Public API
+# ----------
 
 """
     expand_msa(target, seed, workdir; mmseqs_db, overwrite=false, match_mode=1,

@@ -1,3 +1,6 @@
+# Sequence Name Matching
+# ----------------------
+
 """
     strip_ensembl_version(id) -> String
 

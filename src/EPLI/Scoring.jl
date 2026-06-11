@@ -1,5 +1,8 @@
 _function_label(fn) = string(fn)
 
+# Sample Scoring
+# --------------
+
 function _score_field(score, name::Symbol)
     name in keys(score) || return missing
     return getfield(score, name)
@@ -94,6 +97,9 @@ function _score_sample_specs!(rows::AbstractVector,
     return rows
 end
 
+# Alignment Sample Summaries
+# --------------------------
+
 function _score_alignment_samples(reference_msa_fasta::AbstractString,
         sample_specs::AbstractVector;
         score_fn::Function = hhsuite_identity_score,
@@ -133,6 +139,9 @@ function _score_alignment_samples(reference_msa_fasta::AbstractString,
         reference_score,
         scores_path)
 end
+
+# Public EPLI API
+# ---------------
 
 """
     epli_score(input, workdir, aligner_fn; aligner_args=Cmd(String[]))

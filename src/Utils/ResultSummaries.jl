@@ -1,3 +1,6 @@
+# Stage Summaries
+# ---------------
+
 function _stage_summary_from_state_path(state_path::AbstractString, workdir::AbstractString)
     state = try
         JSON.parse(read(state_path, String))
@@ -60,6 +63,9 @@ function collect_stage_summaries(workdir::AbstractString; stage_keys = nothing)
     end
     return summaries
 end
+
+# Result Summaries
+# ----------------
 
 function _seed_summary(seed::SeedSelection)
     return (;

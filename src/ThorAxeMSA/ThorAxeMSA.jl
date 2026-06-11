@@ -40,6 +40,9 @@ export assemble_transcript_msa,
        compute_identity_against_reference,
        select_best_seed
 
+# Constants and Paths
+# -------------------
+
 const _PHYLOSOFS_RESERVED_SYMBOLS = Set([
     ' ', '\t', '\n', '\r', '\v', '\f', '\\', '*', '>', '"', '\'', ',', '-', '_',
     '/', ';', '#', '$', '.', '&', '!', '@', '[', ']'
@@ -107,6 +110,9 @@ end
 function _thoraxe_msa_stage_dir(workdir::AbstractString)
     _pipeline_stage_dir(workdir, "thoraxe_msa")
 end
+
+# Input Stage State
+# -----------------
 
 function _thoraxe_input_outputs(input_dir::AbstractString)
     ensembl_dir = joinpath(input_dir, "Ensembl")
@@ -292,6 +298,9 @@ function _missing_transcript_query_outputs(tmp_gene_dir::AbstractString)
     return missing
 end
 
+# Command Execution
+# -----------------
+
 function _open_logs(f::Function, stdout_path::AbstractString, stderr_path::AbstractString)
     mkpath(dirname(stdout_path))
     mkpath(dirname(stderr_path))
@@ -398,6 +407,9 @@ end
 function _biomart_cache_dir()
     return Scratch.@get_scratch!("biomart_datasets")
 end
+
+# Species Lists
+# -------------
 
 function _normalized_specieslist(specieslist::Union{Nothing, AbstractString})
     specieslist === nothing && return nothing
@@ -515,6 +527,9 @@ function _pid_thresholds_preview(pid_thresholds::AbstractVector{<:Real})
     length(pid_values) > preview_count && (preview = string(preview, ",..."))
     return preview
 end
+
+# BioMart Species Filtering
+# -------------------------
 
 function _fetch_biomart_datasets_text(;
         url::AbstractString = _BIOMART_DATASETS_URL,
@@ -690,6 +705,9 @@ function _resolve_biomart_datasets_specieslist(target::ResolvedTarget,
     return (specieslist = _specieslist_string(kept), warnings = warnings)
 end
 
+# Ensembl Homology Filtering
+# --------------------------
+
 function _homology_species(data, orthology::AbstractString)
     wanted = Set(_orthology_relationships(orthology))
     species = String[]
@@ -781,6 +799,9 @@ function _resolve_effective_specieslist(target::ResolvedTarget,
     effective_species = _prepend_query_species(matching_targets, query_species)
     return (specieslist = _specieslist_string(effective_species), warnings = warnings)
 end
+
+# Transcript Query Stage
+# ----------------------
 
 function _run_transcript_query_once(gene_core::AbstractString,
         workdir::AbstractString,
@@ -1013,6 +1034,9 @@ function _ensure_transcript_query(target::ResolvedTarget, workdir::AbstractStrin
     end
 end
 
+# Transcript Query Warnings
+# -------------------------
+
 function _species_from_biomart_errors_file(errors_path::AbstractString)
     isfile(errors_path) || return String[]
     species = String[]
@@ -1058,6 +1082,9 @@ function _biomart_transcript_query_warnings(input_dir::AbstractString,
         "BioMart transcript_query failures recorded for species: $(join(species, ", ")). See $(errors_path) and $(stderr_log)."
     ]
 end
+
+# Transcript MSA Assembly
+# -----------------------
 
 function _join_msas_consistently(
         lhs::MSAType, rhs::MSAType) where {MSAType <:
@@ -1164,6 +1191,9 @@ function _transcript_exon_segments(thoraxe_dir::AbstractString,
     end
     return segments
 end
+
+# S-Exon Provenance
+# -----------------
 
 function _phylosofs_dir(thoraxe_dir::AbstractString)
     return joinpath(thoraxe_dir, "phylosofs")
@@ -1353,6 +1383,9 @@ function _transcript_msa_species(thoraxe_dir::AbstractString,
     return [get(lookup, String(name), "unknown") for name in sequencenames(transcript_msa)]
 end
 
+# Public MSA Assembly
+# -------------------
+
 """
     assemble_transcript_msa(thoraxe_dir, gene_id, transcript_id)
 
@@ -1398,6 +1431,9 @@ function assemble_transcript_msa(thoraxe_dir::AbstractString,
 
     return transcript_msa, _transcript_msa_species(thoraxe_dir, transcript_msa)
 end
+
+# Transcript Validation
+# ---------------------
 
 function _read_single_fasta_sequence(path::AbstractString)
     seq = fasta_sequence(read(path, String))
@@ -1503,6 +1539,9 @@ function compute_identity_against_reference(reference_fasta::AbstractString,
         logs_dir, label)
     return EPLI.comparable_positions_normalization(score).normalized_score
 end
+
+# PID Candidate Artifacts
+# -----------------------
 
 function _candidate_pid_dir(workdir::AbstractString, pid::Real)
     joinpath(_thoraxe_candidates_dir(workdir), format_pid_dir(pid))
@@ -1895,6 +1934,9 @@ function _generate_pid_candidate(target::ResolvedTarget,
         msa, species)
 end
 
+# Candidate Scoring
+# -----------------
+
 function _candidate_msa0_validation(target::ResolvedTarget,
         msa::AbstractMultipleSequenceAlignment,
         pid::Real,
@@ -2036,6 +2078,9 @@ function _summarize_candidate_scores(rows::AbstractVector{<:NamedTuple},
 end
 
 _truthy(value) = value === true || value == 1 || lowercase(string(value)) == "true"
+
+# Candidate Summary Cache
+# -----------------------
 
 const _CANDIDATE_SUMMARY_STRING_TYPES = Dict(
     :pid_thresholds_key => String,
@@ -2347,6 +2392,9 @@ function _row_seed(row, summary_path::AbstractString)
     )
 end
 
+# Seed Selection
+# --------------
+
 """
     select_best_seed(summary_path) -> SeedSelection
 
@@ -2593,6 +2641,9 @@ function _resolve_thoraxe_species_filters(target::ResolvedTarget,
     )
 end
 
+# ThorAxe Result Assembly
+# -----------------------
+
 function _selected_seed_msas(seeds::AbstractVector{SeedSelection}, workdir::AbstractString)
     return [read_file(_resolve_artifact_path(seed.stockholm_path, workdir),
                 Stockholm; keepinserts = true)
@@ -2674,6 +2725,9 @@ function _cached_thoraxe_msa_result(input_dir::AbstractString,
         pid_sample_seed = cached.sample_seed,
         sampling_strategy = cached.sampling_strategy)
 end
+
+# PID Sample Scoring
+# ------------------
 
 function _generate_validated_pid_candidate(target::ResolvedTarget,
         input_dir::AbstractString,
@@ -2918,6 +2972,9 @@ function _select_scored_candidate_seeds(summary_path::AbstractString,
     Int(pid_sample_count) == 0 && return _eligible_candidate_seeds(summary_path)
     return [select_best_seed(summary_path)]
 end
+
+# Public API
+# ----------
 
 """
     build_thoraxe_msa(target, workdir; pid_thresholds=DEFAULT_PID_THRESHOLDS,

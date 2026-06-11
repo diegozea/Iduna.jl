@@ -3,6 +3,9 @@ import JSON
 
 using ArgParse: ArgParseSettings, @add_arg_table!, parse_args
 
+# Argument Parsing
+# ----------------
+
 function _parse_pid_thresholds(value::AbstractString)
     vals = parse.(Float64, strip.(split(value, ',')))
     isempty(vals) && error("--pid-thresholds cannot be empty.")
@@ -159,6 +162,9 @@ The Iduna option --mmseqs-threads controls MMseqs2 expansion only.
     return settings
 end
 
+# Argument Conversion
+# -------------------
+
 function _postprocess_app_args(parsed::Dict{Symbol, Any})
     kwargs = Dict{Symbol, Any}()
     for (key, value) in parsed
@@ -182,6 +188,9 @@ function _parse_app_args(args::Vector{String};
     parsed === nothing && return Dict{Symbol, Any}(:help => true)
     return _postprocess_app_args(parsed)
 end
+
+# App Entry Points
+# ----------------
 
 function _run_app(args::Vector{String} = ARGS; runner::Function = iduna)
     kwargs = _parse_app_args(args; exc_handler = ArgParse.default_handler)

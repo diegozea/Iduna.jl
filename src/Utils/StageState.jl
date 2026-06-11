@@ -1,3 +1,6 @@
+# Stage Paths
+# -----------
+
 """
     _pipeline_stage_dir(workdir, stage_key) -> String
 
@@ -33,6 +36,9 @@ function _stage_output_exists(outputs::AbstractDict)
     return all(_stage_output_exists, values(outputs))
 end
 
+# Output Serialization
+# --------------------
+
 function _relative_output_value(path::AbstractString, workdir::AbstractString)
     return _relative_artifact_path(path, workdir)
 end
@@ -52,6 +58,9 @@ function _relative_output_value(outputs::AbstractDict, workdir::AbstractString)
     return Dict(String(name) => _relative_output_value(value, workdir)
     for (name, value) in pairs(outputs))
 end
+
+# State Reading
+# -------------
 
 function _read_stage_state(stage_dir::AbstractString)
     state_path = _stage_state_path(stage_dir)
@@ -81,6 +90,9 @@ function _stage_existing_started_at(
     started = get(state, "started_at", nothing)
     return started isa AbstractString ? String(started) : nothing
 end
+
+# State Writing and Reuse
+# -----------------------
 
 """
     _write_stage_state(stage_dir; stage, stage_key, status, identity,

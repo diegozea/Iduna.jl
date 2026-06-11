@@ -1,3 +1,6 @@
+# HHsuite Alignment Parsing
+# -------------------------
+
 function _hhsuite_query_indices(seq::AbstractString, start::Integer, stop::Integer)
     indices = Int[]
     current = Int(start)
@@ -97,6 +100,9 @@ function _hhalign_summary(output::AbstractString)
         hhalign_score = _parse_hhalign_float(line, "Score"))
 end
 
+# HHsuite Execution
+# -----------------
+
 function _run_hhsuite_alignment(reference_fasta::AbstractString,
         sample_fasta::AbstractString;
         logs_dir::Union{Nothing, AbstractString} = nothing,
@@ -122,6 +128,9 @@ function _run_hhsuite_alignment(reference_fasta::AbstractString,
         return output
     end
 end
+
+# Public Score Functions
+# ----------------------
 
 """
     hhsuite_identity_score(reference_msa_fasta, sample_msa_fasta;

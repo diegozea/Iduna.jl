@@ -18,6 +18,9 @@ using ..Utils: ExpansionResult, ResolvedTarget, SeedSelection, ValidationResult,
                _classify_stage_state, _file_sha256, _read_stage_state,
                _write_stage_state
 
+# Expansion Presence
+# ------------------
+
 const _MaybeExpansion = Union{Nothing, Missing, ExpansionResult}
 
 function _has_expansion(expansion::_MaybeExpansion)
@@ -29,6 +32,9 @@ export alignment_stats,
        load_seed_msa,
        load_msa,
        validate_results
+
+# MSA Loading
+# -----------
 
 """
     load_msa(path; keepinserts=true)
@@ -133,6 +139,9 @@ function alignment_stats(path::AbstractString; cluster_threshold::Real = 62.0, n
     )
 end
 
+# Query Sequence Comparison
+# -------------------------
+
 function _resolve_query_name(msa::AbstractMultipleSequenceAlignment,
         gene_id::AbstractString,
         transcript_id::AbstractString)
@@ -182,6 +191,9 @@ function _write_alignment_log(path::AbstractString,
     end
     return path
 end
+
+# Validation State
+# ----------------
 
 function _validation_input_paths(target::ResolvedTarget,
         seed::SeedSelection,
@@ -319,6 +331,9 @@ function _cached_validation_result(outputs, workdir::AbstractString, seed::SeedS
         status = isempty(warnings) ? :ok : :warn)
 end
 
+# Validation Statistics
+# ---------------------
+
 function _validation_alignment_stats(paths, expansion::_MaybeExpansion)
     seed_stats = alignment_stats(paths.seed_path)
     expanded_stats = _has_expansion(expansion) ? alignment_stats(paths.expanded_path) :
@@ -423,6 +438,9 @@ function _write_validation_stats(target::ResolvedTarget,
     return stats_path
 end
 
+# Result Construction
+# -------------------
+
 function _validation_result(stats_path::AbstractString, stats, comparison, warnings)
     seed_stats = stats.seed_stats
     expanded_stats = stats.expanded_stats
@@ -451,6 +469,9 @@ function _validation_result(stats_path::AbstractString, stats, comparison, warni
         status
     )
 end
+
+# Public API
+# ----------
 
 """
     validate_results(target, seed, expansion, workdir; overwrite=false)

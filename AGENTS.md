@@ -17,6 +17,9 @@ Format with JuliaFormatter. Use `CamelCase` for types/modules, `snake_case` for
 functions/variables, and `!` for mutating functions. Keep exports deliberate and
 public APIs documented.
 
+For long Julia files, use section-title comments to cluster related code,
+formatted as `# Title` followed by `# -----` on the next line.
+
 Docstrings must follow the SciMLStyle documentation guidelines: use concise
 Markdown, wrap lines at 92 characters, document exported functions and public
 types, and prefer the standard type/function sections (`# Fields`, `# Arguments`,

@@ -1,3 +1,6 @@
+# Path Normalization
+# ------------------
+
 function _is_path_inside_workdir(rel::AbstractString)
     rel == "." && return true
     isabspath(rel) && return false
@@ -25,6 +28,9 @@ end
 function _resolve_artifact_path(result::IdunaResult, path)
     _resolve_artifact_path(path, result.workdir)
 end
+
+# Result Path Rewriting
+# ---------------------
 
 function _relative_seed_paths(seed::SeedSelection, workdir::AbstractString)
     return SeedSelection(;

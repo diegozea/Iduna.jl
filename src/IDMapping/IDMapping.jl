@@ -24,6 +24,9 @@ const _ENSEMBL_REST_BASE = "https://rest.ensembl.org"
 const _JSON_HEADERS = ["Accept" => "application/json"]
 const _FASTA_HEADERS = ["Accept" => "text/x-fasta"]
 
+# Result Types
+# ------------
+
 """
     EnsemblCandidate
 
@@ -72,6 +75,9 @@ Base.@kwdef struct _UniProtEntry
     protein_sequence::Union{Nothing, String}
 end
 
+# HTTP Fetching
+# -------------
+
 function _http_get(url::AbstractString,
         headers = _JSON_HEADERS;
         retries::Int = 4,
@@ -85,6 +91,9 @@ function _http_get(url::AbstractString,
     end
     return nothing
 end
+
+# UniProt Parsing
+# ---------------
 
 """
     fetch_uniprot_entry(uniprot_id)
@@ -204,6 +213,9 @@ function _parse_xrefs(data)
     xrefs.transcript_to_isoform
 end
 
+# Sequence Fetching and Validation
+# --------------------------------
+
 function _fetch_ensembl_protein_sequence(protein_id::AbstractString;
         _http_get_fn::Function = _http_get)::Union{Nothing, String}
     core = strip_ensembl_version(protein_id)
@@ -272,6 +284,9 @@ function _validate_candidates(entry::_UniProtEntry, sequence_dir::AbstractString
     return candidates, uniprot_path
 end
 
+# Transcript Metadata
+# -------------------
+
 function _choose_candidate(candidates::Vector{EnsemblCandidate}, transcript_id::Union{
         Nothing, AbstractString})
     isempty(candidates) &&
@@ -334,6 +349,9 @@ Look up the parent Ensembl gene ID for an Ensembl transcript.
 function resolve_transcript_gene(transcript_id::AbstractString)::String
     return _resolve_transcript_metadata(transcript_id).ensembl_gene_id
 end
+
+# Target Resolution
+# -----------------
 
 function _resolve_uniprot_target(input_id::AbstractString,
         sequence_dir::AbstractString,
