@@ -138,6 +138,7 @@ function _maybe_cached_thoraxe_msa(input_dir::AbstractString,
     can_try_cache = stage_cache.cache.reusable ||
                     (!overwrite && stage_cache.summary_matches)
     can_try_cache || return nothing
+    # Pre-manifest summaries can still be trusted after metadata and file checks pass.
     cached = _cached_selected_seeds(summary_path, workdir, metadata)
     cached === nothing && return nothing
     @info "Reusing cached ThorAxe MSA candidates." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id n_seeds=length(cached.seeds) summary_path adopted_legacy=(!stage_cache.cache.reusable&&!stage_cache.has_manifest)

@@ -89,6 +89,7 @@ function _transcript_exon_msa(thoraxe_dir::AbstractString,
     isfile(exon_file) && return read_file(exon_file, FASTA)
     startswith(exon_id, "0_") ||
         error("Expected ThorAxe s-exon MSA is missing: $(exon_file).")
+    # ThorAxe can impute query-only s-exons as 0_* entries without separate MSA files.
     sequence = _s_exon_sequence_from_table(thoraxe_dir, exon_id, gene_id, transcript_id)
     isempty(sequence) && return nothing
     return _read_single_sequence_msa(strip_ensembl_version(gene_id), sequence)
@@ -133,6 +134,7 @@ function _phylosofs_s_exon_code_map(thoraxe_dir::AbstractString)
     code_map = Pair{Char, String}[]
     for line in eachline(path)
         isempty(strip(line)) && continue
+        # PhyloSofS writes the stable s-exon ID and its one-character alignment code.
         fields = split(line, '\t'; limit = 2)
         length(fields) == 2 ||
             error("Invalid PhyloSofS s-exon map line in $(path): $(repr(line)).")

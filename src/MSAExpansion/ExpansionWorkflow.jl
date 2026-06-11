@@ -64,6 +64,7 @@ end
 
 function _cached_expansion_result(ctx, workdir::AbstractString)
     counts = _cached_hit_counts(ctx.outputs.hits_fasta, _seed_id_set(ctx.seed_stockholm))
+    # The block table is derived from the saved alignments, so it can be restored lazily.
     _ensure_expansion_s_exon_blocks(ctx.outputs, ctx.identity.seed.pid)
     return ExpansionResult(;
         run_dir = ctx.run_dir,
@@ -106,6 +107,7 @@ function _archive_expansion_seed(seed::SeedSelection, ctx)
         archived_seed_fasta = joinpath(ctx.seed_dir, "$(seed_label).fasta")
         cp(ctx.seed_fasta, archived_seed_fasta; force = true)
     end
+    # MMseqs cannot keep all Stockholm annotations, so archive them before conversion.
     sanitized_seed = prepare_stockholm_for_mmseqs(ctx.seed_stockholm,
         joinpath(ctx.seed_dir, "$(seed_label)_mmseqs.sto"))
     seed_alignment = read_file(archived_seed_sto, Stockholm; keepinserts = true)
