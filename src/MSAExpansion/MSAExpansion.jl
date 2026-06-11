@@ -64,6 +64,7 @@ end
 _step_state_path(run_dir::AbstractString) = _stage_state_path(run_dir)
 
 function _required_expansion_outputs(outputs::NamedTuple)
+    # The s-exon block tables can be rebuilt from the Stockholm alignments.
     return Dict(String(name) => path
     for (name, path) in pairs(outputs)
     if !endswith(String(name), "s_exon_blocks_tsv"))
@@ -195,6 +196,7 @@ function prepare_stockholm_for_mmseqs(source::AbstractString, dest::AbstractStri
 end
 
 function _stockholm_annotation_data()
+    # Keep each Stockholm record type separate so split lines can be joined safely.
     return (;
         comments = String[],
         gf_order = String[],
@@ -441,6 +443,7 @@ function _match_state_mask(msa::AbstractMultipleSequenceAlignment;
     aligned_mask === nothing || return aligned_mask
     rf_mask = _rf_match_state_mask(getannotcolumn(msa, "RF", ""), ncols)
     rf_mask === nothing || return rf_mask
+    # If no annotation says which columns are seed columns, use the caller's default.
     return fill(default_aligned, ncols)
 end
 
@@ -452,6 +455,7 @@ function _project_s_exon_codes(msa::AbstractMultipleSequenceAlignment,
     seed_idx = 0
     for is_match in match_mask
         if is_match
+            # Match columns inherit s-exon labels from the seed; inserted columns do not.
             seed_idx += 1
             write(io, seed_idx <= length(seed_match_chars) ? seed_match_chars[seed_idx] :
                       '.')
@@ -769,6 +773,7 @@ function _archive_expansion_seed(seed::SeedSelection, ctx)
         joinpath(ctx.seed_dir, "$(seed_label)_mmseqs.sto"))
     seed_alignment = read_file(archived_seed_sto, Stockholm; keepinserts = true)
     seed_names = String.(sequencenames(seed_alignment))
+    # Save the seed's s-exon labels before temporary MMseqs files strip them away.
     seed_s_exon_codes = s_exon_codes(seed_alignment)
     seed_s_exon_code_map = sort!(collect(s_exon_code_map(seed_alignment)); by = first)
     return (;

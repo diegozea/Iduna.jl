@@ -240,6 +240,7 @@ function _validation_identity(target::ResolvedTarget,
         expansion = _has_expansion(expansion) ?
                     (; match_stockholm_sha256 = _hash_existing(paths.expanded_path),) :
                     nothing,
+        # File hashes catch changed alignments even when the path stays the same.
         uniprot_sequence_sha256 = _hash_existing(paths.uniprot_path)
     )
 end
@@ -294,6 +295,7 @@ function _cached_validation_result(outputs, workdir::AbstractString, seed::SeedS
     df = DataFrame(CSV.File(outputs.stats_path))
     isempty(df) && error("Cached validation stats at $(outputs.stats_path) are empty.")
     row = first(eachrow(df))
+    # Recreate warnings from saved stats so cached and fresh results report the same status.
     warnings = unique(vcat(
         _cached_validation_warnings(workdir, seed),
         _cached_alignment_warnings(row, expansion)))

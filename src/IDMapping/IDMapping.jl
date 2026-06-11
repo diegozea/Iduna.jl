@@ -177,6 +177,7 @@ function _fill_default_transcript_genes!(transcript_to_gene, transcripts, gene_i
 
     default_gene = first(gene_ids)
     for transcript in transcripts
+        # Some UniProt records give one gene ID but omit it from individual transcripts.
         haskey(transcript_to_gene, transcript) ||
             (transcript_to_gene[transcript] = default_gene)
     end

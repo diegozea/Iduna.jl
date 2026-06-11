@@ -210,6 +210,7 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
         current_stage_keys = _current_stage_keys(target, thoraxe, expansions, validations)
         current_stages = Utils.collect_stage_summaries(root;
             stage_keys = current_stage_keys)
+        # The final result is tied to the exact stage records that produced it.
         result_identity = (; input_id = primary,
             stage_hashes = [stage.identity_hash
                             for stage in current_stages
@@ -357,6 +358,7 @@ function _failure_expansions(failed_stage::AbstractString, thoraxe,
         expansions::AbstractVector)
     padded = Union{Missing, Utils.ExpansionResult}[expansions...]
     if String(failed_stage) == "msa_expansion" && thoraxe !== nothing
+        # Keep one expansion slot per selected seed, even when a later seed failed.
         append!(padded, fill(missing, max(0, length(thoraxe.seeds) - length(padded))))
     end
     return padded
@@ -662,6 +664,7 @@ function load_result(workdir::AbstractString)
     target === nothing &&
         error("Cannot load IdunaResult from $(root): target metadata is unavailable.")
     thoraxe = _load_result_thoraxe(summary, target, root, status)
+    # Rebuild rich Julia result objects from JSON plus any detailed stage files.
     expansions = _load_result_expansions(summary, target, thoraxe, root)
     validations = _load_result_validations(summary, thoraxe, expansions, root)
     result = Utils.IdunaResult(;
@@ -854,6 +857,7 @@ function _load_result_expansion(data, target::Utils.ResolvedTarget,
             n_hits = Int(get(data, "n_hits", 0)),
             n_new_hits = Int(get(data, "n_new_hits", 0)))
     else
+        # Older result files may lack counts, so recover them from saved FASTA files.
         MSAExpansion._cached_hit_counts(hits_fasta,
             MSAExpansion._seed_id_set(seed_stockholm))
     end

@@ -48,6 +48,7 @@ function _get_codes(output::AbstractString)
         end
         in_alignment || continue
         isempty(line) && continue
+        # HHalign prints one query row followed by rows of symbols for each block.
         if query_line
             parsed = _parse_hhsuite_query_segment(line)
             if parsed !== nothing
@@ -68,6 +69,7 @@ function _identity_counts_from_codes(positions::Vector{Int}, codes::Vector{Char}
     seen = Dict{Int, Bool}()
     for (pos, code) in zip(positions, codes)
         pos == 0 && continue
+        # A reference position counts as matched if any compared row marks it with '|'.
         seen[pos] = get(seen, pos, false) || code == '|'
     end
     matched = count(identity, values(seen))

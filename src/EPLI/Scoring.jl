@@ -78,6 +78,7 @@ function _score_sample_specs!(rows::AbstractVector,
         return nothing
     end
     if run_in_parallel
+        # Each thread fills a different row; only the progress display is shared.
         Threads.@threads :greedy for idx in eachindex(sample_specs)
             rows[idx] = _score_sample(sample_specs[idx], reference_msa_fasta,
                 reference_score; score_fn, normalization_fn, logs_dir, overwrite)

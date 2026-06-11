@@ -357,6 +357,7 @@ function _run_logged_command(command::Cmd,
         progress_enabled::Bool = _terminal_progress_enabled(progress_output))
     _open_logs(stdout_log, stderr_log) do out_io, err_io
         out_pipe = Pipe()
+        # When a spinner is shown, keep command output in logs to avoid garbled progress text.
         show_live_stdout = live_stdout && !(progress_desc !== nothing && progress_enabled)
         outputs = show_live_stdout ? (out_io, stderr) : (out_io,)
         stdout_task = @async _forward_stdout(out_pipe, outputs...)
@@ -1247,6 +1248,7 @@ function _complete_s_exon_code_map(code_map::AbstractVector{<:Pair},
         exon in mapped_exons && continue
         startswith(exon, "0_") ||
             error("ThorAxe PhyloSofS s-exon map has no symbol for $(exon).")
+        # Some reference-only s-exons are absent from PhyloSofS, so assign a safe symbol.
         symbol_idx = findfirst(symbol -> !(symbol in used_symbols), _PHYLOSOFS_FALLBACK_SYMBOLS)
         symbol_idx === nothing &&
             error("No unused PhyloSofS-compatible symbol is available for $(exon).")
@@ -1315,6 +1317,7 @@ function _project_phylosofs_symbols(exon_msas::AbstractVector,
         exon_symbol = get(symbol_by_exon, String(exon_id), nothing)
         exon_symbol === nothing &&
             error("ThorAxe PhyloSofS s-exon map has no symbol for $(exon_id).")
+        # Walk through exon MSAs in transcript order and copy one s-exon symbol per column.
         symbol_state = _write_projected_exon_symbols!(
             io, exon_msa, exon_id, gene_id, symbols, exon_symbol, exon_by_symbol,
             symbol_state, transcript_id)
@@ -1576,6 +1579,7 @@ function _symlink_species_file(link_path::AbstractString,
     end
     mkpath(dirname(link_path))
     ispath(link_path) && rm(link_path; force = true)
+    # A relative link keeps the work directory movable.
     target = relpath(target_path, dirname(link_path))
     symlink(target, link_path)
     return link_path
@@ -1677,6 +1681,7 @@ function _common_sampling_universe(records::AbstractVector, gene_id::AbstractStr
     for record in Iterators.drop(records, 1)
         intersect!(common, _candidate_species_set(record.candidate))
     end
+    # Shared samples compare PID candidates using only species present in every candidate.
     species = [item for item in ordered if item in common]
     reference_species = _reference_species(first_record.candidate, gene_id, transcript_id)
     reference_species in species ||
@@ -2099,6 +2104,7 @@ end
 
 function _canonical_thoraxe_msa_metadata(metadata)
     if metadata.requested_pid_sample_seed === nothing
+        # Auto-generated seeds should not force a rebuild of already scored candidates.
         return merge(metadata, (; pid_sample_seed = nothing))
     end
     return metadata
@@ -2195,6 +2201,7 @@ function _prepare_thoraxe_msa_stage!(workdir::AbstractString,
     if overwrite || (stage_cache.cache.status !== :missing && stage_cache.has_manifest)
         isdir(_thoraxe_msa_dir(workdir)) && safe_rm(_thoraxe_msa_dir(workdir), workdir)
     end
+    # A legacy summary can still be reused when all required files and metadata match.
     local_artifacts_are_current = !overwrite && !stage_cache.has_manifest &&
                                   stage_cache.summary_matches
     force_pid_rerun = overwrite || !local_artifacts_are_current
@@ -2711,6 +2718,7 @@ function _prepare_candidate_species_samples!(target::ResolvedTarget,
     if sampling_strategy === :independent
         @info "Preparing independent ThorAxe PID species samples." sample_fraction
         for record in eligible_records
+            # Independent sampling lets each PID candidate use its own available species.
             _ensure_pid_candidate_samples(workdir, record.pid, record.candidate.msa,
                 record.candidate.species;
                 sample_count,
@@ -2739,6 +2747,7 @@ function _prepare_candidate_species_samples!(target::ResolvedTarget,
     else
         @info "Preparing input ThorAxe PID species samples." n_species=length(universe.species) sample_fraction
     end
+    # Shared strategies write one sampled species list, then point each PID to it.
     _write_shared_species_samples(workdir, universe.species, universe.reference_species;
         sample_count,
         sample_fraction,

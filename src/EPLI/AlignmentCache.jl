@@ -19,6 +19,7 @@ function _alignment_cache_identity(aligner_fn::Function,
         input_fasta::AbstractString,
         run_label::AbstractString,
         aligner_args::Cmd)
+    # The cache key includes the input file and aligner settings that affect output.
     return Dict(
         "schema_version" => _ALIGNMENT_CACHE_SCHEMA_VERSION,
         "input_sha256" => _file_sha256(input_fasta),

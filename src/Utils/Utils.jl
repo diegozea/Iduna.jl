@@ -112,12 +112,14 @@ function _terminal_progress_enabled(output = stderr)
 end
 
 function _sample_rng(seed::UInt64, sample_idx::Integer)
+    # Give each sample its own repeatable random stream from the same run seed.
     mixed = xor(seed, UInt64(sample_idx) * 0xbf58476d1ce4e5b9)
     return MersenneTwister(Int(mod(mixed, UInt64(typemax(Int)))))
 end
 
 function _sample_indices(n_total::Integer, reference_idx::Integer,
         fraction::Real, rng::MersenneTwister)
+    # Always keep the reference sequence so every sample remains comparable.
     selectable = [i for i in 1:n_total if i != reference_idx]
     isempty(selectable) && return [reference_idx]
     n_keep = clamp(round(Int, Float64(fraction) * length(selectable)), 1, length(selectable))
@@ -732,6 +734,7 @@ function _write_stage_state(stage_dir::AbstractString;
         extra)
     tmp_path = string(state_path, ".tmp")
     write_json(tmp_path, state)
+    # Replace the state file only after the new JSON has been written completely.
     mv(tmp_path, state_path; force = true)
     return state_path
 end
@@ -811,6 +814,7 @@ function _classify_stage_state(stage_dir::AbstractString,
             status = :unfinished,
             warning = "$(stage_label) outputs are incomplete despite a done $(_STAGE_STATE_FILE); rebuilding.")
     end
+    # Matching inputs plus present outputs are the two requirements for reuse.
     return (; reusable = true, status = :done, warning = nothing)
 end
 
@@ -903,6 +907,7 @@ function s_exon_code_map(msa::AbstractMultipleSequenceAlignment;
     map = Dict{Char, String}()
     isempty(raw) && return map
     pos = firstindex(raw)
+    # The map is stored as compact quoted pairs, for example "A"=>"exon_1".
     for match in eachmatch(r"(\"(?:\\.|[^\"])*\")=>(\"(?:\\.|[^\"])*\")", raw)
         match_start = match.offset
         separator = pos == match_start ? "" : raw[pos:prevind(raw, match_start)]
@@ -984,6 +989,7 @@ function _write_s_exon_block_rows(io,
     for (idx, code) in enumerate(codes)
         if code != current
             if current != S_EXON_MISSING_CODE
+                # Finish the previous run of neighboring columns with the same s-exon.
                 _write_s_exon_block_line(io, alignment, pid_value, current,
                     get(code_map, current, ""), start_col, idx - 1)
             end
@@ -1075,6 +1081,7 @@ function _relative_artifact_path(path::AbstractString, workdir::AbstractString)
     str = String(path)
     isabspath(str) || return str
     rel = relpath(abspath(str), abspath(workdir))
+    # Only rewrite paths inside workdir; outside inputs must remain absolute.
     return _is_path_inside_workdir(rel) ? rel : str
 end
 
