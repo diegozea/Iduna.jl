@@ -1,5 +1,8 @@
 using AutoPrettyPrinting: @def_pprint
 
+# Pipeline Result Types
+# ---------------------
+
 """
     ResolvedTarget
 
@@ -231,6 +234,9 @@ Base.@kwdef struct ValidationResult
     status::Symbol = :ok
 end
 
+# Top-Level Result
+# ----------------
+
 """
     IdunaResult
 
@@ -265,6 +271,9 @@ Base.@kwdef struct IdunaResult
     warnings::Vector{String} = String[]
     status::Symbol = :ok
 end
+
+# Result Display Helpers
+# ----------------------
 
 struct _IdunaSummarySegment
     text::String
@@ -597,6 +606,9 @@ function _iduna_result_rows(result::IdunaResult)
     ]
 end
 
+# Show Methods
+# ------------
+
 function Base.show(io::IO, ::MIME"text/plain", result::IdunaResult)
     print(io, "IdunaResult ", result.input_id, " [")
     _iduna_print_segments(io, [_iduna_status_segment(result.status)])
@@ -615,6 +627,9 @@ function Base.show(io::IO, ::MIME"text/plain", result::IdunaResult)
     end
     return nothing
 end
+
+# Pretty Printing
+# ---------------
 
 @def_pprint mime_types="text/plain" base_show=true ResolvedTarget
 @def_pprint mime_types="text/plain" base_show=true SeedSelection
