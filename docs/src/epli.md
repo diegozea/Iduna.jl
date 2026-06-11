@@ -16,11 +16,12 @@ samples species lists instead of sequences for ThorAxe PID selection.
 
 ## Wrap An Aligner
 
-An aligner wrapper is a Julia function with this contract:
+An aligner wrapper is a Julia function with this required contract:
 
 ```julia
-function my_aligner(input_fasta, output_fasta; logs_dir = nothing, sample_label = "sample")
-    run(`my-aligner --input $input_fasta --output $output_fasta`)
+function my_aligner(input_fasta, output_fasta; logs_dir = nothing,
+        run_label = "run", aligner_args = Cmd(String[]))
+    run(`my-aligner --input $input_fasta --output $output_fasta $aligner_args`)
     return output_fasta
 end
 ```
@@ -40,28 +41,79 @@ EPLI sets these arguments when it calls the wrapper:
 - `logs_dir`: optional directory for logs. When it is not `nothing`, wrappers can
   create it and write aligner stdout, stderr, or temporary diagnostics there.
   Wrappers that do not need logs can ignore it.
-- `sample_label`: stable label for the current run, such as `full` or
+- `run_label`: stable label for the current run, such as `full` or
   `sequence_subset_001`. Use it in log file names so repeated samples do not
   overwrite each other.
+- `aligner_args`: extra command arguments supplied by the `epli_score` caller.
+  The default is `Cmd(String[])`, an empty command. Append it to the command you
+  build for the external aligner.
 
 You normally pass only the wrapper function to `epli_score`; EPLI passes
-`output_fasta`, `logs_dir`, and `sample_label` to your wrapper for each full or
-sampled alignment.
+`output_fasta`, `logs_dir`, `run_label`, and `aligner_args` to your wrapper
+for each full or sampled alignment.
 
-For example, a MAFFT wrapper can write the requested output FASTA directly:
+For example, a wrapper for a command-line aligner can write the requested output
+FASTA directly:
 
 ```julia
 using Iduna.EPLI
 
-function mafft_aligner(input_fasta, output_fasta; logs_dir = nothing,
-        sample_label = "sample")
+function my_aligner(input_fasta, output_fasta; logs_dir = nothing,
+        run_label = "run", aligner_args = Cmd(String[]))
     mkpath(dirname(output_fasta))
-    run(pipeline(`mafft --quiet $input_fasta`, stdout = output_fasta))
+    run(`my-aligner --input $input_fasta --output $output_fasta $aligner_args`)
     return output_fasta
 end
 
-result = epli_score("sequences.fasta", "mafft_epli", mafft_aligner)
+result = epli_score(
+    "sequences.fasta",
+    "my_aligner_epli",
+    my_aligner;
+    aligner_args = `--threads 4 --local`,
+)
 ```
+
+`aligner_args` is intentionally a `Cmd`, not open-ended Julia keywords. This
+keeps EPLI options separate from command-line options for the external aligner.
+Wrappers must accept `run_label` and `aligner_args`, even when callers use the
+default empty command.
+
+## Optional JLL Aligners
+
+Iduna also provides unexported wrappers for MAFFT and Clustal Omega through Julia
+package extensions. These wrappers are available only after loading the matching
+JLL package.
+
+For MAFFT:
+
+```julia
+using Iduna
+using MAFFT_jll
+
+result = Iduna.EPLI.epli_score(
+    "sequences.fasta",
+    "mafft_epli",
+    Iduna.EPLI.mafft_aligner,
+    aligner_args = `--thread 4 --localpair --maxiterate 1000`,
+)
+```
+
+For Clustal Omega:
+
+```julia
+using Iduna
+using ClustalO_jll
+
+result = Iduna.EPLI.epli_score(
+    "sequences.fasta",
+    "clustalo_epli",
+    Iduna.EPLI.clustalo_aligner,
+    aligner_args = `--threads=4 --auto`,
+)
+```
+
+Use the qualified names `Iduna.EPLI.mafft_aligner` and
+`Iduna.EPLI.clustalo_aligner`; they are intentionally not exported.
 
 ## ProGraphMSA Example
 

@@ -32,6 +32,7 @@ include("Normalization.jl")
 include("AlignmentCache.jl")
 include("Sampling.jl")
 include("Scoring.jl")
+include("JLLAligners.jl")
 include("ProGraphMSA.jl")
 
 end

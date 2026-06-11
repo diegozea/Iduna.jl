@@ -1,4 +1,4 @@
-const _ALIGNMENT_CACHE_SCHEMA_VERSION = 1
+const _ALIGNMENT_CACHE_SCHEMA_VERSION = 2
 
 _aligner_cache_label(fn) = string(typeof(fn), "|", hash(fn))
 
@@ -17,12 +17,14 @@ end
 
 function _alignment_cache_identity(aligner_fn::Function,
         input_fasta::AbstractString,
-        sample_label::AbstractString)
+        run_label::AbstractString,
+        aligner_args::Cmd)
     return Dict(
         "schema_version" => _ALIGNMENT_CACHE_SCHEMA_VERSION,
         "input_sha256" => _file_sha256(input_fasta),
         "aligner" => _aligner_cache_label(aligner_fn),
-        "sample_label" => String(sample_label))
+        "aligner_args" => string(aligner_args),
+        "run_label" => String(run_label))
 end
 
 function _read_alignment_cache(output_fasta::AbstractString)
@@ -39,7 +41,7 @@ end
 function _cached_alignment_path(output_fasta::AbstractString, identity::AbstractDict)
     state = _read_alignment_cache(output_fasta)
     state isa AbstractDict || return nothing
-    for key in ("schema_version", "input_sha256", "aligner", "sample_label")
+    for key in ("schema_version", "input_sha256", "aligner", "aligner_args", "run_label")
         get(state, key, nothing) == identity[key] || return nothing
     end
     alignment_path = get(state, "alignment_path", output_fasta)
@@ -61,15 +63,16 @@ function _run_aligner(aligner_fn::Function,
         input_fasta::AbstractString,
         output_fasta::AbstractString;
         logs_dir::Union{Nothing, AbstractString},
-        sample_label::AbstractString,
-        overwrite::Bool)
-    identity = _alignment_cache_identity(aligner_fn, input_fasta, sample_label)
+        run_label::AbstractString,
+        overwrite::Bool,
+        aligner_args::Cmd)
+    identity = _alignment_cache_identity(aligner_fn, input_fasta, run_label, aligner_args)
     if !overwrite
         cached_path = _cached_alignment_path(output_fasta, identity)
         cached_path === nothing || return cached_path
     end
     mkpath(dirname(output_fasta))
-    result = aligner_fn(input_fasta, output_fasta; logs_dir, sample_label)
+    result = aligner_fn(input_fasta, output_fasta; logs_dir, run_label, aligner_args)
     path = _alignment_result_path(result, output_fasta)
     isfile(path) || error("Aligner did not write the expected MSA FASTA at $(path).")
     _write_alignment_cache(output_fasta, path, identity)
