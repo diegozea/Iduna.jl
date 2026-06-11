@@ -875,7 +875,7 @@ function _load_result_expansion(data, target::Utils.ResolvedTarget,
             n_hits = Int(get(data, "n_hits", 0)),
             n_new_hits = Int(get(data, "n_new_hits", 0)))
     else
-        # Older result files may lack counts, so recover them from saved FASTA files.
+        # Older result files may lack hit counts, so recover them from saved FASTA files.
         MSAExpansion._cached_hit_counts(hits_fasta,
             MSAExpansion._seed_id_set(seed_stockholm))
     end
