@@ -134,13 +134,14 @@ function _score_alignment_samples(reference_msa_fasta::AbstractString,
 end
 
 """
-    epli_score(input_fasta, workdir, aligner_fn; aligner_args=Cmd(String[]))
+    epli_score(input, workdir, aligner_fn; aligner_args=Cmd(String[]))
 
-Compute EPLI for an aligner over sequence-row subsamples from an unaligned FASTA.
+Compute EPLI for an aligner over sequence-row subsamples.
 
 # Arguments
 
-- `input_fasta::AbstractString`: unaligned FASTA with the full sequence set.
+- `input`: unaligned FASTA path or MIToS MSA used as a source of sequences.
+  MSA inputs are ungapped before EPLI samples rows and runs the aligner.
 - `workdir::AbstractString`: output directory for inputs, MSAs, logs, and tables.
 - `aligner_fn::Function`: callable that writes an aligned FASTA from an input FASTA.
   It must accept `logs_dir`, `run_label`, and `aligner_args` keywords.
@@ -156,7 +157,7 @@ Compute EPLI for an aligner over sequence-row subsamples from an unaligned FASTA
 - `reference_sequence = nothing`: reference sequence name, or first row when `nothing`.
 - `overwrite::Bool = false`: rebuild existing output files.
 """
-function epli_score(input_fasta::AbstractString,
+function epli_score(input::Union{AbstractString, AbstractMultipleSequenceAlignment},
         workdir::AbstractString,
         aligner_fn::Function;
         score_fn::Function = hhsuite_identity_score,
@@ -171,17 +172,19 @@ function epli_score(input_fasta::AbstractString,
                                              self_reference_normalization,
         progress_output::IO = stderr,
         progress_enabled::Bool = _terminal_progress_enabled(progress_output))
+    input_source = input isa AbstractString ? "fasta" : "mitos_msa"
+    input_fasta = input isa AbstractString ? String(input) : missing
     _validate_sampling_options(sample_count, sample_fraction)
     seed = sample_seed === nothing ? UInt64(rand(UInt32)) :
            _normalize_sample_seed(sample_seed)
-    fasta = _fasta_records(input_fasta)
-    reference_idx = _reference_index(fasta.names, reference_sequence)
+    sequences = _sequence_records(input)
+    reference_idx = _reference_index(sequences.names, reference_sequence)
     full_input = joinpath(workdir, "input", "full_sequences.fasta")
     reference_msa = joinpath(workdir, "msa", "reference_msa.fasta")
     logs_dir = joinpath(workdir, "logs")
     scores_path = joinpath(workdir, "scores.csv")
     summary_path = joinpath(workdir, "summary.csv")
-    write_fasta(full_input, fasta.records)
+    write_fasta(full_input, sequences.records)
     reference_msa = _run_aligner(aligner_fn, full_input, reference_msa;
         logs_dir = joinpath(logs_dir, "aligner"),
         run_label = "full",
@@ -191,17 +194,17 @@ function epli_score(input_fasta::AbstractString,
     for sample_idx in 1:Int(sample_count)
         label = _sample_label(sample_idx)
         rng = _sample_rng(seed, sample_idx)
-        indices = _sample_indices(length(fasta.records), reference_idx, sample_fraction, rng)
+        indices = _sample_indices(length(sequences.records), reference_idx, sample_fraction, rng)
         sample_input = joinpath(workdir, "samples", "$(label)_sequences.fasta")
         sample_msa = joinpath(workdir, "samples", "$(label)_msa.fasta")
-        write_fasta(sample_input, [fasta.records[i] for i in indices])
+        write_fasta(sample_input, [sequences.records[i] for i in indices])
         push!(sample_specs,
             (;
                 sample = sample_idx,
                 sample_label = label,
                 sample_sequence_fasta = sample_input,
                 sample_msa_fasta = sample_msa,
-                n_sequences_reference = length(fasta.records),
+                n_sequences_reference = length(sequences.records),
                 n_sequences_sample = length(indices),
                 build_sample_msa = (spec;
                     overwrite = false) -> _run_aligner(
@@ -230,7 +233,8 @@ function epli_score(input_fasta::AbstractString,
         score_function = _function_label(score_fn),
         normalization_function = _function_label(normalization_fn),
         aligner_args = string(aligner_args),
-        input_fasta = String(input_fasta),
+        input_source,
+        input_fasta,
         reference_msa_fasta = reference_msa,
         scores_path)
     CSV.write(summary_path, DataFrame([summary]))

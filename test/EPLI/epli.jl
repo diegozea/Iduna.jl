@@ -83,6 +83,8 @@
         @test result.epli == 31.0
         @test result.n_samples == 3
         @test result.sample_seed == UInt64(7)
+        @test result.input_source == "fasta"
+        @test result.input_fasta == input
         @test result.aligner_args == string(`--example-arg`)
         @test sort(calls) == ["sequence_subset_001", "sequence_subset_002",
             "sequence_subset_003"]
@@ -93,6 +95,8 @@
         @test scores.epli_component == fill(31.0, 3)
         @test scores.normalization_score == fill(-1.0, 3)
         summary = Iduna.EPLI.DataFrame(Iduna.EPLI.CSV.File(result.summary_path))
+        @test only(summary.input_source) == "fasta"
+        @test only(summary.input_fasta) == input
         @test only(summary.aligner_args) == string(`--example-arg`)
 
         sample_fasta = joinpath(tmp, "run", "samples", "sequence_subset_001_sequences.fasta")
@@ -173,6 +177,68 @@
         @test !occursin('.', full_input)
         @test !occursin('-', sample_input)
         @test !occursin('.', sample_input)
+    end
+
+    mktempdir() do tmp
+        aligned_input = joinpath(tmp, "aligned.fasta")
+        unaligned_input = joinpath(tmp, "unaligned.fasta")
+        write(aligned_input,
+            ">ref\nAA--AA\n" *
+            ">seq2\nA---AA\n" *
+            ">seq3\nA.A-AA\n")
+        write(unaligned_input,
+            ">ref\nAAAA\n" *
+            ">seq2\nAAA\n" *
+            ">seq3\nAAAA\n")
+        msa = Iduna.EPLI.read_file(aligned_input, Iduna.EPLI.FASTA)
+        score_fn = (reference_msa, sample_msa; logs_dir = nothing,
+            label = "sample") -> begin
+            n_sample = Iduna.EPLI.nsequences(
+                Iduna.EPLI.read_file(sample_msa, Iduna.EPLI.FASTA))
+            return (; raw_score = Float64(n_sample))
+        end
+        normalization_fn = (score; reference_score = nothing) -> score.raw_score
+
+        msa_result = Iduna.EPLI.epli_score(msa, joinpath(tmp, "msa"),
+            padded_aligner;
+            score_fn,
+            normalization_fn,
+            sample_count = 2,
+            sample_fraction = 0.5,
+            sample_seed = 19,
+            reference_sequence = "seq2",
+            progress_enabled = false)
+        fasta_result = Iduna.EPLI.epli_score(unaligned_input, joinpath(tmp, "fasta"),
+            padded_aligner;
+            score_fn,
+            normalization_fn,
+            sample_count = 2,
+            sample_fraction = 0.5,
+            sample_seed = 19,
+            reference_sequence = "seq2",
+            progress_enabled = false)
+
+        @test msa_result.epli == fasta_result.epli
+        @test msa_result.input_source == "mitos_msa"
+        @test ismissing(msa_result.input_fasta)
+        full_input = read(joinpath(tmp, "msa", "input", "full_sequences.fasta"),
+            String)
+        @test full_input == read(
+            joinpath(tmp, "fasta", "input", "full_sequences.fasta"), String)
+        @test occursin(">ref\nAAAA\n", full_input)
+        @test occursin(">seq2\nAAA\n", full_input)
+        @test !occursin('-', full_input)
+        @test !occursin('.', full_input)
+        sample_input = read(
+            joinpath(tmp, "msa", "samples", "sequence_subset_001_sequences.fasta"),
+            String)
+        @test startswith(sample_input, ">seq2\n")
+        @test !occursin('-', sample_input)
+        @test !occursin('.', sample_input)
+
+        summary = Iduna.EPLI.DataFrame(Iduna.EPLI.CSV.File(msa_result.summary_path))
+        @test only(summary.input_source) == "mitos_msa"
+        @test ismissing(only(summary.input_fasta))
     end
 
     mktempdir() do tmp
