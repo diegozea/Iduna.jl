@@ -118,6 +118,21 @@ mktempdir() do tmp
     summary = Iduna.EPLI.DataFrame(Iduna.EPLI.CSV.File(result.summary_path))
     @test only(summary.input_source) == "mitos_sequences"
     @test ismissing(only(summary.input_fasta))
+
+    single_result = Iduna.EPLI.epli_score(sequences[1], joinpath(tmp, "single"),
+        padded_aligner;
+        score_fn,
+        normalization_fn,
+        sample_count = 1,
+        sample_fraction = 1.0,
+        sample_seed = 23,
+        progress_enabled = false)
+    @test single_result.input_source == "mitos_sequence"
+    @test ismissing(single_result.input_fasta)
+    @test occursin(">ref\nAAAA\n",
+        read(joinpath(tmp, "single", "input", "full_sequences.fasta"), String))
+
+    @test_throws ErrorException Iduna.EPLI._sequence_records(AnnotatedSequence[])
 end
 
 mktempdir() do tmp
