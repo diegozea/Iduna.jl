@@ -1,3 +1,5 @@
+using MIToS.MSA: AnnotatedSequence
+
 mktempdir() do tmp
     input = joinpath(tmp, "sequences.fasta")
     write(input,
@@ -71,6 +73,66 @@ mktempdir() do tmp
             String)
     end
     @test repeat_result.epli == result.epli
+end
+
+mktempdir() do tmp
+    sequences = [
+        AnnotatedSequence("ref", "AA--AA"),
+        AnnotatedSequence("seq2", "A.AA"),
+        AnnotatedSequence("seq3", "AAAT")
+    ]
+    workdir = joinpath(tmp, "mitos_sequences")
+    score_fn = (reference_msa, sample_msa; logs_dir = nothing,
+        label = "sample") -> begin
+        n_sample = Iduna.EPLI.nsequences(
+            Iduna.EPLI.read_file(sample_msa, Iduna.EPLI.FASTA))
+        return (; raw_score = Float64(n_sample))
+    end
+    normalization_fn = (score; reference_score = nothing) -> score.raw_score
+
+    result = Iduna.EPLI.epli_score(sequences, workdir, padded_aligner;
+        score_fn,
+        normalization_fn,
+        sample_count = 2,
+        sample_fraction = 0.5,
+        sample_seed = 23,
+        reference_sequence = "seq2",
+        progress_enabled = false)
+
+    @test result.epli == 2.0
+    @test result.input_source == "mitos_sequences"
+    @test ismissing(result.input_fasta)
+    full_input = read(joinpath(workdir, "input", "full_sequences.fasta"),
+        String)
+    @test occursin(">ref\nAAAA\n", full_input)
+    @test occursin(">seq2\nAAA\n", full_input)
+    @test !occursin('-', full_input)
+    @test !occursin('.', full_input)
+    sample_input = read(
+        joinpath(workdir, "samples", "sequence_subset_001_sequences.fasta"),
+        String)
+    @test startswith(sample_input, ">seq2\n")
+    @test !occursin('-', sample_input)
+    @test !occursin('.', sample_input)
+
+    summary = Iduna.EPLI.DataFrame(Iduna.EPLI.CSV.File(result.summary_path))
+    @test only(summary.input_source) == "mitos_sequences"
+    @test ismissing(only(summary.input_fasta))
+
+    single_result = Iduna.EPLI.epli_score(sequences[1], joinpath(tmp, "single"),
+        padded_aligner;
+        score_fn,
+        normalization_fn,
+        sample_count = 1,
+        sample_fraction = 1.0,
+        sample_seed = 23,
+        progress_enabled = false)
+    @test single_result.input_source == "mitos_sequence"
+    @test ismissing(single_result.input_fasta)
+    @test occursin(">ref\nAAAA\n",
+        read(joinpath(tmp, "single", "input", "full_sequences.fasta"), String))
+
+    @test_throws ErrorException Iduna.EPLI._sequence_records(AnnotatedSequence[])
 end
 
 mktempdir() do tmp

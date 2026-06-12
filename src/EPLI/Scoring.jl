@@ -150,8 +150,9 @@ Compute EPLI for an aligner over sequence-row subsamples.
 
 # Arguments
 
-- `input`: unaligned FASTA path or MIToS MSA used as a source of sequences.
-  MSA inputs are ungapped before EPLI samples rows and runs the aligner.
+- `input`: unaligned FASTA path, MIToS sequence collection, MIToS sequence, or
+  MIToS MSA used as a source of sequences. MIToS inputs are ungapped before EPLI
+  samples rows and runs the aligner.
 - `workdir::AbstractString`: output directory for inputs, MSAs, logs, and tables.
 - `aligner_fn::Function`: callable that writes an aligned FASTA from an input FASTA.
   It must accept `logs_dir`, `run_label`, and `aligner_args` keywords.
@@ -167,7 +168,9 @@ Compute EPLI for an aligner over sequence-row subsamples.
 - `reference_sequence = nothing`: reference sequence name, or first row when `nothing`.
 - `overwrite::Bool = false`: rebuild existing output files.
 """
-function epli_score(input::Union{AbstractString, AbstractMultipleSequenceAlignment},
+function epli_score(
+        input::Union{AbstractString, AbstractMultipleSequenceAlignment,
+            AbstractSequence, AbstractVector{<:AbstractSequence}},
         workdir::AbstractString,
         aligner_fn::Function;
         score_fn::Function = hhsuite_identity_score,
@@ -182,7 +185,9 @@ function epli_score(input::Union{AbstractString, AbstractMultipleSequenceAlignme
                                              self_reference_normalization,
         progress_output::IO = stderr,
         progress_enabled::Bool = _terminal_progress_enabled(progress_output))
-    input_source = input isa AbstractString ? "fasta" : "mitos_msa"
+    input_source = input isa AbstractString ? "fasta" :
+                   input isa AbstractMultipleSequenceAlignment ? "mitos_msa" :
+                   input isa AbstractSequence ? "mitos_sequence" : "mitos_sequences"
     input_fasta = input isa AbstractString ? String(input) : missing
     _validate_sampling_options(sample_count, sample_fraction)
     seed = sample_seed === nothing ? UInt64(rand(UInt32)) :

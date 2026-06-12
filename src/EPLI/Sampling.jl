@@ -18,8 +18,7 @@ _ungapped_sequence(sequence) = replace(String(sequence), '-' => "", '.' => "")
 
 function _sequence_records(path::AbstractString)
     sequences = read_file(path, FASTASequences)
-    records = [(String(sequence_id(seq)), _ungapped_sequence(stringsequence(seq)))
-               for seq in sequences]
+    records = _sequence_records_from_sequences(sequences)
     isempty(records) && error("Input FASTA has no sequences: $(path).")
     names = [name for (name, _seq) in records]
     return (; names, records)
@@ -32,6 +31,22 @@ function _sequence_records(msa::AbstractMultipleSequenceAlignment)
     isempty(records) && error("Input MSA has no sequences.")
     names = [name for (name, _seq) in records]
     return (; names, records)
+end
+
+function _sequence_records(seq::AbstractSequence)
+    return _sequence_records([seq])
+end
+
+function _sequence_records(sequences::AbstractVector{<:AbstractSequence})
+    records = _sequence_records_from_sequences(sequences)
+    isempty(records) && error("Input sequence collection has no sequences.")
+    names = [name for (name, _seq) in records]
+    return (; names, records)
+end
+
+function _sequence_records_from_sequences(sequences)
+    return [(String(sequence_id(seq)), _ungapped_sequence(stringsequence(seq)))
+            for seq in sequences]
 end
 
 function _reference_index(names::AbstractVector{<:AbstractString}, reference_sequence)

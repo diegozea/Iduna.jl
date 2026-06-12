@@ -23,7 +23,7 @@ makedocs(;
         assets = String[]
     ),
     pages = [
-        "Home" => "index.md",
+        "Iduna" => "index.md",
         "EPLI Score" => "epli.md",
         "API" => "api.md",
         "Output Layout" => "output.md"
