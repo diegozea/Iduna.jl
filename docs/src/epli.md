@@ -113,9 +113,12 @@ default empty command.
 
 ## Optional JLL Aligners
 
-Iduna also provides unexported wrappers for MAFFT and Clustal Omega through Julia
-package extensions. These wrappers are available only after loading the matching
-JLL package.
+Iduna also provides unexported wrappers for MAFFT, Clustal Omega, and MUSCLE
+through Julia package extensions. These wrappers are available only after loading
+the matching JLL package.
+
+All bundled aligner wrappers return aligned FASTA records in the same order as
+the input FASTA. This keeps EPLI's reference row stable across aligners.
 
 For MAFFT:
 
@@ -145,8 +148,22 @@ result = Iduna.EPLI.epli_score(
 )
 ```
 
-Use the qualified names `Iduna.EPLI.mafft_aligner` and
-`Iduna.EPLI.clustalo_aligner`; they are intentionally not exported.
+For MUSCLE:
+
+```julia
+using Iduna
+using MUSCLE_jll
+
+result = Iduna.EPLI.epli_score(
+    "sequences.fasta",
+    "muscle_epli",
+    Iduna.EPLI.muscle_aligner,
+)
+```
+
+Use the qualified names `Iduna.EPLI.mafft_aligner`,
+`Iduna.EPLI.clustalo_aligner`, and `Iduna.EPLI.muscle_aligner`; they are
+intentionally not exported.
 
 ## Alternative Scores
 

@@ -30,10 +30,12 @@ ThorAxe = "cf6a4a95-c6c1-4b3e-818d-24edc886ccb5"
 [weakdeps]
 ClustalO_jll = "0dad4a17-6433-5fde-a0a0-daebbaba7b50"
 MAFFT_jll = "72a4bdf2-be5e-5c84-b157-f1dc2927f791"
+MUSCLE_jll = "0d2b832c-22e5-5080-b34f-49cc6141c4c5"
 
 [extensions]
 IdunaClustalOExt = "ClustalO_jll"
 IdunaMAFFTExt = "MAFFT_jll"
+IdunaMUSCLEExt = "MUSCLE_jll"
 
 [compat]
 ArgParse = "1.2"
@@ -52,6 +54,7 @@ JSON = "1"
 MAFFT_jll = "7"
 MIToS = "3.7"
 MMseqs2_jll = "15"
+MUSCLE_jll = "5"
 Printf = "1"
 ProgressMeter = "1.10.4"
 Random = "1"

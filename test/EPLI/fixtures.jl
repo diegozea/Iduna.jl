@@ -39,5 +39,6 @@ end
 
 function jll_extension_test_dependencies_available()
     return Base.find_package("MAFFT_jll") !== nothing &&
-           Base.find_package("ClustalO_jll") !== nothing
+           Base.find_package("ClustalO_jll") !== nothing &&
+           Base.find_package("MUSCLE_jll") !== nothing
 end

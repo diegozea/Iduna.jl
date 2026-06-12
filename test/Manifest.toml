@@ -2,7 +2,7 @@
 
 julia_version = "1.12.6"
 manifest_format = "2.0"
-project_hash = "13702046200a054a2e45fce72f6a70f7fc7d3125"
+project_hash = "d29dab8f519e4d996cad802decde8e68371b72c9"
 
 [[deps.ANSIColoredPrinters]]
 git-tree-sha1 = "574baf8110975760d391c710b6341da1afa48d8c"
@@ -354,6 +354,12 @@ version = "3.10.0"
     BioAlignments = "00701ae9-d1dc-5365-b64a-a3a3ebf5695e"
     Clustering = "aaaa29a8-35af-508c-8bc3-b662a17a0fe5"
     ROCAnalysis = "f535d66d-59bb-5153-8d2b-ef0a426c6aff"
+
+[[deps.MUSCLE_jll]]
+deps = ["Artifacts", "CompilerSupportLibraries_jll", "JLLWrappers", "LLVMOpenMP_jll", "Libdl"]
+git-tree-sha1 = "1f3008f8c096b20e4dc8a0b1599b592211897bd1"
+uuid = "0d2b832c-22e5-5080-b34f-49cc6141c4c5"
+version = "5.2.0+1"
 
 [[deps.Markdown]]
 deps = ["Base64", "JuliaSyntaxHighlighting", "StyledStrings"]

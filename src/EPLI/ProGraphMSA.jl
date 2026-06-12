@@ -2,7 +2,14 @@
     prographmsa_aligner(input_fasta, output_fasta; logs_dir=nothing,
         run_label="run", aligner_args=Cmd(String[]))
 
-Run ProGraphMSA on an unaligned FASTA and write the aligned FASTA to `output_fasta`.
+Run ProGraphMSA on an unaligned FASTA and write the aligned FASTA to
+`output_fasta`. Iduna always keeps aligned FASTA records in the same order as
+`input_fasta`.
+
+# Fixed Arguments
+
+Iduna runs ProGraphMSA with `--input_order --fasta --output output_fasta`, then
+appends `aligner_args` before the input FASTA path.
 
 This helper is public but intentionally not exported because it wraps separate
 software. Use it as `Iduna.EPLI.prographmsa_aligner`.
