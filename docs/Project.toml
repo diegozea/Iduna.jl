@@ -1,6 +1,8 @@
 [deps]
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 Iduna = "a1090517-0d21-41a4-b698-8a258aa9b9e4"
+MIToS = "51bafb47-8a16-5ded-8b04-24ef4eede0b5"
 
 [compat]
 Documenter = "1.17.0"
+MIToS = "3.7"
