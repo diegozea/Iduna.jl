@@ -113,12 +113,14 @@ default empty command.
 
 ## Optional JLL Aligners
 
-Iduna also provides unexported wrappers for MAFFT, Clustal Omega, and MUSCLE
-through Julia package extensions. These wrappers are available only after loading
-the matching JLL package.
+Iduna also provides unexported wrappers for FAMSA, Kalign, MAFFT, Clustal
+Omega, and MUSCLE through Julia package extensions. These wrappers are
+available only after loading the matching JLL package.
 
 All bundled aligner wrappers return aligned FASTA records in the same order as
 the input FASTA. This keeps EPLI's reference row stable across aligners.
+Wrappers that reorder aligner output use MIToS FASTA parsing and writing, so
+input and aligned output sequences should use the MIToS residue alphabet.
 
 For MAFFT:
 
@@ -133,6 +135,39 @@ result = Iduna.EPLI.epli_score(
     aligner_args = `--thread 4 --localpair --maxiterate 1000`,
 )
 ```
+
+For FAMSA:
+
+```julia
+using Iduna
+using FAMSA_jll
+
+result = Iduna.EPLI.epli_score(
+    "sequences.fasta",
+    "famsa_epli",
+    Iduna.EPLI.famsa_aligner,
+    aligner_args = `-t 4`,
+)
+```
+
+For Kalign:
+
+```julia
+using Iduna
+using kalign_jll
+
+result = Iduna.EPLI.epli_score(
+    "sequences.fasta",
+    "kalign_epli",
+    Iduna.EPLI.kalign_aligner,
+    aligner_args = `-n 4`,
+)
+```
+
+The Kalign wrapper fixes FASTA output with `--format fasta`. It does not force
+`--type protein`, because Kalign rejects DNA-like protein alphabets such as
+`AAAA` before alignment when that flag is set. Pass `--type` in `aligner_args`
+only when you want Kalign to validate a specific sequence type.
 
 For Clustal Omega:
 
@@ -161,7 +196,8 @@ result = Iduna.EPLI.epli_score(
 )
 ```
 
-Use the qualified names `Iduna.EPLI.mafft_aligner`,
+Use the qualified names `Iduna.EPLI.famsa_aligner`,
+`Iduna.EPLI.kalign_aligner`, `Iduna.EPLI.mafft_aligner`,
 `Iduna.EPLI.clustalo_aligner`, and `Iduna.EPLI.muscle_aligner`; they are
 intentionally not exported.
 

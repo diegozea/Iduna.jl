@@ -13,9 +13,9 @@ import ThorAxe
 
 using Base.Threads
 using DataFrames: DataFrame
-using MIToS.MSA: AbstractMultipleSequenceAlignment, AbstractSequence, FASTA,
-                 FASTASequences, nsequences, read_file, sequence_id, sequencenames,
-                 stringsequence
+using MIToS.MSA: AbstractMultipleSequenceAlignment, AbstractSequence,
+                 AnnotatedSequence, FASTA, FASTASequences, nsequences,
+                 read_file, sequence_id, sequencenames, stringsequence, write_file
 using Statistics: median
 
 using ..Utils: _file_sha256, _sample_indices, _sample_rng, _terminal_progress_enabled,

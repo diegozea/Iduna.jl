@@ -2,7 +2,7 @@
 
 julia_version = "1.12.6"
 manifest_format = "2.0"
-project_hash = "d29dab8f519e4d996cad802decde8e68371b72c9"
+project_hash = "9bf680188164951117f0f15fb7f7b1d2c49b0760"
 
 [[deps.ANSIColoredPrinters]]
 git-tree-sha1 = "574baf8110975760d391c710b6341da1afa48d8c"
@@ -167,6 +167,12 @@ deps = ["Markdown", "Pkg", "PrecompileTools", "TOML", "Test"]
 git-tree-sha1 = "a8b6c26bf0ea9f8c4bad71e109a5fa64f34be392"
 uuid = "7d51a73a-1435-4ff3-83d9-f097790105c7"
 version = "1.15.0"
+
+[[deps.FAMSA_jll]]
+deps = ["Artifacts", "JLLWrappers", "Libdl"]
+git-tree-sha1 = "1688d69add4df07544284fae694f07c72e6bd260"
+uuid = "03e070a6-cabd-5a65-a0e2-949769773651"
+version = "2.2.2+1"
 
 [[deps.FastaIO]]
 deps = ["GZip"]
@@ -638,6 +644,12 @@ deps = ["Artifacts", "JLLWrappers", "Libdl"]
 git-tree-sha1 = "0bc5c492e971cf0427024df3d9c028c8ba877031"
 uuid = "166911fe-1485-5b25-83ac-750489179000"
 version = "2.13.0+0"
+
+[[deps.kalign_jll]]
+deps = ["Artifacts", "CompilerSupportLibraries_jll", "JLLWrappers", "LLVMOpenMP_jll", "Libdl"]
+git-tree-sha1 = "15f2126627bbaa02f9d11b166f2f1f32be30216c"
+uuid = "86ae5844-b998-5f56-950b-e2311b0a7e21"
+version = "3.4.0+0"
 
 [[deps.libblastrampoline_jll]]
 deps = ["Artifacts", "Libdl"]
