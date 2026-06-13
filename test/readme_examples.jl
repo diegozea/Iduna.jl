@@ -3,11 +3,11 @@ using .ExampleFixtures
 @testset "README examples" begin
     @testset "Julia quick start" begin
         mktempdir() do tmp
-            kwargs = merge((
-                    mmseqs_db = "/path/to/mmseqs/db",
-                    workdir = joinpath(tmp, "P20963")),
+            kwargs = merge((mmseqs_db = "/path/to/mmseqs/db",),
                 iduna_stage_kwargs())
-            result = Iduna.iduna("P20963"; kwargs...)
+            result = cd(tmp) do
+                Iduna.iduna("P20963"; kwargs...)
+            end
             expanded = Iduna.load_expanded_msa(result)
 
             @test result.input_id == "P20963"
@@ -24,14 +24,12 @@ using .ExampleFixtures
             "P20963",
             "--mmseqs-db",
             "/path/to/mmseqs/db",
-            "--workdir",
-            "P20963",
         ]
         kwargs = Iduna._parse_app_args(iduna_args_after_module(command))
 
         @test kwargs[:id] == "P20963"
         @test kwargs[:mmseqs_db] == "/path/to/mmseqs/db"
-        @test kwargs[:workdir] == "P20963"
+        @test !haskey(kwargs, :workdir)
     end
 
     @testset "ThorAxe-only example" begin

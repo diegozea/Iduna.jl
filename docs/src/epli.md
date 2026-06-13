@@ -6,7 +6,7 @@ is when the input sequence set is subsampled.
 ## Quick Example
 
 This example creates four fake protein sequences with MIToS, aligns them with
-ProGraphMSA, and computes EPLI from two sequence subsamples.
+ProGraphMSA, and computes EPLI with the default sampling settings.
 
 ```jldoctest; output = false
 using Iduna
@@ -24,19 +24,14 @@ workdir = mktempdir()
 result = Iduna.EPLI.epli_score(
     sequences,
     workdir,
-    Iduna.EPLI.prographmsa_aligner;
-    sample_count = 2,
-    sample_fraction = 0.75,
-    sample_seed = 1,
-    reference_sequence = "ref",
-    progress_enabled = false,
+    Iduna.EPLI.prographmsa_aligner,
 )
 
 (result.n_samples, result.input_source, isfile(result.summary_path))
 
 # output
 
-(2, "mitos_sequences", true)
+(45, "mitos_sequences", true)
 ```
 
 The call writes a full input FASTA under `workdir`, runs ProGraphMSA for the full
