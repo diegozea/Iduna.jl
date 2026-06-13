@@ -174,6 +174,30 @@
         end
 
         mktempdir() do tmp
+            empty_input = joinpath(tmp, "empty.fasta")
+            input = joinpath(tmp, "input.fasta")
+            records_output = joinpath(tmp, "records.fasta")
+            short_output = joinpath(tmp, "short_output.fasta")
+            missing_output = joinpath(tmp, "missing_output.fasta")
+            write(empty_input, "")
+            write(input, ">ref\nAAAA\n>seq2\nAAAT\n")
+            write(short_output, ">ref\nAAAA\n")
+            write(missing_output, ">ref\nAAAA\n>extra\nAAAT\n")
+
+            @test_throws ErrorException Iduna.EPLI._read_fasta_records(empty_input)
+            @test Iduna.EPLI._write_fasta_records(records_output,
+                [
+                    ("ref", "AAAA"),
+                    ("ignored", Iduna.EPLI.AnnotatedSequence("seq2", "AAAT"))
+                ]) == records_output
+            @test read(records_output, String) == ">ref\nAAAA\n>seq2\nAAAT\n"
+            @test_throws ErrorException Iduna.EPLI._reorder_fasta_like_input!(input,
+                short_output; aligner_name = "Probe")
+            @test_throws ErrorException Iduna.EPLI._reorder_fasta_like_input!(input,
+                missing_output; aligner_name = "Probe")
+        end
+
+        mktempdir() do tmp
             input = joinpath(tmp, "input.fasta")
             output = joinpath(tmp, "kalign_output.fasta")
             logs_dir = joinpath(tmp, "logs")

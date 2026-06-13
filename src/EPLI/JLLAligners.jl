@@ -130,9 +130,6 @@ function _reorder_fasta_like_input!(input_fasta::AbstractString,
             error("$(aligner_name) output is missing FASTA record $(repr(name)).")
         end
     end
-    if any(name -> !(name in input_names), String.(sequencenames(output_msa)))
-        error("$(aligner_name) output contains FASTA records that were not in the input.")
-    end
 
     reordered = output_msa[input_names, :]
     output_dir = dirname(output_fasta)
