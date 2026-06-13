@@ -32,9 +32,6 @@ using Iduna
 result = iduna(
     "P20963";
     mmseqs_db="/path/to/mmseqs/uniref_db",
-    workdir="P20963",
-    overwrite=false,
-    centroids=false,
 )
 
 expanded = load_expanded_msa(result)

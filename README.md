@@ -26,7 +26,7 @@ calling ThorAxe.
 ```julia
 using Iduna
 
-result = iduna("P20963"; mmseqs_db="/path/to/mmseqs/db", workdir="P20963")
+result = iduna("P20963"; mmseqs_db="/path/to/mmseqs/db")
 expanded = load_expanded_msa(result)
 ```
 

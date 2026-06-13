@@ -3,13 +3,11 @@ using MIToS.MSA: Stockholm, getannotcolumn, getannotfile, read_file
 
 @testset "Docs examples" begin
     function _docs_full_result(tmp::AbstractString)
-        kwargs = merge((
-                mmseqs_db = "/path/to/mmseqs/uniref_db",
-                workdir = joinpath(tmp, "P20963"),
-                overwrite = false,
-                centroids = false),
+        kwargs = merge((mmseqs_db = "/path/to/mmseqs/uniref_db",),
             iduna_stage_kwargs())
-        return Iduna.iduna("P20963"; kwargs...)
+        return cd(tmp) do
+            Iduna.iduna("P20963"; kwargs...)
+        end
     end
 
     @testset "home page Julia API example" begin

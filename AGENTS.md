@@ -39,4 +39,5 @@ coverage check for source changes.
 
 Do not use subagents by default. Use Julia MCP for short evaluation and
 formatting when available. Use `julia -e` for long tasks such as full tests
-because MCP sessions can time out. Preserve unrelated local changes.
+because MCP sessions can time out. Preserve unrelated local changes. Do not
+prefix PR titles with `[codex]`.
