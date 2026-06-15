@@ -5,4 +5,5 @@ MIToS = "51bafb47-8a16-5ded-8b04-24ef4eede0b5"
 
 [compat]
 Documenter = "1.17.0"
+Iduna = "0.9.1"
 MIToS = "3.7"
