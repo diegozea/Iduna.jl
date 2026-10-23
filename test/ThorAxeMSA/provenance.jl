@@ -252,5 +252,7 @@ end
 @testset "isolated installed tool provenance" begin
     script = joinpath(@__DIR__, "tool_provenance_process.jl")
     project = dirname(Base.active_project())
-    @test success(`$(Base.julia_cmd()) --startup-file=no --project=$project --code-coverage=user $script`)
+    command = `$(Base.julia_cmd()) --startup-file=no --project=$project --code-coverage=user $script`
+    process = run(pipeline(ignorestatus(command); stdout, stderr))
+    @test (process.exitcode, process.termsignal) == (0, 0)
 end
