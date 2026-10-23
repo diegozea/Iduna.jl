@@ -132,23 +132,6 @@ function _metadata_value_matches(stored, expected)
     return String(stored) == String(expected)
 end
 
-function _metadata_matches(path::AbstractString, expected)
-    isfile(path) || return false
-    try
-        metadata = JSON.parse(read(path, String))
-        for (key, expected_value) in pairs(expected)
-            string_key = String(key)
-            haskey(metadata, string_key) || return false
-            _metadata_value_matches(get(metadata, string_key, nothing), expected_value) ||
-                return false
-        end
-        return true
-    catch err
-        err isa InterruptException && rethrow()
-        return false
-    end
-end
-
 function _write_transcript_query_metadata!(input_dir::AbstractString, expected)
     metadata = merge(expected,
         (;
@@ -157,13 +140,6 @@ function _write_transcript_query_metadata!(input_dir::AbstractString, expected)
         ))
     path = _transcript_query_metadata_path(input_dir)
     return write_json(path, metadata)
-end
-
-function _has_matching_transcript_query_metadata(input_dir::AbstractString, expected)
-    expected_with_fingerprint = merge(expected,
-        (; input_fingerprint = _bundle_fingerprint(input_dir)))
-    return _metadata_matches(_transcript_query_metadata_path(input_dir),
-        expected_with_fingerprint)
 end
 
 function _missing_transcript_query_outputs(tmp_gene_dir::AbstractString)
