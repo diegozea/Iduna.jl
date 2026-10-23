@@ -3,7 +3,7 @@
 
 function _thoraxe_input_outputs(input_dir::AbstractString)
     ensembl_dir = joinpath(input_dir, "Ensembl")
-    outputs = Dict{String, Any}("ensembl_dir" => ensembl_dir)
+    outputs = Dict{String, Any}()
     for file in _REQUIRED_ENSEMBL_FILES
         outputs[file] = joinpath(ensembl_dir, file)
     end
@@ -22,6 +22,12 @@ function _write_thoraxe_input_state(workdir::AbstractString,
         action,
         warnings::AbstractVector{<:AbstractString} = String[],
         exception = nothing)
+    if status === :done
+        _has_valid_ensembl_bundle(input_dir) ||
+            error("Cannot complete an invalid Ensembl bundle.")
+        metadata = JSON.parse(read(_transcript_query_metadata_path(input_dir), String))
+        metadata isa AbstractDict || error("Transcript-query metadata must be an object.")
+    end
     return _write_stage_state(_thoraxe_input_stage_dir(workdir);
         stage = "thoraxe_input",
         stage_key = "thoraxe_input",
@@ -46,22 +52,13 @@ end
 function _maybe_reuse_thoraxe_input(workdir::AbstractString,
         input_dir::AbstractString,
         identity,
-        expected,
         cache;
         overwrite::Bool,
-        manifest_message::AbstractString,
-        legacy_message::AbstractString)
+        manifest_message::AbstractString)
     overwrite && return nothing
     if cache.reusable
         @info manifest_message input_dir
         _write_thoraxe_input_state(workdir, input_dir, :done, identity; action = :reuse)
-        return input_dir
-    end
-    if _has_valid_ensembl_bundle(input_dir) &&
-       _has_matching_transcript_query_metadata(input_dir, expected)
-        @info legacy_message input_dir
-        _write_thoraxe_input_state(workdir, input_dir, :done,
-            _thoraxe_input_identity(input_dir, expected); action = :reuse)
         return input_dir
     end
     return nothing

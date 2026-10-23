@@ -125,12 +125,6 @@ function _ensure_seed_blocks_tsv(paths, pid::Real)
     return paths.s_exon_blocks_tsv
 end
 
-function _seed_has_s_exon_annotations(stockholm_path::AbstractString)
-    isfile(stockholm_path) || return false
-    msa = read_file(stockholm_path, Stockholm; keepinserts = true)
-    return has_s_exon_annotations(msa)
-end
-
 function _reference_index(msa::AbstractMultipleSequenceAlignment,
         gene_id::AbstractString,
         transcript_id::AbstractString)
@@ -280,15 +274,13 @@ function _run_kept_thoraxe_pid_msa!(target::ResolvedTarget,
         runner,
         overwrite::Bool,
         thoraxe_fn::Function = ThorAxe.thoraxe)
-    if overwrite || !isfile(path_table) || !_has_phylosofs_outputs(thoraxe_dir)
-        run_root = _pid_sample_run_root(workdir, pid, sample_idx)
-        isdir(run_root) && safe_rm(run_root, workdir)
-        mkpath(dirname(run_root))
-        _with_thoraxe_lock() do
-            thoraxe_fn(
-                input_dir, run_root; identity = Float64(pid), specieslist = specieslist,
-                phylosofs = true, runner = runner)
-        end
+    run_root = _pid_sample_run_root(workdir, pid, sample_idx)
+    isdir(run_root) && safe_rm(run_root, workdir)
+    mkpath(dirname(run_root))
+    _with_thoraxe_lock() do
+        thoraxe_fn(
+            input_dir, run_root; identity = Float64(pid), specieslist = specieslist,
+            phylosofs = true, runner = runner)
     end
     pid_msa,
     _ = assemble_transcript_msa(thoraxe_dir,
@@ -330,15 +322,6 @@ function _run_thoraxe_pid_msa(target::ResolvedTarget,
     paths = _pid_sample_paths(workdir, pid, sample_idx)
     thoraxe_dir = _pid_sample_thoraxe_dir(workdir, pid, sample_idx)
     path_table = joinpath(thoraxe_dir, "path_table.csv")
-    if !overwrite && isfile(paths.fasta_path) && isfile(paths.stockholm_path) &&
-       _seed_has_s_exon_annotations(paths.stockholm_path) &&
-       (!keep_thoraxe_dir || (isfile(path_table) && _has_phylosofs_outputs(thoraxe_dir)))
-        _log_full_pid_msa("Reusing ThorAxe PID MSA.", target, pid, sample_idx,
-            (; fasta_path = paths.fasta_path, stockholm_path = paths.stockholm_path))
-        _ensure_seed_blocks_tsv(paths, pid)
-        return paths.fasta_path, paths.stockholm_path, thoraxe_dir
-    end
-
     mkpath(_candidate_pid_dir(workdir, pid))
     sample_label = "$(format_pid_dir(pid))_sample$(sample_idx)"
     stdout_log = joinpath(_thoraxe_logs_dir(workdir), "$(sample_label)_stdout.log")

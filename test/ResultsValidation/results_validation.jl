@@ -69,6 +69,33 @@
         @test stats_row.query_vs_uniprot_path ==
               joinpath("validation", "pid_10.00", "query_vs_uniprot_alignment.txt")
 
+        original_stats = read(validation.stats_path, String)
+        write(validation.stats_path, replace(original_stats, "seq1" => "seqX"))
+        rebuilt = Iduna.ResultsValidation.validate_results(target, seed, expansion, tmp)
+        @test rebuilt.query_name == "seq1"
+        @test read(rebuilt.stats_path, String) == original_stats
+        @test Iduna.Utils._read_stage_state(dirname(rebuilt.stats_path))["action"] ==
+              "rebuild"
+        write(rebuilt.query_vs_uniprot_path, "")
+        rebuilt = Iduna.ResultsValidation.validate_results(target, seed, expansion, tmp)
+        @test filesize(rebuilt.query_vs_uniprot_path) > 0
+        @test Iduna.Utils._read_stage_state(dirname(rebuilt.stats_path))["action"] ==
+              "rebuild"
+        unchanged = Iduna.ResultsValidation.validate_results(target, seed, expansion, tmp)
+        @test unchanged.query_name == "seq1"
+        @test Iduna.Utils._read_stage_state(dirname(unchanged.stats_path))["action"] ==
+              "reuse"
+
+        paths = Iduna.ResultsValidation._validation_input_paths(target, seed, expansion, tmp)
+        outputs = Iduna.ResultsValidation._validation_outputs(tmp, seed, paths)
+        identity = Iduna.ResultsValidation._validation_identity(target, seed, expansion, paths)
+        write(outputs.query_vs_uniprot_path, "")
+        @test_throws ErrorException Iduna.ResultsValidation._write_validation_state(
+            tmp, seed, :done, identity, outputs; action = :run)
+        write(outputs.stats_path, "query_name\n")
+        @test_throws ErrorException Iduna.ResultsValidation._write_validation_state(
+            tmp, seed, :done, identity, outputs; action = :run)
+
         indel_uniprot = joinpath(tmp, "uniprot_indel.fasta")
         write(indel_uniprot, ">P20963\nACD\n")
         indel_target = Iduna.ResolvedTarget(;

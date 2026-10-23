@@ -41,10 +41,9 @@ function _ensure_cached_thoraxe_input(source_dir::AbstractString,
         ))
     identity = _thoraxe_input_identity(dest, expected)
     cache = _classify_thoraxe_input_stage(workdir, dest, identity; overwrite)
-    reused = _maybe_reuse_thoraxe_input(workdir, dest, identity, expected, cache;
+    reused = _maybe_reuse_thoraxe_input(workdir, dest, identity, cache;
         overwrite,
-        manifest_message = "Reusing manifest-backed ThorAxe transcript_query input.",
-        legacy_message = "Adopting legacy ThorAxe transcript_query input.")
+        manifest_message = "Reusing manifest-backed ThorAxe transcript_query input.")
     reused === nothing || return reused
 
     _warn_stage_cache(cache, dest)
@@ -208,10 +207,9 @@ function _ensure_transcript_query(target::ResolvedTarget, workdir::AbstractStrin
     input_dir = _thoraxe_input_dir(workdir)
     identity = _thoraxe_input_identity(input_dir, metadata)
     cache = _classify_thoraxe_input_stage(workdir, input_dir, identity; overwrite)
-    reused = _maybe_reuse_thoraxe_input(workdir, input_dir, identity, metadata, cache;
+    reused = _maybe_reuse_thoraxe_input(workdir, input_dir, identity, cache;
         overwrite,
-        manifest_message = "Reusing manifest-backed ThorAxe transcript_query input.",
-        legacy_message = "Reusing ThorAxe transcript_query input.")
+        manifest_message = "Reusing manifest-backed ThorAxe transcript_query input.")
     reused === nothing || return reused
 
     _warn_stage_cache(cache, input_dir)

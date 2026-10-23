@@ -61,6 +61,10 @@
         write(abs_seed.stockholm_path, "# STOCKHOLM 1.0\nseed AC\n//\n")
         mkpath(dirname(abs_expansion.match_stockholm))
         write(abs_expansion.match_stockholm, "# STOCKHOLM 1.0\nseed AC\n//\n")
+        for path in (abs_target.uniprot_sequence_path, abs_target.ensembl_protein_sequence_path)
+            mkpath(dirname(path))
+            write(path, ">reference\nAC\n")
+        end
 
         result = Iduna.iduna(;
             id = "Q13148",

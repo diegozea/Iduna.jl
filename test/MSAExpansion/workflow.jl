@@ -68,6 +68,29 @@ completion_kwargs = Dict(completion_log.kwargs)
     "$(transcript_id)_centroids.a3m"))
 success_state = Iduna.MSAExpansion._read_step_state(success.run_dir)
 @test success_state.status == "done"
+# An unannotated seed used to leave an empty GF SExonCodeMap record that MIToS
+# could write but not read. Every final Stockholm must round-trip on its own.
+for stockholm_path in (success.full_stockholm, success.match_stockholm,
+    joinpath(success.run_dir, "centroid_msa", "$(transcript_id)_centroids_full.sto"),
+    joinpath(success.run_dir, "centroid_msa", "$(transcript_id)_centroids_matchonly.sto"))
+    roundtrip = Iduna.MSAExpansion.read_file(
+        stockholm_path, Iduna.MSAExpansion.Stockholm; keepinserts = true)
+    @test Iduna.MSAExpansion.nsequences(roundtrip) == 1
+    @test Iduna.MSAExpansion.ncolumns(roundtrip) == 20
+    @test isempty(Iduna.Utils.s_exon_code_map(roundtrip))
+end
+success_digest = Iduna.Utils._file_sha256(success.full_stockholm)
+success_reuse_logs,
+success_reused = Test.collect_test_logs() do
+    Iduna.MSAExpansion.expand_msa(
+        target, success_seed, tmp; mmseqs_db = success_db, centroids = true,
+        mmseqs_threads = 1)
+end
+@test success_reused.status === :skipped
+@test success_reused.n_hits == success.n_hits
+@test Iduna.Utils._file_sha256(success_reused.full_stockholm) == success_digest
+@test count(log -> log.message == "Reusing cached MSA expansion.", success_reuse_logs) == 1
+@test !any(log -> log.message == "Running MMseqs expansion workflow.", success_reuse_logs)
 
 Iduna.MSAExpansion._write_step_state(legacy_dir, :failed, legacy_identity,
     legacy_outputs; exception = (; type = "ErrorException", message = "failed"))

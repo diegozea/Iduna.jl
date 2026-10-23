@@ -18,7 +18,8 @@ Expand one selected seed MSA against an MMseqs2 database.
 
 - `mmseqs_db::AbstractString`: MMseqs2 database prefix.
 - `overwrite::Bool = false`: reuse package-owned expansion outputs when their
-  run identity still matches. When `true`, Iduna rebuilds those outputs.
+  run identity and required-file digests still match. When `true`, Iduna rebuilds
+  those outputs. Older states without digests are rebuilt on the next run.
 - `match_mode::Integer = 1`: MMseqs2 profile matching mode passed to
   `mmseqs msa2profile --match-mode`.
 - `match_ratio = nothing`: optional MMseqs2 match-ratio setting. When `nothing`,
@@ -65,6 +66,7 @@ function expand_msa(target::ResolvedTarget,
         _write_step_state(ctx.run_dir, :done, ctx.identity, ctx.outputs;
             warnings = cache.cache_warnings,
             action = cache.action)
+        @info "MSA expansion completed." pid=archived.seed_pid n_hits=run_outputs.n_hits n_new_hits=run_outputs.n_new_hits
         return _finished_expansion_result(ctx, archived, run_outputs, workdir)
     catch err
         err isa InterruptException && rethrow()

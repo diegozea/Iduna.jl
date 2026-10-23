@@ -274,6 +274,12 @@ function _write_validation_state(workdir::AbstractString,
         action,
         warnings::AbstractVector{<:AbstractString} = String[],
         exception = nothing)
+    if status === :done
+        _cached_validation_result(outputs, workdir, seed, nothing)
+        outputs.query_vs_uniprot_path === nothing ||
+            filesize(outputs.query_vs_uniprot_path) > 0 ||
+            error("Cannot complete validation with an empty query alignment report.")
+    end
     return _write_stage_state(_validation_dir(workdir, seed);
         stage = "validation",
         stage_key = "validation:$(format_pid_dir(seed.pid))",
@@ -315,7 +321,7 @@ function _cached_validation_result(outputs, workdir::AbstractString, seed::SeedS
         expansion::_MaybeExpansion)
     df = DataFrame(CSV.File(outputs.stats_path))
     isempty(df) && error("Cached validation stats at $(outputs.stats_path) are empty.")
-    row = first(eachrow(df))
+    row = only(eachrow(df))
     # Recreate warnings from saved stats so cached and fresh results report the same status.
     warnings = unique(vcat(
         _cached_validation_warnings(workdir, seed),
