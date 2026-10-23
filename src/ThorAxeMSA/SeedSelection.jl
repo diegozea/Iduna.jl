@@ -1,6 +1,17 @@
 # Seed Selection
 # --------------
 
+function _validate_candidate_scores(df::DataFrame)
+    :epli in propertynames(df) || return nothing
+    for row in eachrow(df)
+        value = row.epli
+        ismissing(value) && continue
+        value isa Real && isfinite(Float64(value)) ||
+            throw(ArgumentError("PID $(row.pid) has an invalid EPLI score: $(value). Expected a finite value."))
+    end
+    return nothing
+end
+
 """
     select_best_seed(summary_path) -> SeedSelection
 
@@ -8,7 +19,7 @@ Choose the best eligible percent identity (PID) candidate from a ThorAxe
 candidate summary table.
 
 Candidates are ranked by EPLI, candidate MSA size, and then the original PID
-order.
+order. Non-finite scores in eligible candidates raise `ArgumentError`.
 
 # Arguments
 
@@ -21,6 +32,7 @@ function select_best_seed(summary_path::AbstractString)
         df = df[[!ismissing(value) && _truthy(value) for value in df.eligible], :]
     end
     :epli in propertynames(df) || error("Candidate summary has no epli column.")
+    _validate_candidate_scores(df)
     df = df[[!ismissing(value) for value in df.epli], :]
     isempty(df) && error("No eligible PID candidates are available for seed selection.")
     df.__row_order = 1:nrow(df)
@@ -74,8 +86,13 @@ end
 function _selected_candidate_seeds(summary_path::AbstractString)
     df = _candidate_summary_dataframe(summary_path)
     :selected in propertynames(df) || return [select_best_seed(summary_path)]
+    if :eligible in propertynames(df)
+        _validate_candidate_scores(df[[!ismissing(value) && _truthy(value)
+                                       for value in df.eligible], :])
+    end
     selected = df[[!ismissing(value) && _truthy(value) for value in df.selected], :]
     isempty(selected) && return SeedSelection[]
+    _validate_candidate_scores(selected)
     return [_row_seed(row, summary_path) for row in eachrow(selected)]
 end
 
@@ -84,6 +101,7 @@ function _eligible_candidate_seeds(summary_path::AbstractString)
     :eligible in propertynames(df) || error("Candidate summary has no eligible column.")
     eligible = df[[!ismissing(value) && _truthy(value) for value in df.eligible], :]
     isempty(eligible) && error("No eligible PID candidates are available.")
+    _validate_candidate_scores(eligible)
     sort!(eligible, [:pid_order])
     return [_row_seed(row, summary_path) for row in eachrow(eligible)]
 end

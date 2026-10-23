@@ -1,3 +1,53 @@
+@testset "Finite seed-selection scores" begin
+    mktempdir() do tmp
+        summary = joinpath(tmp, "candidate_summary.csv")
+        header = "pid,pid_order,eligible,selected,epli,stockholm_path,fasta_path\n"
+        for value in ("NaN", "Inf", "-Inf", "1e1000")
+            write(summary,
+                header *
+                "10,1,true,false,90,pid10.sto,pid10.fa\n" *
+                "20,2,true,true,$(value),pid20.sto,pid20.fa\n")
+            @test_throws ArgumentError Iduna.ThorAxeMSA.select_best_seed(summary)
+            @test_throws ArgumentError Iduna.ThorAxeMSA._selected_candidate_seeds(summary)
+            @test_throws ArgumentError Iduna.ThorAxeMSA._eligible_candidate_seeds(summary)
+        end
+        write(summary,
+            header *
+            "10,1,true,true,90,pid10.sto,pid10.fa\n" *
+            "20,2,true,false,NaN,pid20.sto,pid20.fa\n")
+        @test_throws ArgumentError Iduna.ThorAxeMSA._selected_candidate_seeds(summary)
+
+        write(summary,
+            "pid,pid_order,selected,epli,stockholm_path,fasta_path\n" *
+            "10,1,true,NaN,pid10.sto,pid10.fa\n")
+        @test_throws ArgumentError Iduna.ThorAxeMSA._selected_candidate_seeds(summary)
+
+        write(summary,
+            "pid,pid_order,eligible,selected,stockholm_path,fasta_path\n" *
+            "10,1,true,true,pid10.sto,pid10.fa\n")
+        @test ismissing(only(Iduna.ThorAxeMSA._eligible_candidate_seeds(summary)).epli)
+        @test ismissing(only(Iduna.ThorAxeMSA._selected_candidate_seeds(summary)).epli)
+
+        write(summary, header *
+                       "10,1,true,true,,pid10.sto,pid10.fa\n" *
+                       "20,2,true,true,,pid20.sto,pid20.fa\n")
+        @test all(ismissing(seed.epli)
+        for seed in Iduna.ThorAxeMSA._eligible_candidate_seeds(summary))
+        @test all(ismissing(seed.epli)
+        for seed in Iduna.ThorAxeMSA._selected_candidate_seeds(summary))
+
+        write(summary,
+            header *
+            "10,1,true,false,-2,pid10.sto,pid10.fa\n" *
+            "20,2,true,true,150,pid20.sto,pid20.fa\n" *
+            "30,3,false,false,NaN,pid30.sto,pid30.fa\n")
+        @test Iduna.ThorAxeMSA.select_best_seed(summary).epli == 150.0
+        @test only(Iduna.ThorAxeMSA._selected_candidate_seeds(summary)).epli == 150.0
+        @test [seed.epli for seed in Iduna.ThorAxeMSA._eligible_candidate_seeds(summary)] ==
+              [-2.0, 150.0]
+    end
+end
+
 mktempdir() do tmp
     thoraxe = joinpath(tmp, "thoraxe")
     msa_dir = joinpath(thoraxe, "msa")
