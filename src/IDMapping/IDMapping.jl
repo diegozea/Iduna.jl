@@ -371,6 +371,14 @@ function _resolve_uniprot_target(input_id::AbstractString,
               String(ensembl_protein_id)
     protein_path = protein === nothing ? nothing :
                    joinpath(sequence_dir, "ensembl_proteins", "$(protein).fasta")
+    resolved_species = species === nothing ? chosen.species : String(species)
+    protein_changed = protein != chosen.ensembl_protein_id
+    mapping_changed = (protein, gene, resolved_species) !=
+                      (chosen.ensembl_protein_id, chosen.ensembl_gene_id, chosen.species)
+    if mapping_changed
+        push!(warnings,
+            "Identifier or species override was not mapping-validated; affected validation flags are unset.")
+    end
     return ResolvedTarget(;
         input_id = String(input_id),
         input_kind = :uniprot,
@@ -378,11 +386,11 @@ function _resolve_uniprot_target(input_id::AbstractString,
         ensembl_gene_id = String(gene),
         transcript_id = chosen.transcript_id,
         ensembl_protein_id = protein,
-        species = species === nothing ? chosen.species : String(species),
+        species = resolved_species,
         uniprot_sequence_path = uniprot_path,
         ensembl_protein_sequence_path = protein_path,
-        sequence_validated = chosen.sequence_validated,
-        mapping_confirmed = chosen.mapping_confirmed,
+        sequence_validated = protein_changed ? nothing : chosen.sequence_validated,
+        mapping_confirmed = mapping_changed ? nothing : chosen.mapping_confirmed,
         workdir = String(workdir),
         warnings
     )

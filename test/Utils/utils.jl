@@ -131,7 +131,12 @@ import URIs
 
     indel = Iduna.Utils.protein_alignment_stats("ACDEF", "ACDE")
     @test !indel.identical
-    @test indel.insertions + indel.deletions == 1
+    @test (indel.insertions, indel.deletions) == (1, 0)
+    for (query, reference, expected) in (("ACDE", "ACDEF", (0, 1)),
+        ("", "ACDE", (0, 4)), ("ACDE", "", (4, 0)), ("", "", (0, 0)))
+        directional = Iduna.Utils.protein_alignment_stats(query, reference)
+        @test (directional.insertions, directional.deletions) == expected
+    end
 
     mktempdir() do tmp
         sto = joinpath(tmp, "names.sto")

@@ -218,7 +218,7 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
             stage_hashes = [stage.identity_hash
                             for stage in current_stages
                             if stage.identity_hash !== nothing &&
-                               stage.stage_key != "result"])
+                stage.stage_key != "result"])
         Utils._write_stage_state(Utils._pipeline_stage_dir(root, "result");
             stage = "result",
             stage_key = "result",
@@ -488,6 +488,7 @@ function _target_identity(primary::AbstractString;
         disambiguating_transcript,
         species)
     return (;
+        target_contract = 2,
         input_id = String(primary),
         input_kind = String(Utils.id_kind(primary)),
         uniprot_id = supplied_uniprot === nothing ? nothing : String(supplied_uniprot),
@@ -914,8 +915,7 @@ function _load_result_expansions(summary, target::Utils.ResolvedTarget,
     expansions = Union{Missing, Utils.ExpansionResult}[_load_result_expansion_at_index(
                                                            expansion_data, target,
                                                            seed, workdir, index)
-                                                       for (index, seed) in
-                                                           pairs(thoraxe.seeds)]
+                                                       for (index, seed) in pairs(thoraxe.seeds)]
     _warn_extra_expansion_summaries(expansion_data, thoraxe.seeds, workdir)
     return expansions
 end
