@@ -1,6 +1,19 @@
-const _ALIGNMENT_CACHE_SCHEMA_VERSION = 3
+const _ALIGNMENT_CACHE_SCHEMA_VERSION = 4
 
-_aligner_cache_label(fn) = string(typeof(fn), "|", hash(fn))
+function _aligner_provenance(aligner_cache_id::Union{Nothing, AbstractString};
+        implementation_fn::Function = _implementation_identity)
+    if aligner_cache_id === nothing
+        @info "EPLI alignment reuse disabled: no aligner_cache_id was supplied."
+        return nothing
+    end
+    isempty(strip(aligner_cache_id)) &&
+        throw(ArgumentError("aligner_cache_id must be a nonblank string or nothing."))
+    implementation = implementation_fn()
+    implementation === nothing && return nothing
+    # Normalize once so cached JSON and the in-memory record have the same types.
+    return (; aligner_cache_id = String(aligner_cache_id),
+        implementation = JSON.parse(JSON.json(implementation)))
+end
 
 function _alignment_result_path(result, fallback::AbstractString)
     result === nothing && return fallback
@@ -15,15 +28,16 @@ function _alignment_cache_path(output_fasta::AbstractString)
     string(output_fasta, ".iduna_cache.json")
 end
 
-function _alignment_cache_identity(aligner_fn::Function,
-        input_fasta::AbstractString,
+function _alignment_cache_identity(input_fasta::AbstractString,
         run_label::AbstractString,
-        aligner_args::Cmd)
-    # The cache key includes the input file and aligner settings that affect output.
+        aligner_args::Cmd,
+        provenance)
+    provenance === nothing && return nothing
     return Dict(
         "schema_version" => _ALIGNMENT_CACHE_SCHEMA_VERSION,
         "input_sha256" => _file_sha256(input_fasta),
-        "aligner" => _aligner_cache_label(aligner_fn),
+        "aligner_cache_id" => provenance.aligner_cache_id,
+        "implementation" => provenance.implementation,
         "aligner_args" => string(aligner_args),
         "run_label" => String(run_label))
 end
@@ -51,7 +65,8 @@ end
 function _cached_alignment_path(output_fasta::AbstractString, identity::AbstractDict)
     state = _read_alignment_cache(output_fasta)
     state isa AbstractDict || return nothing
-    for key in ("schema_version", "input_sha256", "aligner", "aligner_args", "run_label")
+    for key in ("schema_version", "input_sha256", "aligner_cache_id", "implementation",
+        "aligner_args", "run_label")
         value = get(state, key, nothing)
         value isa typeof(identity[key]) && value == identity[key] || return nothing
     end
@@ -120,9 +135,10 @@ function _run_aligner(aligner_fn::Function,
         logs_dir::Union{Nothing, AbstractString},
         run_label::AbstractString,
         overwrite::Bool,
-        aligner_args::Cmd)
-    identity = _alignment_cache_identity(aligner_fn, input_fasta, run_label, aligner_args)
-    if !overwrite
+        aligner_args::Cmd,
+        aligner_provenance = nothing)
+    identity = _alignment_cache_identity(input_fasta, run_label, aligner_args, aligner_provenance)
+    if !overwrite && identity !== nothing
         cached_path = _cached_alignment_path(output_fasta, identity)
         cached_path === nothing || return cached_path
     end
@@ -134,6 +150,6 @@ function _run_aligner(aligner_fn::Function,
     path = _alignment_result_path(result, output_fasta)
     isfile(path) || error("Aligner did not write the expected MSA FASTA at $(path).")
     _validate_alignment_output(input_records, path)
-    _write_alignment_cache(output_fasta, path, identity)
+    identity === nothing || _write_alignment_cache(output_fasta, path, identity)
     return path
 end

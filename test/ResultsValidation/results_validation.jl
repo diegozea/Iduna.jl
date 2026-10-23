@@ -295,3 +295,41 @@ end
         @test Iduna.Utils._read_stage_state(stage_dir)["action"] == "rebuild"
     end
 end
+
+@testset "validation provenance controls reuse" begin
+    mktempdir() do root
+        path = joinpath(root, "seed.sto")
+        write(path, "# STOCKHOLM 1.0\nquery ACDE\nother ACDF\n//\n")
+        seed = Iduna.SeedSelection(; pid = 10.0, epli = 1.0,
+            stockholm_path = path, summary_path = joinpath(root, "summary.csv"))
+        target = Iduna.ResolvedTarget(;
+            input_id = "query", input_kind = :ensembl_transcript,
+            ensembl_gene_id = "query", transcript_id = "query")
+        first_result = Iduna.ResultsValidation.validate_results(target, seed, nothing, root)
+        stage_dir = dirname(first_result.stats_path)
+        state_path = Iduna.Utils._stage_state_path(stage_dir)
+        state = JSON.parse(read(state_path, String))
+        @test state["identity"]["implementation"]["source_sha256"] !== nothing
+        state["identity"]["implementation"]["source_sha256"] = "old-implementation"
+        state["identity_hash"] = Iduna.Utils._identity_hash(state["identity"])
+        Iduna.Utils.write_json(state_path, state)
+        Iduna.ResultsValidation.validate_results(target, seed, nothing, root)
+        @test Iduna.Utils._read_stage_state(stage_dir)["action"] == "rebuild"
+        Iduna.ResultsValidation.validate_results(target, seed, nothing, root)
+        @test Iduna.Utils._read_stage_state(stage_dir)["action"] == "reuse"
+        previous_project = Base.active_project()
+        try
+            Iduna.Utils.Pkg.activate(joinpath(root, "empty-project"); io = devnull)
+            for _ in 1:2
+                Iduna.ResultsValidation.validate_results(target, seed, nothing, root)
+                state = Iduna.Utils._read_stage_state(stage_dir)
+                @test state["action"] != "reuse"
+                @test state["identity"]["implementation"] === nothing
+            end
+        finally
+            Iduna.Utils.Pkg.activate(dirname(previous_project); io = devnull)
+        end
+        Iduna.ResultsValidation.validate_results(target, seed, nothing, root)
+        @test Iduna.Utils._read_stage_state(stage_dir)["action"] == "rebuild"
+    end
+end

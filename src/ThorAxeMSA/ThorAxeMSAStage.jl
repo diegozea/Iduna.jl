@@ -366,7 +366,12 @@ Run or reuse the ThorAxe input and MSA stages for one resolved target.
   and reuse. When `nothing`, Iduna runs transcript-query to build the input
   bundle.
 - `overwrite::Bool = false`: reuse package-owned stage outputs when their run
-  identity still matches. When `true`, Iduna rebuilds those outputs.
+  identity and required artifact digests still match. Iduna fingerprints the input
+  bundle, reference and species-list files, loaded implementation, and actual tools.
+  Unknown tool identity disables affected reuse; an explicitly supplied input bundle
+  can still be copied and reused without Python. Legacy caches rebuild once.
+  Restart Julia after changing source or Julia dependencies. Keep external tools and
+  their dependencies stable during each operation. When `true`, Iduna rebuilds outputs.
 - `orthology::AbstractString = "1:1"`: Ensembl homology relationship filter.
   Accepted values are `"1:1"` for one-to-one orthologs, `"1:n"` for one-to-one
   and one-to-many orthologs, and `"m:n"` for one-to-one, one-to-many, and
@@ -403,11 +408,16 @@ function build_thoraxe_msa(target::ResolvedTarget, workdir::AbstractString;
         pid_sample_count::Integer = 45,
         pid_sample_fraction::Real = 0.8,
         pid_sample_seed::Union{Nothing, Integer} = nothing,
-        sampling_strategy::Symbol = :common)
+        sampling_strategy::Symbol = :common,
+        _provenance = nothing,
+        _stage_runner::Function = _run_thoraxe_msa_stage!)
     pid_thresholds = _validate_pid_thresholds(pid_thresholds)
     _orthology_relationships(orthology)
     _validate_pid_sampling_options(pid_sample_count, pid_sample_fraction)
     sampling_strategy = _validate_sampling_strategy(sampling_strategy)
+    # Probe actual tools once per operation, never once per PID or sample.
+    provenance = _provenance === nothing ?
+                 _thoraxe_stage_provenance(pid_sample_count) : _provenance
     sample_seed = pid_sample_seed === nothing ? UInt64(rand(UInt32)) :
                   _normalize_pid_sample_seed(pid_sample_seed)
     # Species filters run only when transcript_query will create new input.
@@ -431,7 +441,9 @@ function build_thoraxe_msa(target::ResolvedTarget, workdir::AbstractString;
         specieslist = filters.effective_specieslist, overwrite,
         cached_input_dir = cached_thoraxe_input_dir,
         max_retries = transcript_query_retries,
-        orthology)
+        orthology,
+        _implementation = provenance.implementation,
+        _tool_identity = cached_thoraxe_input_dir === nothing ? provenance.python : nothing)
     summary_path = joinpath(_thoraxe_msa_dir(workdir), "candidate_summary.csv")
     metadata = _candidate_run_metadata(input_dir, target, pid_thresholds;
         sample_count = Int(pid_sample_count),
@@ -442,7 +454,9 @@ function build_thoraxe_msa(target::ResolvedTarget, workdir::AbstractString;
         effective_specieslist = filters.effective_specieslist,
         orthology,
         specieslist_filter,
-        biomart_datasets_filter)
+        biomart_datasets_filter,
+        provenance,
+        workdir)
     stage_identity = _thoraxe_msa_identity(metadata, workdir)
     stage_cache = _thoraxe_msa_stage_cache(workdir, summary_path, metadata,
         stage_identity; overwrite)
@@ -456,7 +470,7 @@ function build_thoraxe_msa(target::ResolvedTarget, workdir::AbstractString;
 
     prepared = _prepare_thoraxe_msa_stage!(workdir, summary_path, stage_identity,
         stage_cache; overwrite)
-    return _run_thoraxe_msa_stage_with_failure_state!(_run_thoraxe_msa_stage!,
+    return _run_thoraxe_msa_stage_with_failure_state!(_stage_runner,
         target, input_dir, workdir, summary_path, pid_thresholds,
         filters.effective_specieslist, metadata, stage_identity, filters, prepared;
         pid_sample_count,

@@ -6,19 +6,25 @@ annotations used by Iduna.
 """
 module Utils
 
-using BioAlignments: AffineGapScoreModel, BLOSUM62, GlobalAlignment, alignment,
+using BioAlignments: BioAlignments, AffineGapScoreModel, BLOSUM62, GlobalAlignment,
+                     alignment,
                      count_deletions, count_insertions, count_mismatches, pairalign
-using BioSequences: LongAA
+using BioSequences: BioSequences, LongAA
 import CodecZlib
+import CSV
+import DataFrames
+import MIToS
+import Statistics
+import Pkg
 using Dates: UTC, now
 import HTTP
 import JSON
-using Random: MersenneTwister
+using Random: Random, MersenneTwister
 import SHA
 using MIToS.MSA: AbstractMultipleSequenceAlignment, getannotcolumn, getannotfile,
                  ncolumns, sequencenames, setannotcolumn!, setannotfile!
 using Printf: @sprintf
-using StatsBase: sample
+using StatsBase: StatsBase, sample
 
 export DEFAULT_PID_THRESHOLDS,
        ExpansionResult,
@@ -68,5 +74,9 @@ include("StageState.jl")
 include("SExonAnnotations.jl")
 include("ExternalDatabases.jl")
 include("ResultSummaries.jl")
+
+function __init__()
+    _IMPLEMENTATION_SOURCE[] = nothing
+end
 
 end

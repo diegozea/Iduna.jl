@@ -20,9 +20,12 @@ uses relative paths for artifacts under `workdir`.
 For an Ensembl transcript input, Iduna resolves the parent Ensembl gene ID and
 species needed by ThorAxe. It does not require UniProt mapping on that path.
 
-Rerunning with `overwrite=false` reuses matching completed stages. This includes
-copied or previously generated `transcript_query` bundles. Iduna rebuilds a
-stage when it is missing, stale, failed, or incomplete.
+Rerunning with `overwrite=false` reuses completed stages whose input, implementation,
+tool identity and saved output contents still match. Unknown provenance disables the
+affected reuse. This includes copied or previously generated `transcript_query`
+bundles. Expansion additionally needs an immutable database manifest passed as
+`mmseqs_db_manifest` or `--mmseqs-db-manifest`; it still runs without one.
+See [Output files](output.md) for migration and snapshot preparation.
 
 ## Julia API
 

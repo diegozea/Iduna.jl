@@ -1,5 +1,119 @@
 using MIToS.MSA: AnnotatedSequence
 
+alignment_test_provenance = Iduna.EPLI._aligner_provenance("test-copy-aligner-v1";
+    implementation_fn = () -> (; source_sha256 = "fixed-test-source"))
+
+@testset "Explicit EPLI alignment provenance" begin
+    @test_logs (:info, "EPLI alignment reuse disabled: no aligner_cache_id was supplied.") begin
+        @test Iduna.EPLI._aligner_provenance(nothing;
+            implementation_fn = () -> error("must not inspect untrusted callbacks")) ===
+              nothing
+    end
+    unknown = Iduna.EPLI._aligner_provenance("callback-v1";
+        implementation_fn = () -> nothing)
+    @test unknown === nothing
+    mktempdir() do tmp
+        input = joinpath(tmp, "input.fasta")
+        write(input, ">a\nACD\n>b\nACE\n>c\nACF\n")
+        workdir = joinpath(tmp, "work")
+        calls = Ref(0)
+        padding = Ref("")
+        aligner = function (source, destination; kwargs...)
+            calls[] += 1
+            open(destination, "w") do io
+                for line in eachline(source)
+                    println(io, startswith(line, '>') ? line : line * padding[])
+                end
+            end
+            return destination
+        end
+        score_fn = (reference, sample; kwargs...) -> (; raw_score = 5.0)
+        run_epli = (;
+            aligner_cache_id = nothing, sample_seed = 12) -> Iduna.EPLI.epli_score(
+            input, workdir, aligner; aligner_cache_id, score_fn,
+            normalization_fn = Iduna.EPLI.no_normalization, sample_count = 1,
+            sample_fraction = 0.5, sample_seed, progress_enabled = false)
+        for invalid in ("", " \t\n")
+            @test_throws ArgumentError run_epli(; aligner_cache_id = invalid)
+            @test !isdir(workdir)
+            @test calls[] == 0
+        end
+        first_result = @test_logs (
+            :info, "EPLI alignment reuse disabled: no aligner_cache_id was supplied.") run_epli()
+        subset_path = joinpath(workdir, "samples", "sequence_subset_001_sequences.fasta")
+        subset = read(subset_path, String)
+        padding[] = "-"
+        second_result = @test_logs (
+            :info, "EPLI alignment reuse disabled: no aligner_cache_id was supplied.") run_epli()
+        @test calls[] == 4
+        @test first_result.epli == second_result.epli == 5.0
+        @test read(subset_path, String) == subset
+        @test occursin("ACD-", read(second_result.reference_msa_fasta, String))
+        marker = Iduna.EPLI._alignment_cache_path(second_result.reference_msa_fasta)
+        sample_marker = Iduna.EPLI._alignment_cache_path(
+            joinpath(workdir, "samples", "sequence_subset_001_msa.fasta"))
+        @test !isfile(marker)
+        @test !isfile(sample_marker)
+
+        run_epli(; aligner_cache_id = "callback-v1")
+        @test calls[] == 6
+        state = Iduna.EPLI._read_alignment_cache(second_result.reference_msa_fasta)
+        @test state["aligner_cache_id"] == "callback-v1"
+        @test state["implementation"]["source_sha256"] isa String
+        @test !haskey(state, "aligner")
+        run_epli(; aligner_cache_id = "callback-v1")
+        @test calls[] == 6
+        run_epli(; aligner_cache_id = "callback-v2")
+        @test calls[] == 8
+        @test_logs (
+            :info, "EPLI alignment reuse disabled: no aligner_cache_id was supplied.") run_epli()
+        @test calls[] == 10
+        @test !isfile(marker)
+        @test !isfile(sample_marker)
+
+        generated = run_epli(; aligner_cache_id = "callback-v2", sample_seed = nothing)
+        generated_subset = read(subset_path, String)
+        before_replay = calls[]
+        replayed = run_epli(; aligner_cache_id = "callback-v2",
+            sample_seed = generated.sample_seed)
+        @test calls[] == before_replay
+        @test replayed.sample_seed == generated.sample_seed
+        @test read(subset_path, String) == generated_subset
+
+        output = joinpath(tmp, "standalone.fasta")
+        run_alignment = provenance -> Iduna.EPLI._run_aligner(aligner, input, output;
+            logs_dir = nothing, run_label = "source-change", overwrite = false,
+            aligner_args = Cmd(String[]), aligner_provenance = provenance)
+        source_root = mkpath(joinpath(tmp, "implementation"))
+        write(joinpath(source_root, "Project.toml"), "name = \"Fixture\"\n")
+        source_file = joinpath(mkpath(joinpath(source_root, "src")), "Fixture.jl")
+        write(source_file, "const setting = 1\n")
+        implementation_fn = () -> (;
+            source_sha256 = Iduna.Utils._source_fingerprint(source_root))
+        provenance = Iduna.EPLI._aligner_provenance("callback-v1"; implementation_fn)
+        before = calls[]
+        @test run_alignment(provenance) == output
+        @test run_alignment(provenance) == output
+        @test calls[] == before + 1
+        write(source_file, "const setting = 2\n")
+        changed = Iduna.EPLI._aligner_provenance("callback-v1"; implementation_fn)
+        @test changed != provenance
+        @test run_alignment(changed) == output
+        @test calls[] == before + 2
+        @test run_alignment(unknown) == output
+        @test run_alignment(unknown) == output
+        @test calls[] == before + 4
+        @test !isfile(Iduna.EPLI._alignment_cache_path(output))
+
+        run_alignment(provenance)
+        failing_aligner = (source, destination; kwargs...) -> error("callback failed")
+        @test_throws ErrorException Iduna.EPLI._run_aligner(failing_aligner, input, output;
+            logs_dir = nothing, run_label = "source-change", overwrite = false,
+            aligner_args = Cmd(String[]))
+        @test !isfile(Iduna.EPLI._alignment_cache_path(output))
+    end
+end
+
 @testset "Non-finite sample and reference scores" begin
     mktempdir() do tmp
         input = joinpath(tmp, "input.fasta")
@@ -375,6 +489,7 @@ mktempdir() do tmp
         label = "sample") -> (; raw_score = 1.0)
     normalization_fn = (score; reference_score = nothing) -> score.raw_score
     Iduna.EPLI.epli_score(input, workdir, cached_aligner;
+        aligner_cache_id = "copy-aligner-v1",
         score_fn,
         normalization_fn,
         sample_count = 1,
@@ -384,6 +499,7 @@ mktempdir() do tmp
     @test calls == ["full", "sequence_subset_001"]
 
     cached = Iduna.EPLI.epli_score(input, workdir, cached_aligner;
+        aligner_cache_id = "copy-aligner-v1",
         score_fn,
         normalization_fn,
         sample_count = 1,
@@ -394,6 +510,7 @@ mktempdir() do tmp
     @test calls == ["full", "sequence_subset_001"]
 
     Iduna.EPLI.epli_score(input, workdir, cached_aligner;
+        aligner_cache_id = "copy-aligner-v1",
         score_fn,
         normalization_fn,
         sample_count = 1,
@@ -403,6 +520,7 @@ mktempdir() do tmp
     @test calls == ["full", "sequence_subset_001", "sequence_subset_001"]
 
     arg_result = Iduna.EPLI.epli_score(input, workdir, cached_aligner;
+        aligner_cache_id = "copy-aligner-v1",
         score_fn,
         normalization_fn,
         sample_count = 1,
@@ -415,6 +533,7 @@ mktempdir() do tmp
         "full", "sequence_subset_001"]
 
     Iduna.EPLI.epli_score(input, workdir, cached_aligner;
+        aligner_cache_id = "copy-aligner-v1",
         score_fn,
         normalization_fn,
         sample_count = 1,
@@ -426,6 +545,7 @@ mktempdir() do tmp
         "full", "sequence_subset_001"]
 
     Iduna.EPLI.epli_score(input, workdir, cached_aligner;
+        aligner_cache_id = "copy-aligner-v1",
         score_fn,
         normalization_fn,
         sample_count = 1,
@@ -444,6 +564,7 @@ mktempdir() do tmp
             logs_dir, run_label, aligner_args)
     end
     Iduna.EPLI.epli_score(input, workdir, changed_aligner;
+        aligner_cache_id = "changed-aligner-v2",
         score_fn,
         normalization_fn,
         sample_count = 1,
@@ -502,7 +623,8 @@ end
         end
         run_cached = (; overwrite = false) -> Iduna.EPLI._run_aligner(
             aligner, input, output; logs_dir = nothing, run_label = "integrity",
-            overwrite, aligner_args = Cmd(String[]))
+            overwrite, aligner_args = Cmd(String[]),
+            aligner_provenance = alignment_test_provenance)
         @test run_cached() == output
         @test run_cached() == output
         @test calls[] == 1
@@ -521,7 +643,11 @@ end
         cache_path = Iduna.EPLI._alignment_cache_path(output)
         for change in (
             state -> delete!(state, "schema_version"),
-            state -> (state["schema_version"] = 3.0),
+            state -> (state["schema_version"] = 4.0),
+            state -> (state["schema_version"] = 3),
+            state -> (state["implementation"] = nothing),
+            state -> (state["implementation"] = "unknown"),
+            state -> delete!(state, "aligner_cache_id"),
             state -> delete!(state, "output_sha256"),
             state -> (state["output_sha256"] = [1, 2]),
             state -> (state["alignment_path"] = "missing.fasta"),
@@ -595,7 +721,8 @@ end
         for _ in 1:2
             @test Iduna.EPLI._run_aligner(alternate_aligner, input, output;
                 logs_dir = nothing, run_label = "alternate", overwrite = false,
-                aligner_args = Cmd(String[])) == alternate
+                aligner_args = Cmd(String[]),
+                aligner_provenance = alignment_test_provenance) == alternate
         end
         @test calls[] == 1
         @test !isfile(output)
@@ -624,14 +751,16 @@ end
             return destination
         end
         Iduna.EPLI._run_aligner(aligner, input, output; logs_dir = nothing,
-            run_label = "movable", overwrite = false, aligner_args = Cmd(String[]))
+            run_label = "movable", overwrite = false, aligner_args = Cmd(String[]),
+            aligner_provenance = alignment_test_provenance)
         moved = joinpath(tmp, "after")
         mv(workdir, moved)
         moved_output = joinpath(moved, "alignment.fasta")
         @test Iduna.EPLI._run_aligner(
             aligner, joinpath(moved, "input.fasta"), moved_output;
             logs_dir = nothing, run_label = "movable", overwrite = false,
-            aligner_args = Cmd(String[])) == moved_output
+            aligner_args = Cmd(String[]),
+            aligner_provenance = alignment_test_provenance) == moved_output
         @test calls[] == 1
     end
 end
@@ -660,7 +789,8 @@ end
             end
             run_cached = () -> Iduna.EPLI._run_aligner(aligner, input, output;
                 logs_dir = nothing, run_label = "unreadable", overwrite = false,
-                aligner_args = Cmd(String[]))
+                aligner_args = Cmd(String[]),
+                aligner_provenance = alignment_test_provenance)
             @test run_cached() == output
             @test calls[] == 1
             original_mode = stat(output).mode & 0o777

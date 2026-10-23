@@ -1,6 +1,31 @@
+# Cached-path fixtures declare every component; only the real-tool fixtures below
+# construct a usable MMseqs database. Corruption tests deliberately force failure.
+function write_test_mmseqs_manifest(db; snapshot_id = "test-snapshot")
+    manifest = string(db, ".snapshot.json")
+    prefix = basename(db)
+    files = filter(readdir(dirname(db))) do name
+        (name == prefix || startswith(name, prefix * ".") ||
+         startswith(name, prefix * "_")) &&
+            isfile(joinpath(dirname(db), name)) && name != basename(manifest)
+    end
+    Iduna.Utils.write_json(manifest,
+        (;
+            schema_version = 1, immutable = true, snapshot_id,
+            components = Dict(name => Iduna.Utils._file_sha256(joinpath(dirname(db), name))
+            for name in files)))
+    return manifest
+end
+
+for suffix in ("", "_seq", "_aln", "_h", "_seq_h"), tail in ("", ".dbtype", ".index")
+
+    path = string(db, suffix, tail)
+    isfile(path) || write(path, "fixture\n")
+end
+db_manifest = write_test_mmseqs_manifest(db)
 
 @test_throws ErrorException Iduna.MSAExpansion.expand_msa(
-    target, seed, joinpath(tmp, "invalid_symfrac"); mmseqs_db = db,
+    target, seed, joinpath(tmp, "invalid_symfrac");
+    mmseqs_db = db, mmseqs_db_manifest = db_manifest,
     hmmbuild_symfrac = 1.1)
 @test !isdir(joinpath(tmp, "invalid_symfrac", "expansion"))
 
@@ -66,6 +91,7 @@ outputs = write_outputs(
     Iduna.MSAExpansion._expansion_output_paths(run_dir, transcript_id))
 identity = Iduna.MSAExpansion._expansion_identity(
     target, seed, seed_sto, nothing, db;
+    mmseqs_db_manifest = db_manifest, mmseqs_threads = 1,
     match_mode = 1,
     match_ratio = nothing,
     hmmbuild_symfrac = 0.0,
@@ -79,18 +105,92 @@ state = Iduna.MSAExpansion._read_step_state(run_dir)
       "state file disappeared while reading"
 hits_fasta = outputs.hits_fasta
 @test_throws MethodError Iduna.MSAExpansion.expand_msa(
-    target, seed, tmp; mmseqs_db = db, threads = 1)
+    target, seed, tmp; mmseqs_db = db, mmseqs_db_manifest = db_manifest, threads = 1)
 
 cached = @test_logs (:info, r"Reusing cached MSA expansion") match_mode=:any Iduna.MSAExpansion.expand_msa(
-    target, seed, tmp; mmseqs_db = db, mmseqs_threads = 1)
-cached_with_new_mmseqs_threads = Iduna.MSAExpansion.expand_msa(
-    target, seed, tmp; mmseqs_db = db, mmseqs_threads = 8)
+    target, seed, tmp; mmseqs_db = db, mmseqs_db_manifest = db_manifest, mmseqs_threads = 1)
+changed_threads_identity = Iduna.MSAExpansion._expansion_identity(
+    target, seed, seed_sto, nothing, db;
+    match_mode = 1, match_ratio = nothing, hmmbuild_symfrac = 0.0,
+    centroids = false, mmseqs_db_manifest = db_manifest, mmseqs_threads = 8)
+changed_threads = Iduna.MSAExpansion._classify_step_state(
+    run_dir, changed_threads_identity, outputs)
 hit_counts = Iduna.MSAExpansion._cached_hit_counts(hits_fasta, Set(["seed"]))
 @test cached.status === :skipped
-@test cached_with_new_mmseqs_threads.status === :skipped
+@test changed_threads.reusable === false
+@test changed_threads.status === :stale
 @test cached.n_hits == hit_counts.n_hits
 @test cached.n_hits == 3
 @test cached.n_new_hits == 2
+
+@testset "Expansion provenance must be known and unchanged" begin
+    @test identity.implementation !== nothing
+    @test identity.tools.mmseqs !== nothing
+    @test identity.tools.hmmer !== nothing
+    @test Set(keys(identity.tools.hmmer.executables)) ==
+          Set(["hmmbuild", "hmmalign", "esl_alimask"])
+    @test identity.expansion.mmseqs_threads == 1
+    @test Set(keys(identity.expansion.database_snapshot.components)) ==
+          Set(basename(db) * suffix * tail
+    for suffix in ("", "_seq", "_aln", "_h", "_seq_h")
+    for tail in ("", ".dbtype", ".index"))
+
+    # A different source/tool can keep all scientific options and output bytes equal.
+    for changed in (
+        merge(identity,
+        (;
+            implementation = merge(identity.implementation,
+            (; source_sha256 = repeat("0", 64))))),
+        merge(identity,
+        (;
+            tools = merge(identity.tools,
+            (; mmseqs = merge(identity.tools.mmseqs, (; version = "different")))))),
+        merge(identity,
+        (;
+            tools = merge(identity.tools,
+            (; hmmer = merge(identity.tools.hmmer, (; artifact_tree = repeat("0", 40))))))))
+        @test !Iduna.MSAExpansion._classify_step_state(run_dir, changed, outputs).reusable
+    end
+
+    # Matching unknown identities must never certify each other.
+    unknown_dir = joinpath(tmp, "unknown_provenance")
+    unknown_outputs = write_outputs(
+        Iduna.MSAExpansion._expansion_output_paths(unknown_dir, transcript_id))
+    for unknown in (
+        merge(identity, (; implementation = nothing)),
+        merge(identity, (; tools = merge(identity.tools, (; mmseqs = nothing)))),
+        merge(identity, (; tools = merge(identity.tools, (; hmmer = nothing)))),
+        merge(identity, (;
+        expansion = merge(identity.expansion, (; database_snapshot = nothing)))),
+        merge(identity, (;
+        expansion = merge(identity.expansion, (; mmseqs_threads = nothing)))),
+        merge(identity, (; expansion = merge(identity.expansion, (; mmseqs_threads = 0)))))
+        Iduna.MSAExpansion._write_step_state(unknown_dir, :done, unknown, unknown_outputs)
+        classified = Iduna.MSAExpansion._classify_step_state(unknown_dir, unknown, unknown_outputs)
+        @test !classified.reusable
+        @test occursin("provenance is incomplete", classified.warning)
+    end
+
+    for component in (string(db, "_seq"), string(db, "_aln"))
+        original = read(component)
+        try
+            write(component, "different snapshot bytes\n")
+            # Hold the operator's label fixed: component checksums alone must
+            # distinguish refreshed manifests after either database changes.
+            write_test_mmseqs_manifest(db)
+            changed = Iduna.MSAExpansion._expansion_identity(
+                target, seed, seed_sto, nothing, db;
+                match_mode = 1, match_ratio = nothing, hmmbuild_symfrac = 0.0,
+                centroids = false, mmseqs_db_manifest = db_manifest, mmseqs_threads = 1)
+            @test changed.expansion.database_snapshot !=
+                  identity.expansion.database_snapshot
+            @test !Iduna.MSAExpansion._classify_step_state(run_dir, changed, outputs).reusable
+        finally
+            write(component, original)
+            write_test_mmseqs_manifest(db)
+        end
+    end
+end
 
 overwrite_dir = joinpath(tmp, "expansion", gene_id, transcript_id, "pid_15.00")
 overwrite_marker = joinpath(overwrite_dir, "old_output.txt")
@@ -105,6 +205,7 @@ overwrite_cache = @test_logs (
 
 changed_mode_identity = Iduna.MSAExpansion._expansion_identity(
     target, seed, seed_sto, nothing, db;
+    mmseqs_db_manifest = db_manifest, mmseqs_threads = 1,
     match_mode = 3,
     match_ratio = nothing,
     hmmbuild_symfrac = 0.0,
@@ -116,6 +217,7 @@ changed_mode = Iduna.MSAExpansion._classify_step_state(
 
 changed_ratio_identity = Iduna.MSAExpansion._expansion_identity(
     target, seed, seed_sto, nothing, db;
+    mmseqs_db_manifest = db_manifest, mmseqs_threads = 1,
     match_mode = 1,
     match_ratio = 0.75,
     hmmbuild_symfrac = 0.0,
@@ -127,6 +229,7 @@ changed_ratio = Iduna.MSAExpansion._classify_step_state(
 
 changed_symfrac_identity = Iduna.MSAExpansion._expansion_identity(
     target, seed, seed_sto, nothing, db;
+    mmseqs_db_manifest = db_manifest, mmseqs_threads = 1,
     match_mode = 1,
     match_ratio = nothing,
     hmmbuild_symfrac = 0.5,
@@ -139,6 +242,7 @@ changed_symfrac = Iduna.MSAExpansion._classify_step_state(
 write(seed_sto, "# STOCKHOLM 1.0\nseed ACDF\n//\n")
 changed_seed_identity = Iduna.MSAExpansion._expansion_identity(
     target, seed, seed_sto, nothing, db;
+    mmseqs_db_manifest = db_manifest, mmseqs_threads = 1,
     match_mode = 1,
     match_ratio = nothing,
     hmmbuild_symfrac = 0.0,
@@ -162,6 +266,7 @@ centroids_outputs = write_outputs(
     centroids = true)
 centroids_identity = Iduna.MSAExpansion._expansion_identity(
     target, centroids_seed, seed_sto, nothing, db;
+    mmseqs_db_manifest = db_manifest, mmseqs_threads = 1,
     match_mode = 1,
     match_ratio = nothing,
     hmmbuild_symfrac = 0.0,
@@ -171,7 +276,8 @@ Iduna.MSAExpansion._write_step_state(
 write(hits_fasta, ">seed one\nACDE\n>hit one\nACDF\n>hit_two\nACDG\n")
 
 cached_centroids = Iduna.MSAExpansion.expand_msa(
-    target, centroids_seed, tmp; mmseqs_db = db, centroids = true)
+    target, centroids_seed, tmp; mmseqs_db = db, mmseqs_db_manifest = db_manifest,
+    centroids = true, mmseqs_threads = 1)
 @test cached_centroids.status === :skipped
 @test isfile(centroids_outputs.s_exon_blocks_tsv)
 @test isfile(centroids_outputs.centroid_s_exon_blocks_tsv)
@@ -189,6 +295,7 @@ missing_centroid_seed = Iduna.SeedSelection(;
 )
 missing_centroid_identity = Iduna.MSAExpansion._expansion_identity(
     target, missing_centroid_seed, seed_sto, nothing, db;
+    mmseqs_db_manifest = db_manifest, mmseqs_threads = 1,
     match_mode = 1,
     match_ratio = nothing,
     hmmbuild_symfrac = 0.0,
@@ -243,6 +350,7 @@ legacy_seed = Iduna.SeedSelection(;
 )
 legacy_identity = Iduna.MSAExpansion._expansion_identity(
     target, legacy_seed, seed_sto, nothing, db;
+    mmseqs_db_manifest = db_manifest, mmseqs_threads = 1,
     match_mode = 1,
     match_ratio = nothing,
     hmmbuild_symfrac = 0.0,
@@ -284,6 +392,7 @@ end
         mutation_workdir = joinpath(tmp, "integrity_$(mutation)")
         mutation_ctx = Iduna.MSAExpansion._expansion_context(
             target, seed, mutation_workdir, db;
+            mmseqs_db_manifest = db_manifest, mmseqs_threads = 1,
             match_mode = 1, match_ratio = nothing, hmmbuild_symfrac = 0.0,
             centroids = false)
         write_outputs(mutation_ctx.outputs)
@@ -311,7 +420,8 @@ end
         # The deliberately unusable tiny DB makes a rebuild observable without
         # performing a search: accepting the cache would return successfully.
         @test_throws Base.ProcessFailedException Iduna.MSAExpansion.expand_msa(
-            target, seed, mutation_workdir; mmseqs_db = db, mmseqs_threads = 1)
+            target, seed, mutation_workdir; mmseqs_db = db,
+            mmseqs_db_manifest = db_manifest, mmseqs_threads = 1)
         rejected = Iduna.MSAExpansion._read_step_state(mutation_ctx.run_dir)
         @test rejected.status == "failed"
         @test !isfile(mutation_ctx.outputs.full_stockholm)
@@ -321,6 +431,7 @@ end
 @testset "Zero-hit expansion and movable verified caches" begin
     zero_workdir = joinpath(tmp, "zero_hits")
     zero_ctx = Iduna.MSAExpansion._expansion_context(target, seed, zero_workdir, db;
+        mmseqs_db_manifest = db_manifest, mmseqs_threads = 1,
         match_mode = 1, match_ratio = nothing, hmmbuild_symfrac = 0.0,
         centroids = false)
     write_outputs(zero_ctx.outputs)
@@ -329,7 +440,8 @@ end
         zero_ctx.identity, zero_ctx.outputs)
     @test !isfile(zero_ctx.outputs.s_exon_blocks_tsv)
     zero_result = Iduna.MSAExpansion.expand_msa(
-        target, seed, zero_workdir; mmseqs_db = db)
+        target, seed, zero_workdir; mmseqs_db = db,
+        mmseqs_db_manifest = db_manifest, mmseqs_threads = 1)
     @test zero_result.status === :skipped
     @test zero_result.n_hits == zero_result.n_new_hits == 0
     @test isfile(zero_result.s_exon_blocks_tsv)
@@ -337,7 +449,8 @@ end
     moved_workdir = joinpath(tmp, "moved_zero_hits")
     cp(zero_workdir, moved_workdir)
     moved_result = Iduna.MSAExpansion.expand_msa(
-        target, seed, moved_workdir; mmseqs_db = db)
+        target, seed, moved_workdir; mmseqs_db = db,
+        mmseqs_db_manifest = db_manifest, mmseqs_threads = 1)
     @test moved_result.status === :skipped
     @test moved_result.n_hits == moved_result.n_new_hits == 0
     @test isfile(moved_result.s_exon_blocks_tsv)

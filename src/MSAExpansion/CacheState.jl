@@ -73,8 +73,13 @@ function _step_state_unreadable_message(state)
 end
 
 function _classify_step_state(run_dir::AbstractString, identity, outputs::NamedTuple)
-    return _classify_stage_state(run_dir, identity, _required_expansion_outputs(outputs);
+    state = _classify_stage_state(run_dir, identity, _required_expansion_outputs(outputs);
         stage_label = "MSA expansion")
+    if state.reusable && !_expansion_reuse_trusted(identity)
+        return (; reusable = false, status = :stale,
+            warning = "MSA expansion provenance is incomplete; rebuilding cached outputs.")
+    end
+    return state
 end
 
 function _write_cache_warning(logs_dir::AbstractString, warning::AbstractString)

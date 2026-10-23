@@ -12,6 +12,7 @@ using TestItemRunner
     include("example_fixtures.jl")
     include("readme_examples.jl")
     include("Utils/utils.jl")
+    include("Utils/provenance.jl")
     include("IDMapping/id_mapping.jl")
     include("EPLI/EPLI.jl")
     include("ThorAxeMSA/ThorAxeMSA.jl")

@@ -23,7 +23,8 @@ function _app_arg_settings(;
         description = "Build one ThorAxe-based MSA from a UniProt accession or an Ensembl transcript ID, " *
                       "optionally expanding it with MMseqs2/HMMER.",
         epilog = """
-Julia runtime threads speed up ThorAxe PID sample scoring. For an installed app, either run:
+Julia runtime threads schedule PID sample work; ThorAxe commands serialize to protect
+the process environment. For an installed app, either run:
   JULIA_NUM_THREADS=4 iduna P20963 --mmseqs-db /path/to/db
 or pass Julia flags before the app separator:
   iduna --threads=4 -- P20963 --mmseqs-db /path/to/db
@@ -47,6 +48,11 @@ The Iduna option --mmseqs-threads controls MMseqs2 expansion only.
 
         "--mmseqs-db"
         help = "MMseqs2 database prefix. Required unless --no-expansion is used."
+        metavar = "path"
+        arg_type = String
+
+        "--mmseqs-db-manifest"
+        help = "Immutable database snapshot manifest. Required for expansion cache reuse."
         metavar = "path"
         arg_type = String
 

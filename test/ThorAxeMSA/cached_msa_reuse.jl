@@ -1,5 +1,8 @@
 @testset "cached ThorAxe MSA result reuse" begin
     mktempdir() do tmp
+        provenance = (; implementation = (; source = "fixture-v1"),
+            python = (; source = "python-fixture-v1"),
+            aligner = (; sha256 = "aligner-fixture-v1"), hhsuite = nothing)
         source = joinpath(tmp, "cached_input")
         ensembl = joinpath(source, "Ensembl")
         mkpath(ensembl)
@@ -17,7 +20,8 @@
             specieslist = "homo_sapiens",
             cached_input_dir = source,
             orthology = "1:1",
-            overwrite = false)
+            overwrite = false,
+            _implementation = provenance.implementation)
         metadata = Iduna.ThorAxeMSA._candidate_run_metadata(
             input_dir, target, [10.0];
             sample_count = 0,
@@ -28,7 +32,8 @@
             effective_specieslist = "homo_sapiens",
             orthology = "1:1",
             specieslist_filter = true,
-            biomart_datasets_filter = true)
+            biomart_datasets_filter = true,
+            provenance)
 
         paths = Iduna.ThorAxeMSA._pid_sample_paths(workdir, 10.0, 0)
         write(joinpath(tmp, "seed.fasta"), ">ENSG00000000001\nAA\n>ORTHO1\nAB\n")
@@ -102,7 +107,8 @@
                 specieslist = "homo_sapiens",
                 cached_thoraxe_input_dir = source,
                 pid_sample_count = 0,
-                pid_sample_seed = 7)
+                pid_sample_seed = 7,
+                _provenance = provenance)
         end
         @test any(log -> log.message == "Reusing cached ThorAxe MSA candidates.",
             reuse_logs)
@@ -179,7 +185,8 @@
             :done, auto_identity; action = :run)
         auto_reuse = Iduna.ThorAxeMSA.build_thoraxe_msa(target, workdir;
             pid_thresholds = [10.0], specieslist = "homo_sapiens",
-            cached_thoraxe_input_dir = source, pid_sample_count = 0)
+            cached_thoraxe_input_dir = source, pid_sample_count = 0,
+            _provenance = provenance)
         @test auto_reuse.pid_sample_seed == UInt64(7)
 
         original_sto = read(paths.stockholm_path, String)
@@ -228,7 +235,8 @@
         scored_input = Iduna.ThorAxeMSA._ensure_transcript_query(
             target, scored_workdir;
             cached_input_dir = source,
-            overwrite = false)
+            overwrite = false,
+            _implementation = provenance.implementation)
         scored_metadata = Iduna.ThorAxeMSA._candidate_run_metadata(
             scored_input, target, [20.0, 30.0];
             sample_count = 0,
@@ -239,7 +247,8 @@
             effective_specieslist = nothing,
             orthology = "1:1",
             specieslist_filter = false,
-            biomart_datasets_filter = false)
+            biomart_datasets_filter = false,
+            provenance)
         scored_summary = joinpath(Iduna.ThorAxeMSA._thoraxe_msa_dir(scored_workdir),
             "candidate_summary.csv")
         mkpath(dirname(scored_summary))
@@ -304,7 +313,8 @@
         rerun = Iduna.ThorAxeMSA.build_thoraxe_msa(target, scored_workdir;
             pid_thresholds = [20.0, 30.0], specieslist = "all",
             cached_thoraxe_input_dir = source, specieslist_filter = false,
-            biomart_datasets_filter = false, pid_sample_count = 0, pid_sample_seed = 9)
+            biomart_datasets_filter = false, pid_sample_count = 0, pid_sample_seed = 9,
+            _provenance = provenance)
         @test [seed.pid for seed in rerun.seeds] == [20.0, 30.0]
 
         # A rejected stage must attempt a rebuild and retain failed state if its
@@ -317,11 +327,71 @@
             target, blocked_workdir;
             pid_thresholds = [20.0], specieslist = "all",
             cached_thoraxe_input_dir = source, specieslist_filter = false,
-            biomart_datasets_filter = false, pid_sample_count = 0, pid_sample_seed = 9)
+            biomart_datasets_filter = false, pid_sample_count = 0, pid_sample_seed = 9,
+            _provenance = provenance)
         failed = Iduna.Utils._read_stage_state(
             Iduna.ThorAxeMSA._thoraxe_msa_stage_dir(blocked_workdir))
         @test failed["status"] == "failed"
         @test failed["output_digests"] === nothing
         @test read(blocked_output, String) == "blocking file"
+
+        rebuilds = Ref(0)
+        fixture_runner = (args...; kwargs...) -> begin
+            rebuilds[] += 1
+            fake = (input, root; kwargs...) -> write_cached_test_thoraxe_dir(joinpath(root, "thoraxe"))
+            Iduna.ThorAxeMSA._run_thoraxe_msa_stage!(args...; kwargs..., thoraxe_fn = fake)
+        end
+        function build_fixture(path, facts; query = target, species = "all")
+            return Iduna.ThorAxeMSA.build_thoraxe_msa(query, path;
+                pid_thresholds = [20.0, 30.0], specieslist = species,
+                cached_thoraxe_input_dir = source, specieslist_filter = false,
+                biomart_datasets_filter = false, pid_sample_count = 0, pid_sample_seed = 9,
+                _provenance = facts, _stage_runner = fixture_runner)
+        end
+        # Every producer change reaches the real public rebuild path. The fixture
+        # replaces only the external biological tool, retaining assembly and writes.
+        for field in (:implementation, :python, :aligner)
+            changed = merge(provenance, NamedTuple{(field,)}(((; revision = "changed"),)))
+            path = joinpath(tmp, "changed_$(field)")
+            cp(scored_workdir, path)
+            before = rebuilds[]
+            build_fixture(path, changed)
+            @test rebuilds[] == before + 1
+            build_fixture(path, changed)
+            @test rebuilds[] == before + 1
+
+            unknown = merge(changed, NamedTuple{(field,)}((nothing,)))
+            build_fixture(path, unknown)
+            build_fixture(path, unknown)
+            @test rebuilds[] == before + 3
+        end
+
+        reference = joinpath(tmp, "reference.fasta")
+        write(reference, ">P1\nAA\n")
+        reference_target = Iduna.ResolvedTarget(;
+            input_id = target.input_id, input_kind = target.input_kind,
+            ensembl_gene_id = target.ensembl_gene_id, transcript_id = target.transcript_id,
+            uniprot_id = "P1", uniprot_sequence_path = reference)
+        reference_work = joinpath(tmp, "reference_work")
+        cp(scored_workdir, reference_work)
+        before = rebuilds[]
+        build_fixture(reference_work, provenance; query = reference_target)
+        build_fixture(reference_work, provenance; query = reference_target)
+        @test rebuilds[] == before + 1
+        write(reference, ">P1\nAC\n")
+        build_fixture(reference_work, provenance; query = reference_target)
+        @test rebuilds[] == before + 2
+
+        species_file = joinpath(tmp, "requested_species.txt")
+        write(species_file, "homo_sapiens\n")
+        species_work = joinpath(tmp, "species_work")
+        cp(scored_workdir, species_work)
+        before = rebuilds[]
+        build_fixture(species_work, provenance; species = species_file)
+        build_fixture(species_work, provenance; species = species_file)
+        @test rebuilds[] == before + 1
+        write(species_file, "mus_musculus\n")
+        build_fixture(species_work, provenance; species = species_file)
+        @test rebuilds[] == before + 2
     end
 end

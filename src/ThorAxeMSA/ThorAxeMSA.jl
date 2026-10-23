@@ -7,7 +7,9 @@ used by later Iduna stages.
 module ThorAxeMSA
 
 import CSV
+import CondaPkg
 import Dates
+import HHsuite_jll
 import JSON
 import ProgressMeter
 import Scratch
@@ -24,6 +26,8 @@ using StatsBase: sample
 
 using ..EPLI
 using ..Utils: DEFAULT_PID_THRESHOLDS, ResolvedTarget, SeedSelection, ThorAxeMSAResult,
+               _file_sha256, _identity_hash, _implementation_identity,
+               _executable_identity, _jll_tool_identity,
                _http_get_request, _http_get_with_retries, _relative_artifact_path,
                _resolve_artifact_path, _sample_indices, _sample_rng,
                _terminal_progress_enabled, _validate_pid_thresholds,
@@ -41,8 +45,9 @@ export assemble_transcript_msa,
        select_best_seed
 
 include("ConstantsPaths.jl")
-include("InputStageState.jl")
 include("CommandExecution.jl")
+include("ToolIdentity.jl")
+include("InputStageState.jl")
 include("SpeciesFiltering.jl")
 include("TranscriptQuery.jl")
 include("TranscriptMSAAssembly.jl")

@@ -369,12 +369,14 @@ mktempdir() do tmp
     @test failed_input_state["exception"]["type"] == "SystemError"
 
     direct_workdir = joinpath(tmp, "direct_work")
+    query_tool_identity = (; source = "query-runner-fixture-v1")
     direct_input = Iduna.ThorAxeMSA._thoraxe_input_dir(direct_workdir)
     write_test_ensembl_bundle(direct_input)
     direct_metadata = Iduna.ThorAxeMSA._expected_transcript_query_metadata(target;
         specieslist = "homo_sapiens",
         orthology = "1:1",
-        source_kind = "transcript_query")
+        source_kind = "transcript_query",
+        tool_identity = query_tool_identity)
     Iduna.ThorAxeMSA._write_transcript_query_metadata!(
         direct_input, direct_metadata)
     legacy_calls = Ref(0)
@@ -384,11 +386,13 @@ mktempdir() do tmp
     end
     @test Iduna.ThorAxeMSA._ensure_transcript_query(target, direct_workdir;
         specieslist = "homo_sapiens",
-        orthology = "1:1", transcript_query_runner = legacy_runner) == direct_input
+        orthology = "1:1", transcript_query_runner = legacy_runner,
+        _tool_identity = query_tool_identity) == direct_input
     @test legacy_calls[] == 1
     @test Iduna.ThorAxeMSA._ensure_transcript_query(target, direct_workdir;
         specieslist = "homo_sapiens", orthology = "1:1",
-        transcript_query_runner = legacy_runner) == direct_input
+        transcript_query_runner = legacy_runner,
+        _tool_identity = query_tool_identity) == direct_input
     @test legacy_calls[] == 1
 
     queried_workdir = joinpath(tmp, "queried_work")
@@ -406,6 +410,7 @@ mktempdir() do tmp
             specieslist = "homo_sapiens",
             orthology = "1:1",
             transcript_query_runner = query_runner,
+            _tool_identity = query_tool_identity,
             sleep_fn = seconds -> nothing)
     end
     running_query_log = only([log
@@ -429,17 +434,20 @@ mktempdir() do tmp
         write(input_state, bad_state)
         Iduna.ThorAxeMSA._ensure_transcript_query(target, queried_workdir;
             specieslist = "homo_sapiens", orthology = "1:1",
-            transcript_query_runner = query_runner)
+            transcript_query_runner = query_runner,
+            _tool_identity = query_tool_identity)
     end
     @test query_calls[] == 4
     write(Iduna.ThorAxeMSA._transcript_query_metadata_path(rebuilt_input), "{}")
     Iduna.ThorAxeMSA._ensure_transcript_query(target, queried_workdir;
         specieslist = "homo_sapiens", orthology = "1:1",
-        transcript_query_runner = query_runner)
+        transcript_query_runner = query_runner,
+        _tool_identity = query_tool_identity)
     @test query_calls[] == 5
     Iduna.ThorAxeMSA._ensure_transcript_query(target, queried_workdir;
         specieslist = "homo_sapiens", orthology = "1:1",
-        transcript_query_runner = query_runner)
+        transcript_query_runner = query_runner,
+        _tool_identity = query_tool_identity)
     @test query_calls[] == 5
     @test_throws ErrorException Iduna.ThorAxeMSA._write_thoraxe_input_state(
         queried_workdir, joinpath(tmp, "missing_bundle"), :done, (;); action = :run)
@@ -467,6 +475,7 @@ mktempdir() do tmp
         specieslist = "homo_sapiens",
         orthology = "1:1",
         thoraxe_runner_factory = default_runner_factory,
+        _tool_identity = query_tool_identity,
         sleep_fn = seconds -> nothing)
     @test default_runner_input ==
           Iduna.ThorAxeMSA._thoraxe_input_dir(default_runner_workdir)
