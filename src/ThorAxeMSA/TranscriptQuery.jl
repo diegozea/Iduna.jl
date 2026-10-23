@@ -10,14 +10,16 @@ function _run_transcript_query_once(gene_core::AbstractString,
         orthology::AbstractString = "1:1",
         runner::Function = _thoraxe_runner(stdout_log, stderr_log))
     _orthology_relationships(orthology)
-    cd(workdir) do
-        if species === nothing
-            ThorAxe.transcript_query(
-                gene_core; orthology = orthology, specieslist = specieslist, runner = runner)
-        else
-            ThorAxe.transcript_query(
-                gene_core; species = species, orthology = orthology,
-                specieslist = specieslist, runner = runner)
+    _with_thoraxe_lock() do
+        cd(workdir) do
+            if species === nothing
+                ThorAxe.transcript_query(
+                    gene_core; orthology = orthology, specieslist = specieslist, runner = runner)
+            else
+                ThorAxe.transcript_query(
+                    gene_core; species = species, orthology = orthology,
+                    specieslist = specieslist, runner = runner)
+            end
         end
     end
     return nothing

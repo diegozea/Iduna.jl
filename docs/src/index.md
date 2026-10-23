@@ -132,7 +132,11 @@ candidate forward. In that mode `result.thoraxe_msa.seeds`,
 
 ## Threads
 
-The repeated ThorAxe runs used for PID sample scoring can run at the same time.
+PID samples can be scheduled on Julia threads. Complete ThorAxe calls run one at
+a time because their Conda wrapper changes the process environment. The lock
+covers command completion and environment restoration; assembly and HHsuite
+scoring can still overlap. This can reduce throughput compared with earlier
+threaded runs, while preserving sample membership and score ordering.
 For an installed `iduna` app, set Julia threads with an environment variable:
 
 ```bash
@@ -155,6 +159,10 @@ This affects the ThorAxe sampling step. The app option `--mmseqs-threads` is
 different: it controls MMseqs2 during the expansion step. Do not put
 `--threads` after the Iduna arguments; it is a Julia runtime flag, not an Iduna
 option.
+
+The lock protects calls made through Iduna. Avoid concurrent direct calls to
+ThorAxe or CondaPkg, or other changes to the process environment or current
+directory, in the same Julia process.
 
 ## Reusing ThorAxe Input
 

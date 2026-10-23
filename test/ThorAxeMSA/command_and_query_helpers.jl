@@ -160,6 +160,148 @@ mktempdir() do tmp
         complete_ensembl))
 end
 
+@testset "ThorAxe environment lifetime" begin
+    mktempdir() do tmp
+        thoraxe = Iduna.ThorAxeMSA.ThorAxe
+        conda = thoraxe.CondaPkg
+        # Warm resolution before scheduling concurrent calls. The real wrapper still
+        # activates/restores Conda for every call, even with a harmless runner.
+        active_env = conda.withenv(() -> copy(ENV))
+        original_env = copy(ENV)
+        original_frozen = conda.STATE.frozen
+        original_dir = pwd()
+        target = Iduna.ResolvedTarget(;
+            input_id = "ENST", input_kind = :ensembl_transcript,
+            ensembl_gene_id = "ENSG", transcript_id = "ENST")
+        input = write_test_ensembl_bundle(joinpath(tmp, "input"))
+
+        function pid_call(workdir, keep, callback)
+            actual_thoraxe = (input_dir, output_dir;
+                identity, specieslist, phylosofs, runner) -> thoraxe.thoraxe(
+                input_dir, output_dir; identity, specieslist, phylosofs,
+                aligner = "unused-test-aligner", runner = command -> begin
+                    callback(command)
+                    write_fake_thoraxe_dir(joinpath(output_dir, "thoraxe"))
+                    nothing
+                end)
+            return Iduna.ThorAxeMSA._run_thoraxe_pid_msa(
+                target, input, workdir, 35.0, nothing, keep ? 0 : 1;
+                overwrite = true, keep_thoraxe_dir = keep, thoraxe_fn = actual_thoraxe)
+        end
+
+        function query_call(workdir, callback; species = nothing)
+            mkpath(workdir)
+            return Iduna.ThorAxeMSA._run_transcript_query_once(
+                "ENSG", workdir, species, nothing,
+                joinpath(workdir, "stdout.log"), joinpath(workdir, "stderr.log");
+                runner = callback)
+        end
+
+        function check_active(_command)
+            env_matches = copy(ENV) == active_env
+            @test env_matches
+            @test conda.STATE.frozen
+            return nothing
+        end
+
+        pid_call(joinpath(tmp, "warm_kept"), true, check_active)
+        pid_call(joinpath(tmp, "warm_temporary"), false, check_active)
+        query_call(joinpath(tmp, "warm_query"), check_active)
+        query_call(joinpath(tmp, "warm_query_species"), check_active;
+            species = "homo_sapiens")
+        @test_throws ErrorException query_call(joinpath(tmp, "failed_query"),
+            command -> error("expected query runner failure"))
+        env_restored = copy(ENV) == original_env
+        @test env_restored
+        @test conda.STATE.frozen == original_frozen
+        @test pwd() == original_dir
+        for fail_first in (false, true)
+            first_entered = Channel{NamedTuple}(1)
+            second_entered = Channel{NamedTuple}(1)
+            second_finished = Channel{NamedTuple}(1)
+            second_attempting = Channel{Nothing}(1)
+            release_first = Channel{Nothing}(1)
+            release_second = Channel{Nothing}(1)
+            snapshot() = (; env_matches = copy(ENV) == active_env,
+                frozen = conda.STATE.frozen, directory = pwd())
+            first_callback = command -> begin
+                put!(first_entered, snapshot())
+                take!(release_first)
+                fail_first && error("expected runner failure")
+                nothing
+            end
+            second_callback = command -> begin
+                put!(second_entered, snapshot())
+                take!(release_second)
+                put!(second_finished, snapshot())
+                nothing
+            end
+            first_workdir = joinpath(tmp, "first_$(fail_first)")
+            second_workdir = joinpath(tmp, "second_$(fail_first)")
+            first_call = Threads.@spawn try
+                pid_call(first_workdir, !fail_first, first_callback)
+                nothing
+            catch err
+                err
+            end
+            second_call = nothing
+            try
+                @test timedwait(() -> isready(first_entered), 30) == :ok
+                isready(first_entered) || error("First ThorAxe callback did not start.")
+                first_state = take!(first_entered)
+                @test first_state.env_matches
+                @test first_state.frozen
+                second_call = Threads.@spawn begin
+                    put!(second_attempting, nothing)
+                    if fail_first
+                        pid_call(second_workdir, true, second_callback)
+                    else
+                        query_call(second_workdir, second_callback)
+                    end
+                end
+                take!(second_attempting)
+                # A owns activation until its runner and Conda cleanup both finish.
+                @test timedwait(() -> isready(second_entered), 0.5) == :timed_out
+                put!(release_first, nothing)
+                first_result = fetch(first_call)
+                if fail_first
+                    @test first_result isa ErrorException
+                    @test sprint(showerror, first_result) == "expected runner failure"
+                else
+                    @test first_result === nothing
+                end
+                @test timedwait(() -> isready(second_entered), 30) == :ok
+                isready(second_entered) || error("Second ThorAxe callback did not start.")
+                second_state = take!(second_entered)
+                @test second_state.env_matches
+                @test second_state.frozen
+                env_matches = copy(ENV) == active_env
+                @test env_matches
+                @test conda.STATE.frozen
+                @test pwd() == (fail_first ? original_dir : second_workdir)
+            finally
+                isready(release_first) || put!(release_first, nothing)
+                put!(release_second, nothing)
+                wait(first_call)
+                second_call === nothing || wait(second_call)
+            end
+            finished_state = take!(second_finished)
+            @test finished_state.env_matches
+            @test finished_state.frozen
+            env_restored = copy(ENV) == original_env
+            @test env_restored
+            @test conda.STATE.frozen == original_frozen
+            @test pwd() == original_dir
+            # A later call must also succeed after an earlier runner throws.
+            query_call(joinpath(tmp, "after_$(fail_first)"), check_active)
+            env_restored = copy(ENV) == original_env
+            @test env_restored
+            @test conda.STATE.frozen == original_frozen
+            @test pwd() == original_dir
+        end
+    end
+end
+
 mktempdir() do tmp
     source = joinpath(tmp, "cached_input")
     ensembl = joinpath(source, "Ensembl")
