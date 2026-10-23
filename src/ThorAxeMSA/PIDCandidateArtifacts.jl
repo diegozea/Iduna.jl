@@ -293,8 +293,7 @@ function _log_full_pid_msa(message::AbstractString,
         target::ResolvedTarget,
         pid::Real,
         sample_idx::Integer,
-        extra = NamedTuple();
-        level::Symbol = :info)
+        extra = NamedTuple())
     sample_idx == 0 || return nothing
     details = (;
         gene_id = target.ensembl_gene_id,
@@ -302,11 +301,7 @@ function _log_full_pid_msa(message::AbstractString,
         pid,
         sample = "full",
         extra...)
-    if level === :debug
-        @debug message details...
-    else
-        @info message details...
-    end
+    @debug message details...
     return nothing
 end
 
@@ -328,8 +323,7 @@ function _run_thoraxe_pid_msa(target::ResolvedTarget,
     stderr_log = joinpath(_thoraxe_logs_dir(workdir), "$(sample_label)_stderr.log")
     runner = _thoraxe_runner(stdout_log, stderr_log)
     _log_full_pid_msa("Running ThorAxe PID MSA command.", target, pid, sample_idx,
-        (; _specieslist_log_details(specieslist)..., stdout_log, stderr_log);
-        level = :debug)
+        (; _specieslist_log_details(specieslist)..., stdout_log, stderr_log))
 
     if keep_thoraxe_dir
         return _run_kept_thoraxe_pid_msa!(target, input_dir, workdir, paths,

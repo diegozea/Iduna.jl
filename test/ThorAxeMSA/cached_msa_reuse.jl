@@ -306,5 +306,22 @@
             cached_thoraxe_input_dir = source, specieslist_filter = false,
             biomart_datasets_filter = false, pid_sample_count = 0, pid_sample_seed = 9)
         @test [seed.pid for seed in rerun.seeds] == [20.0, 30.0]
+
+        # A rejected stage must attempt a rebuild and retain failed state if its
+        # output directory is blocked. This fails locally before invoking ThorAxe.
+        blocked_workdir = joinpath(tmp, "blocked_work")
+        mkpath(blocked_workdir)
+        blocked_output = Iduna.ThorAxeMSA._thoraxe_msa_dir(blocked_workdir)
+        write(blocked_output, "blocking file")
+        @test_throws Base.IOError Iduna.ThorAxeMSA.build_thoraxe_msa(
+            target, blocked_workdir;
+            pid_thresholds = [20.0], specieslist = "all",
+            cached_thoraxe_input_dir = source, specieslist_filter = false,
+            biomart_datasets_filter = false, pid_sample_count = 0, pid_sample_seed = 9)
+        failed = Iduna.Utils._read_stage_state(
+            Iduna.ThorAxeMSA._thoraxe_msa_stage_dir(blocked_workdir))
+        @test failed["status"] == "failed"
+        @test failed["output_digests"] === nothing
+        @test read(blocked_output, String) == "blocking file"
     end
 end
