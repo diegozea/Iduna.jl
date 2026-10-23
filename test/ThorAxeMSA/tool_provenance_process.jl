@@ -22,6 +22,16 @@ using Iduna, Test
         end
     end
 
+    sampled = msa._thoraxe_stage_provenance(1)
+    @test msa._known_thoraxe_provenance(sampled, 1)
+    @test sampled.python == tools.python
+    @test sampled.aligner == msa._thoraxe_aligner_identity()
+    @test Set(keys(sampled.hhsuite.executables)) == Set(["hhmake", "hhalign"])
+    unsampled = msa._thoraxe_stage_provenance(0)
+    @test msa._known_thoraxe_provenance(unsampled, 0)
+    @test unsampled.python == sampled.python
+    @test unsampled.hhsuite === nothing
+
     mktempdir() do root
         wrapper = msa.ThorAxe
         original = joinpath(wrapper.ALIGNER_PATH[], wrapper.ALIGNER_NAME)
