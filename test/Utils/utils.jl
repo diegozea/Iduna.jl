@@ -32,6 +32,18 @@ import URIs
         write(other, "FGHI")
 
         valid_state = Iduna.Utils.JSON.parse(read(state_path, String))
+        for status in ("failed", "skipped")
+            Iduna.Utils.write_json(state_path, merge(valid_state, Dict("status" => status)))
+            @test !reusable()
+        end
+        complete()
+        rm(artifact)
+        @test !reusable()
+        rm(state_path)
+        @test !reusable()
+        write(artifact, "ACDE")
+        complete()
+
         for bad in (merge(valid_state, Dict("schema_version" => 0)),
             filter(pair -> first(pair) != "schema_version", valid_state),
             merge(valid_state, Dict("status" => 1)),
