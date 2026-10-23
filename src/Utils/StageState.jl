@@ -68,8 +68,7 @@ function _stage_output_files(outputs::Union{NamedTuple, AbstractDict, AbstractVe
         init = String[])
 end
 
-_output_mapping_matches(_expected, _stored) = false
-_output_mapping_matches(::Nothing, stored) = stored === nothing
+_output_mapping_matches(expected, stored) = expected === nothing && stored === nothing
 _output_mapping_matches(expected::AbstractString, stored) = expected == stored
 
 function _output_mapping_matches(expected::AbstractVector, stored)
