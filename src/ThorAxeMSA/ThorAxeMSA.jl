@@ -26,7 +26,7 @@ using ..EPLI
 using ..Utils: DEFAULT_PID_THRESHOLDS, ResolvedTarget, SeedSelection, ThorAxeMSAResult,
                _http_get_request, _http_get_with_retries, _relative_artifact_path,
                _resolve_artifact_path, _sample_indices, _sample_rng,
-               _terminal_progress_enabled,
+               _terminal_progress_enabled, _validate_pid_thresholds,
                decode_body,
                fasta_sequence, format_pid, format_pid_dir, protein_alignment_stats,
                resolve_sequence_name, safe_rm,

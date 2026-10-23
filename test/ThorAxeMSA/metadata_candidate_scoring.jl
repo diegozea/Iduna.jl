@@ -492,3 +492,134 @@ mktempdir() do tmp
         label = "identical") == 100.0
     @test isfile(joinpath(identity_logs, "identical_hhalign.out"))
 end
+
+@testset "Distinct effective PIDs preserve candidate artifacts" begin
+    mktempdir() do tmp
+        target = Iduna.ResolvedTarget(;
+            input_id = "ENST", input_kind = :ensembl_transcript,
+            ensembl_gene_id = "ENSG", transcript_id = "ENST")
+        input = write_test_ensembl_bundle(joinpath(tmp, "input"))
+        pids = [30.001, 30.004]
+        metadata = Iduna.ThorAxeMSA._candidate_run_metadata(input, target, pids;
+            sample_count = 0, sample_fraction = 1.0, sample_seed = UInt64(1),
+            requested_sample_seed = 1, sampling_strategy = :common,
+            effective_specieslist = nothing, orthology = "1:1",
+            specieslist_filter = false, biomart_datasets_filter = false)
+        fake_thoraxe = (input_dir, run_root; identity, specieslist,
+            phylosofs, runner) -> begin
+            root = write_fake_thoraxe_dir(joinpath(run_root, "thoraxe"))
+            if identity == 30.004
+                # Keep the independent two-residue query consistent in every input.
+                for file in ("s_exon_table.csv", "msa/msa_s_exon_1_0.fasta",
+                    "phylosofs/transcripts.pir")
+                    path = joinpath(root, file)
+                    write(path, replace(read(path, String), "AA" => "CC", "AB" => "CD"))
+                end
+            end
+            runner(`$(Base.julia_cmd()) --startup-file=no -e
+                'print(stdout, ARGS[1]); print(stderr, ARGS[1])' $(repr(identity))`)
+            return nothing
+        end
+        legacy = joinpath(tmp, "thoraxe_msa", "candidates", "pid_30.00", "archived.txt")
+        mkpath(dirname(legacy))
+        write(legacy, "archived result")
+        rows = Iduna.ThorAxeMSA._score_pid_candidates(target, input, tmp, pids,
+            nothing, metadata; pid_sample_count = 0, pid_sample_fraction = 1.0,
+            sample_seed = UInt64(1), overwrite = true, thoraxe_fn = fake_thoraxe)
+        @test [row.pid for row in rows] == pids
+        @test all(row -> row.eligible, rows)
+        @test rows[1].fasta_path != rows[2].fasta_path
+        @test read(legacy, String) == "archived result"
+        for (row, expected, token) in zip(rows, ("AA", "CC"), ("30.001", "30.004"))
+            path = Iduna.Utils._resolve_artifact_path(row.fasta_path, tmp)
+            msa = Iduna.ThorAxeMSA.read_file(path, Iduna.ThorAxeMSA.FASTA)
+            @test Iduna.ThorAxeMSA.stringsequence(msa, "ENSG") == expected
+            @test occursin("pid_$(token)", row.fasta_path)
+        end
+        summary = joinpath(tmp, "summary.csv")
+        Iduna.ThorAxeMSA._summarize_candidate_scores(rows, summary)
+        restored = Iduna.ThorAxeMSA._candidate_summary_dataframe(summary)
+        @test restored.pid == pids
+        @test restored.fasta_path == [row.fasta_path for row in rows]
+        @test hasproperty(restored, :pid_path_contract) &&
+              all(==(2), restored.pid_path_contract)
+        @test Iduna.ThorAxeMSA._candidate_summary_matches(restored, metadata)
+        restored.selected .= true
+        Iduna.ThorAxeMSA.CSV.write(summary, restored)
+        @test Iduna.ThorAxeMSA._cached_selected_seeds(summary, tmp, metadata) !== nothing
+
+        # Replay an old complete summary whose two PIDs both point to the CC alignment.
+        old_fasta = joinpath(dirname(legacy), "candidate_msa_full.fasta")
+        old_stockholm = joinpath(dirname(legacy), "candidate_msa_full.sto")
+        cp(Iduna.Utils._resolve_artifact_path(rows[2].fasta_path, tmp), old_fasta)
+        cp(Iduna.Utils._resolve_artifact_path(rows[2].stockholm_path, tmp), old_stockholm)
+        old = restored[:, filter(!=(:pid_path_contract), propertynames(restored))]
+        old.fasta_path .= relpath(old_fasta, tmp)
+        old.stockholm_path .= relpath(old_stockholm, tmp)
+        old.selected .= [true, false]
+        old_summary = joinpath(tmp, "old_summary.csv")
+        Iduna.ThorAxeMSA.CSV.write(old_summary, old)
+        @test !Iduna.ThorAxeMSA._candidate_summary_matches(old, metadata)
+        @test !Iduna.ThorAxeMSA._has_matching_candidate_summary(old_summary, metadata)
+        identity = Iduna.ThorAxeMSA._thoraxe_msa_identity(metadata, tmp)
+        old_identity = (;
+            (key => value
+        for (key, value) in pairs(identity)
+        if key != :pid_path_contract)...)
+        Iduna.Utils._write_stage_state(Iduna.ThorAxeMSA._thoraxe_msa_stage_dir(tmp);
+            stage = "thoraxe_msa", stage_key = "thoraxe_msa", status = :done,
+            identity = old_identity, outputs = (; pid_summary = old_summary),
+            action = :run, workdir = tmp)
+        cache = Iduna.ThorAxeMSA._thoraxe_msa_stage_cache(tmp, old_summary,
+            metadata, identity; overwrite = false)
+        @test !cache.cache.reusable
+        @test !cache.summary_matches
+        @test Iduna.ThorAxeMSA._maybe_cached_thoraxe_msa(input, old_summary,
+            target, tmp, metadata, identity, cache,
+            (; warnings = String[]), (; warnings = String[]);
+            overwrite = false, pid_sample_count = 0, pid_sample_fraction = 1.0) === nothing
+        old.pid_path_contract = [2, 1]
+        @test !Iduna.ThorAxeMSA._candidate_summary_matches(old, metadata)
+        old.pid_path_contract = [2, missing]
+        @test !Iduna.ThorAxeMSA._candidate_summary_matches(old, metadata)
+        for sample_idx in (0, 1)
+            first_paths = Iduna.ThorAxeMSA._pid_sample_paths(tmp, pids[1], sample_idx)
+            second_paths = Iduna.ThorAxeMSA._pid_sample_paths(tmp, pids[2], sample_idx)
+            @test all(a != b for (a, b) in zip(first_paths, second_paths))
+            @test Iduna.ThorAxeMSA._pid_sample_run_root(tmp, pids[1], sample_idx) !=
+                  Iduna.ThorAxeMSA._pid_sample_run_root(tmp, pids[2], sample_idx)
+        end
+        # These two settings have distinct old directories but used to share logs.
+        for pid in (12.31, 12.34)
+            Iduna.ThorAxeMSA._run_thoraxe_pid_msa(target, input, tmp, pid,
+                nothing, 1; thoraxe_fn = fake_thoraxe)
+        end
+        for (token, sample_idx) in (("30.001", 0), ("30.004", 0),
+                ("12.31", 1), ("12.34", 1)),
+            stream in ("stdout", "stderr")
+
+            path = joinpath(tmp, "logs", "thoraxe",
+                "pid_$(token)_sample$(sample_idx)_$(stream).log")
+            @test isfile(path) && read(path, String) == token
+        end
+    end
+end
+
+@testset "Invalid PIDs fail before ThorAxe stage work" begin
+    mktempdir() do tmp
+        target = Iduna.ResolvedTarget(;
+            input_id = "ENST", input_kind = :ensembl_transcript,
+            ensembl_gene_id = "ENSG", transcript_id = "ENST")
+        for pids in (Float64[], [NaN], [Inf], [-Inf], [-1.0], [101.0],
+            [10.0, 10.0], [-0.0, 0.0], [BigFloat(10), nextfloat(BigFloat(10))])
+            workdir = joinpath(tmp, "unused")
+            logs, _ = Test.collect_test_logs() do
+                @test_throws ArgumentError Iduna.ThorAxeMSA.build_thoraxe_msa(
+                    target, workdir; pid_thresholds = pids,
+                    cached_thoraxe_input_dir = joinpath(tmp, "missing_input"))
+            end
+            @test isempty(logs)
+            @test !ispath(workdir)
+        end
+    end
+end

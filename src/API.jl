@@ -49,7 +49,11 @@ selected seeds, validation statistics, warnings, and status.
 - `overwrite::Bool = false`: reuse package-owned stage outputs when their run
   identity still matches. When `true`, Iduna rebuilds those outputs.
 - `pid_thresholds = DEFAULT_PID_THRESHOLDS`: ThorAxe percent identity (PID)
-  thresholds to test; currently `[10, 20, 30, 60, 80]`.
+  thresholds to test; currently `[10, 20, 30, 60, 80]`. The list must be nonempty,
+  finite, in `[0, 100]`, and distinct after `Float64` conversion. Signed zero is
+  treated as zero. Invalid thresholds are rejected before creating outputs.
+  Earlier candidate caches are rebuilt, including default-threshold runs. Default
+  directory names are retained; archived results remain readable from recorded paths.
 - `species = nothing`: species name to use instead of a fetched value. When
   `nothing`, Iduna uses fetched metadata when available.
 - `specieslist::AbstractString = "ases"`: species preset, list, file, or name.
@@ -137,6 +141,7 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
         _build_thoraxe_msa::Function = ThorAxeMSA.build_thoraxe_msa,
         _expand_msa::Function = MSAExpansion.expand_msa,
         _validate_results::Function = ResultsValidation.validate_results)
+    pid_thresholds = Utils._validate_pid_thresholds(pid_thresholds)
     primary, disambiguating_transcript,
     supplied_uniprot = _normalize_primary_input(;
         id, uniprot_id, ensembl_transcript_id, transcript_id)

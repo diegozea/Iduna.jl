@@ -340,8 +340,7 @@ function _run_thoraxe_pid_msa(target::ResolvedTarget,
     end
 
     mkpath(_candidate_pid_dir(workdir, pid))
-    pid_label = format_pid(pid)
-    sample_label = "pid$(pid_label)_sample$(sample_idx)"
+    sample_label = "$(format_pid_dir(pid))_sample$(sample_idx)"
     stdout_log = joinpath(_thoraxe_logs_dir(workdir), "$(sample_label)_stdout.log")
     stderr_log = joinpath(_thoraxe_logs_dir(workdir), "$(sample_label)_stderr.log")
     runner = _thoraxe_runner(stdout_log, stderr_log)

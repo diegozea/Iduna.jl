@@ -163,3 +163,22 @@ import JSON
         @test endswith(text, "\n")
     end
 end
+
+@testset "CLI validates effective PID thresholds before running" begin
+    calls = Ref(0)
+    unexpected = (; kwargs...) -> begin
+        calls[] += 1
+        error("Invalid PID input reached the app runner.")
+    end
+    for value in ("", "NaN", "Inf", "-Inf", "-1", "101", "10,10",
+        "-0.0,0.0", "10,10.0000000000000001")
+        @test_throws ArgumentError Iduna._run_app(
+            ["Q13148", "--no-expansion", "--pid-thresholds=$(value)"];
+            runner = unexpected)
+        @test calls[] == 0
+    end
+    kwargs = Iduna._parse_app_args([
+        "Q13148", "--no-expansion", "--pid-thresholds=-0.0,30.001,30.004,100"])
+    @test kwargs[:pid_thresholds] == [0.0, 30.001, 30.004, 100.0]
+    @test !signbit(first(kwargs[:pid_thresholds]))
+end
