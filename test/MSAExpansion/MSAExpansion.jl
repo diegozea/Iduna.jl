@@ -4,5 +4,6 @@
         include("stockholm_and_alignment.jl")
         include("cache_and_state.jl")
         include("workflow.jl")
+        include("cluster_member_regression.jl")
     end
 end
