@@ -4,6 +4,10 @@ using Iduna, Test
 # isolated from the rest of the suite.
 @testset "Installed ThorAxe producer identity" begin
     msa = Iduna.ThorAxeMSA
+    wrapper = msa.ThorAxe
+    # Use a fresh directory so cached tools cannot hide missing setup.
+    wrapper.ALIGNER_PATH[] = mktempdir()
+    wrapper.aligner_executable()
     tools = msa._thoraxe_tool_identity(; aligner = false)
     @test tools !== nothing
     if tools !== nothing
@@ -33,7 +37,6 @@ using Iduna, Test
     @test unsampled.hhsuite === nothing
 
     mktempdir() do root
-        wrapper = msa.ThorAxe
         original = joinpath(wrapper.ALIGNER_PATH[], wrapper.ALIGNER_NAME)
         @test isfile(original)
         copied = joinpath(mkpath(joinpath(root, "with spaces")), wrapper.ALIGNER_NAME)
