@@ -164,12 +164,27 @@ end
     mktempdir() do tmp
         thoraxe = Iduna.ThorAxeMSA.ThorAxe
         conda = thoraxe.CondaPkg
-        # Warm resolution before scheduling concurrent calls. The real wrapper still
-        # activates/restores Conda for every call, even with a harmless runner.
-        active_env = conda.withenv(() -> copy(ENV))
         original_env = copy(ENV)
         original_frozen = conda.STATE.frozen
         original_dir = pwd()
+        function environment_matches(expected)
+            observed = copy(ENV)
+            observed == expected && return true
+            # CI diagnostics must not expose environment values or credentials.
+            changed_keys = sort!([key
+                                  for key in union(keys(observed), keys(expected))
+                                  if get(observed, key, nothing) !=
+                                     get(expected, key, nothing)])
+            @warn "ThorAxe test environment differs." changed_keys
+            return false
+        end
+        # First resolution can initialize tools inside activation. Let it finish
+        # before recording the steady-state activation expected by later calls.
+        conda.withenv(() -> nothing)
+        @test environment_matches(original_env)
+        @test conda.STATE.frozen == original_frozen
+        @test pwd() == original_dir
+        active_env = conda.withenv(() -> copy(ENV))
         target = Iduna.ResolvedTarget(;
             input_id = "ENST", input_kind = :ensembl_transcript,
             ensembl_gene_id = "ENSG", transcript_id = "ENST")
@@ -198,7 +213,7 @@ end
         end
 
         function check_active(_command)
-            env_matches = copy(ENV) == active_env
+            env_matches = environment_matches(active_env)
             @test env_matches
             @test conda.STATE.frozen
             return nothing
@@ -211,7 +226,7 @@ end
             species = "homo_sapiens")
         @test_throws ErrorException query_call(joinpath(tmp, "failed_query"),
             command -> error("expected query runner failure"))
-        env_restored = copy(ENV) == original_env
+        env_restored = environment_matches(original_env)
         @test env_restored
         @test conda.STATE.frozen == original_frozen
         @test pwd() == original_dir
@@ -222,7 +237,7 @@ end
             second_attempting = Channel{Nothing}(1)
             release_first = Channel{Nothing}(1)
             release_second = Channel{Nothing}(1)
-            snapshot() = (; env_matches = copy(ENV) == active_env,
+            snapshot() = (; env_matches = environment_matches(active_env),
                 frozen = conda.STATE.frozen, directory = pwd())
             first_callback = command -> begin
                 put!(first_entered, snapshot())
@@ -275,10 +290,12 @@ end
                 second_state = take!(second_entered)
                 @test second_state.env_matches
                 @test second_state.frozen
-                env_matches = copy(ENV) == active_env
+                env_matches = environment_matches(active_env)
                 @test env_matches
                 @test conda.STATE.frozen
-                @test pwd() == (fail_first ? original_dir : second_workdir)
+                # macOS temporary paths can spell /private/var as /var.
+                @test realpath(pwd()) ==
+                      realpath(fail_first ? original_dir : second_workdir)
             finally
                 isready(release_first) || put!(release_first, nothing)
                 put!(release_second, nothing)
@@ -288,13 +305,13 @@ end
             finished_state = take!(second_finished)
             @test finished_state.env_matches
             @test finished_state.frozen
-            env_restored = copy(ENV) == original_env
+            env_restored = environment_matches(original_env)
             @test env_restored
             @test conda.STATE.frozen == original_frozen
             @test pwd() == original_dir
             # A later call must also succeed after an earlier runner throws.
             query_call(joinpath(tmp, "after_$(fail_first)"), check_active)
-            env_restored = copy(ENV) == original_env
+            env_restored = environment_matches(original_env)
             @test env_restored
             @test conda.STATE.frozen == original_frozen
             @test pwd() == original_dir
