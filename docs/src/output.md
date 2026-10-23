@@ -63,7 +63,11 @@ around it. By default, `workdir` is a directory named after the input ID.
 
 The output layout is part of the API. `overwrite=true` rebuilds package-owned
 subdirectories, but Iduna does not delete files outside the selected work
-directory.
+directory. Cleanup checks both the path and its resolved parent, and refuses to
+remove the work directory itself. It can remove an in-directory symlink without
+deleting its target, but rejects cleanup through a parent symlink that leaves
+the work directory. A symlinked work directory uses its resolved target as the
+boundary. These checks assume directories and symlinks are not changed concurrently.
 
 After the work directory is created, Iduna always attempts to write
 `result.json`. Successful runs keep the returned [`IdunaResult`](@ref) summary
