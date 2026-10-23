@@ -1,5 +1,56 @@
 using MIToS.MSA: AnnotatedSequence
 
+@testset "Non-finite sample and reference scores" begin
+    mktempdir() do tmp
+        input = joinpath(tmp, "input.fasta")
+        write(input, ">ref\nACDE\n>other\nACDF\n")
+        for value in (NaN, Inf, -Inf)
+            score_fn = (reference, sample; kwargs...) -> (; raw_score = value)
+            constant_normalization = (score; kwargs...) -> 90.0
+            workdir = joinpath(tmp, "raw_$(value)")
+            @test_throws ArgumentError Iduna.EPLI.epli_score(input, workdir,
+                copy_aligner; score_fn, normalization_fn = constant_normalization,
+                sample_count = 1, sample_seed = 1, progress_enabled = false)
+            @test !isfile(joinpath(workdir, "summary.csv"))
+
+            reference_score = (reference, sample; label, kwargs...) -> (;
+                raw_score = label == "reference_self" ? value : 10.0)
+            @test_throws ArgumentError Iduna.EPLI.epli_score(input,
+                joinpath(tmp, "reference_$(value)"), copy_aligner;
+                score_fn = reference_score,
+                normalization_fn = constant_normalization,
+                compute_reference_self_score = true, sample_count = 1,
+                sample_seed = 1, progress_enabled = false)
+
+            finite_score = (reference, sample; kwargs...) -> (; raw_score = 10.0)
+            normalization = (score; kwargs...) -> value
+            @test_throws ArgumentError Iduna.EPLI.epli_score(input,
+                joinpath(tmp, "normalized_$(value)"), copy_aligner;
+                score_fn = finite_score, normalization_fn = normalization,
+                sample_count = 1, sample_seed = 1, progress_enabled = false)
+        end
+
+        mixed_score = (reference, sample; label, kwargs...) -> (;
+            raw_score = endswith(label, "001") ? NaN : 90.0)
+        failed_workdir = joinpath(tmp, "mixed_samples")
+        error_type = Threads.threadpoolsize() > 1 ? CompositeException : ArgumentError
+        @test_throws error_type Iduna.EPLI.epli_score(input, failed_workdir, copy_aligner;
+            score_fn = mixed_score, normalization_fn = Iduna.EPLI.no_normalization,
+            sample_count = 2, sample_seed = 1, progress_enabled = false)
+        @test !isfile(joinpath(failed_workdir, "scores.csv"))
+        @test !isfile(joinpath(failed_workdir, "summary.csv"))
+
+        score_fn = (reference, sample; kwargs...) -> (; raw_score = floatmax(Float64))
+        workdir = joinpath(tmp, "extreme_finite")
+        result = Iduna.EPLI.epli_score(input, workdir, copy_aligner;
+            score_fn, normalization_fn = Iduna.EPLI.no_normalization,
+            sample_count = 2, sample_seed = 1, progress_enabled = false)
+        @test result.epli == floatmax(Float64)
+        @test isfile(joinpath(workdir, "scores.csv"))
+        @test isfile(joinpath(workdir, "summary.csv"))
+    end
+end
+
 mktempdir() do tmp
     input = joinpath(tmp, "sequences.fasta")
     write(input,

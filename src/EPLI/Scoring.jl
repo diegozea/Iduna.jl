@@ -22,6 +22,7 @@ function _score_sample(spec,
     score = score_fn(reference_msa_fasta, sample_msa_fasta;
         logs_dir = logs_dir === nothing ? nothing : joinpath(logs_dir, "hhalign"),
         label = spec.sample_label)
+    raw_score = _finite_score(score.raw_score, "Raw score for $(spec.sample_label)")
     normalized = _normalization_result(normalization_fn(score; reference_score))
     n_reference = spec.n_sequences_reference
     n_sample = spec.n_sequences_sample === nothing ?
@@ -30,7 +31,7 @@ function _score_sample(spec,
     return (;
         sample = spec.sample,
         sample_label = spec.sample_label,
-        raw_score = Float64(score.raw_score),
+        raw_score,
         normalization_score = normalized.normalization_score,
         normalized_score = normalized.normalized_score,
         epli_component = normalized.normalized_score,
@@ -50,9 +51,11 @@ function _reference_self_score(reference_msa_fasta::AbstractString,
         score_fn::Function,
         logs_dir::Union{Nothing, AbstractString})
     compute_reference_self_score || return nothing
-    return score_fn(reference_msa_fasta, reference_msa_fasta;
+    score = score_fn(reference_msa_fasta, reference_msa_fasta;
         logs_dir = logs_dir === nothing ? nothing : joinpath(logs_dir, "hhalign"),
         label = "reference_self")
+    _finite_score(score.raw_score, "Reference self score")
+    return score
 end
 
 function _score_sample_specs!(rows::AbstractVector,
@@ -129,13 +132,14 @@ function _score_alignment_samples(reference_msa_fasta::AbstractString,
         progress_enabled)
     score_rows = [row for row in rows if row !== nothing]
     isempty(score_rows) && error("No sample scores were computed.")
+    epli = _finite_score(median([row.epli_component for row in score_rows]), "EPLI")
     if scores_path !== nothing
         mkpath(dirname(scores_path))
         CSV.write(scores_path, DataFrame(score_rows))
     end
     return (;
         rows = score_rows,
-        epli = median([row.epli_component for row in score_rows]),
+        epli,
         reference_score,
         scores_path)
 end
@@ -167,6 +171,14 @@ Compute EPLI for an aligner over sequence-row subsamples.
 - `sample_seed = nothing`: random seed; `nothing` records a generated seed.
 - `reference_sequence = nothing`: reference sequence name, or first row when `nothing`.
 - `overwrite::Bool = false`: rebuild existing output files.
+
+# Score Contract
+
+Raw scores, normalized scores and the final EPLI must be finite Float64 values.
+An optional `normalization_score` must be finite or `missing`. Invalid scores
+raise `ArgumentError` (wrapped in a task failure during parallel scoring);
+samples are never silently discarded. Finite negative scores and normalization
+ratios above 100 remain valid.
 """
 function epli_score(
         input::Union{AbstractString, AbstractMultipleSequenceAlignment,

@@ -17,6 +17,36 @@
     @test ismissing(normalized.normalization_score)
 end
 
+@testset "Finite normalization scores" begin
+    for value in (NaN, Inf, -Inf, big"1e1000")
+        @test_throws ArgumentError Iduna.EPLI._normalization_result(value)
+        @test_throws ArgumentError Iduna.EPLI._normalization_result(
+            (; normalized_score = value))
+        @test_throws ArgumentError Iduna.EPLI._normalization_result(
+            (; normalized_score = 90.0, normalization_score = value))
+        @test_throws ArgumentError Iduna.EPLI.no_normalization((; raw_score = value))
+        @test_throws ArgumentError Iduna.EPLI.self_reference_normalization(
+            (; raw_score = 10.0); reference_score = (; raw_score = value))
+        @test_throws ArgumentError Iduna.EPLI.self_reference_normalization(
+            (; raw_score = value); reference_score = (; raw_score = 10.0))
+        @test_throws ArgumentError Iduna.EPLI.comparable_positions_normalization(
+            (; matched_positions = value, comparable_positions = 10))
+    end
+    @test Iduna.EPLI.self_reference_normalization(
+        (; raw_score = 15.0); reference_score = (; raw_score = 10.0)).normalized_score ==
+          150.0
+    @test Iduna.EPLI.no_normalization((; raw_score = -2.0)).normalized_score == -2.0
+    @test ismissing(Iduna.EPLI._normalization_result(3.0).normalization_score)
+    @test ismissing(Iduna.EPLI._normalization_result(
+        (; normalized_score = 3.0, normalization_score = missing)).normalization_score)
+    @test Iduna.EPLI.comparable_positions_normalization(
+        (; matched_positions = 0, comparable_positions = 0)).normalized_score == 0.0
+    @test_throws ErrorException Iduna.EPLI.self_reference_normalization(
+        (; raw_score = 10.0); reference_score = (; raw_score = 0.0))
+    @test_throws ArgumentError Iduna.EPLI.self_reference_normalization(
+        (; raw_score = floatmax(Float64)); reference_score = (; raw_score = 1.0))
+end
+
 mktempdir() do tmp
     reference = joinpath(tmp, "reference.fasta")
     sample = joinpath(tmp, "sample.fasta")
