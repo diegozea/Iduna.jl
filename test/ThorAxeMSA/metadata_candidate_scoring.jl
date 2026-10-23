@@ -306,14 +306,15 @@ mktempdir() do tmp
     parallel_lock = ReentrantLock()
     parallel_write_lock = ReentrantLock()
     parallel_call_kinds = Symbol[]
-    parallel_sample_threads = Int[]
+    parallel_sample_tasks = Task[]
+    scoring_task = current_task()
     parallel_score_labels = String[]
     function record_parallel_call!(kind::Symbol)
         lock(parallel_lock)
         try
             push!(parallel_call_kinds, kind)
             if kind === :sample
-                push!(parallel_sample_threads, Base.Threads.threadid())
+                push!(parallel_sample_tasks, current_task())
             end
         finally
             unlock(parallel_lock)
@@ -367,8 +368,13 @@ mktempdir() do tmp
     @test count(==(:sample), parallel_call_kinds) == 4
     @test sort(parallel_score_labels) == ["species_subset_001",
         "species_subset_002", "species_subset_003", "species_subset_004"]
+    @test length(parallel_sample_tasks) == 4
+    # Worker tasks may share a thread while ThorAxe calls serialize. Verify task
+    # dispatch rather than requiring a particular thread assignment.
     if Base.Threads.threadpoolsize() > 1
-        @test length(unique(parallel_sample_threads)) > 1
+        @test all(task -> task !== scoring_task, parallel_sample_tasks)
+    else
+        @test all(task -> task === scoring_task, parallel_sample_tasks)
     end
     @test parallel_row.epli == 2.5
     @test parallel_row.n_samples == 4
@@ -376,6 +382,7 @@ mktempdir() do tmp
         Iduna.ThorAxeMSA.CSV.File(
         Iduna.ThorAxeMSA._pid_scores_path(tmp, parallel_pid)))
     @test parallel_scores.sample == 1:4
+    @test parallel_scores.epli_component == Float64.(1:4)
 
     common_pids = [54.0, 56.0]
     common_calls = Ref(0)
