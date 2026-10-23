@@ -199,5 +199,12 @@ end
         written_target_stages = filter(
             stage -> stage["stage_key"] == "target", written["stages"])
         @test only(written_target_stages)["warnings"] == [target_warning]
+
+        delete!(target_state["identity"], "target_contract")
+        target_state["identity_hash"] = Iduna.Utils._identity_hash(target_state["identity"])
+        Iduna.Utils.write_json(target_stage_path, target_state)
+        Iduna.iduna(; run_kwargs...)
+        @test resolver_calls[] == 2
+        @test JSON.parse(read(target_stage_path, String))["action"] == "rebuild"
     end
 end

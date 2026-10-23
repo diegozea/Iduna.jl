@@ -5,10 +5,10 @@
         legacy_key = "expansion:pid_10.00"
         for (key, dir) in (
             current_key => joinpath(tmp, "expansion", target.ensembl_gene_id,
-                target.transcript_id, "pid_10.00"),
+            target.transcript_id, "pid_10.00"),
             old_key => joinpath(tmp, "expansion", "OLDGENE", "OLDTX", "pid_10.00"),
             legacy_key => joinpath(tmp, "expansion", "LEGACY", "LEGACYTX",
-                "pid_10.00"))
+            "pid_10.00"))
             Iduna.Utils._write_stage_state(dir;
                 stage = "msa_expansion",
                 stage_key = key,
@@ -69,6 +69,36 @@ end
         @test failed["exception"]["type"] == "ErrorException"
         @test failed["exception"]["message"] == "thoraxe boom"
         @test isfile(joinpath(workdir, "target.json"))
+    end
+
+    for (label, rows) in (("missing_query", "wrong ACDE\nother ACDF\n"),
+        ("ambiguous_query", "1|ENSG1.2 ACDE\n2|ENSG1.3 ACDE\n"))
+        mktempdir() do tmp
+            workdir = joinpath(tmp, label)
+            sto = joinpath(tmp, "seed.sto")
+            write(sto, "# STOCKHOLM 1.0\n$(rows)//\n")
+            uniprot = joinpath(tmp, "uniprot.fasta")
+            write(uniprot, ">P20963\nACDE\n")
+            validation_target = Iduna.ResolvedTarget(input_id = "P20963",
+                input_kind = :uniprot, uniprot_id = "P20963", ensembl_gene_id = "ENSG1",
+                transcript_id = "ENST1", uniprot_sequence_path = uniprot)
+            invalid_thoraxe = deepcopy(thoraxe)
+            invalid_thoraxe.seeds[1] = Iduna.SeedSelection(pid = 10.0, epli = 100.0,
+                stockholm_path = sto, summary_path = joinpath(tmp, "summary.csv"))
+            @test_throws ErrorException Iduna.iduna(; id = "P20963", no_expansion = true,
+                workdir, _resolve_target = (args...; kwargs...) -> validation_target,
+                _build_thoraxe_msa = (args...; kwargs...) -> invalid_thoraxe)
+
+            failed = _read_result(workdir)
+            @test failed["status"] == "error"
+            @test failed["failed_stage"] == "validation"
+            @test occursin("ENSG1", failed["exception"]["message"])
+            @test occursin("ENST1", failed["exception"]["message"])
+            @test isempty(failed["validations"])
+            state = Iduna.Utils._read_stage_state(joinpath(workdir, "validation", "pid_10.00"))
+            @test state["status"] == "failed"
+            @test !isfile(joinpath(workdir, "validation", "pid_10.00", "stats.csv"))
+        end
     end
 
     mktempdir() do tmp

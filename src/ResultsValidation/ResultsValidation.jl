@@ -14,7 +14,7 @@ using MIToS.MSA: A3M, AbstractMultipleSequenceAlignment, FASTA, Stockholm,
 
 using ..Utils: ExpansionResult, ResolvedTarget, SeedSelection, ValidationResult,
                _relative_artifact_path, _resolve_artifact_path, format_pid_dir,
-               protein_alignment_stats, resolve_sequence_name, safe_rm,
+               protein_alignment_stats, sequence_name_variants, safe_rm,
                _classify_stage_state, _file_sha256, _read_stage_state,
                _write_stage_state
 
@@ -145,7 +145,14 @@ end
 function _resolve_query_name(msa::AbstractMultipleSequenceAlignment,
         gene_id::AbstractString,
         transcript_id::AbstractString)
-    return resolve_sequence_name(msa, (gene_id, transcript_id); fallback = true)
+    requested = Set(variant for id in (gene_id, transcript_id)
+    for variant in sequence_name_variants(id))
+    matches = [String(name)
+               for name in sequencenames(msa)
+               if any(in(requested), sequence_name_variants(name))]
+    length(matches) == 1 ||
+        error("Expected exactly one query matching $(gene_id) or $(transcript_id); found $(length(matches)).")
+    return only(matches)
 end
 
 function _extract_query_sequence(msa::AbstractMultipleSequenceAlignment,
@@ -185,6 +192,7 @@ function _write_alignment_log(path::AbstractString,
         println(io, "mismatches=$(aln_stats.mismatches)")
         println(io, "insertions=$(aln_stats.insertions)")
         println(io, "deletions=$(aln_stats.deletions)")
+        println(io, "# Alignment rows: UniProt reference first, query second.")
         println(io)
         show(io, MIME("text/plain"), aln_stats.aln)
         println(io)
@@ -238,6 +246,7 @@ function _validation_identity(target::ResolvedTarget,
         expansion::_MaybeExpansion,
         paths)
     return (;
+        validation_contract = 2,
         target = (;
             input_id = target.input_id,
             input_kind = String(target.input_kind),
@@ -334,10 +343,14 @@ end
 # Validation Statistics
 # ---------------------
 
-function _validation_alignment_stats(paths, expansion::_MaybeExpansion)
+function _validation_alignment_stats(target::ResolvedTarget, paths, expansion::_MaybeExpansion)
     seed_stats = alignment_stats(paths.seed_path)
     expanded_stats = _has_expansion(expansion) ? alignment_stats(paths.expanded_path) :
                      nothing
+    for stats in (seed_stats, expanded_stats)
+        stats === nothing && continue
+        _resolve_query_name(stats.msa, target.ensembl_gene_id, target.transcript_id)
+    end
     final_stats = _has_expansion(expansion) ? expanded_stats : seed_stats
     return (; seed_stats, expanded_stats, final_stats)
 end
@@ -478,6 +491,10 @@ end
 
 Compute validation statistics for one seed and its optional expansion.
 
+Each alignment must contain exactly one row matching the requested gene or transcript.
+Missing or ambiguous query rows cause an error, including when no UniProt reference
+was supplied. A UniProt comparison is reported only when its reference is available.
+
 # Arguments
 
 - `target::ResolvedTarget`: resolved target metadata.
@@ -525,7 +542,7 @@ function validate_results(target::ResolvedTarget,
     end
     _write_validation_state(workdir, seed, :running, identity, outputs; action)
     try
-        stats = _validation_alignment_stats(paths, expansion)
+        stats = _validation_alignment_stats(target, paths, expansion)
         comparison = _compare_final_query_to_uniprot(
             target, seed, expansion, stats.final_stats, paths.uniprot_path, workdir)
         warnings = comparison.warnings

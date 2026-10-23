@@ -9,8 +9,8 @@
         """)
         msa = Iduna.ResultsValidation.load_msa(sto)
         @test Iduna.ResultsValidation.nsequences(msa) == 2
-        @test Iduna.ResultsValidation._resolve_query_name(msa, "missing_gene", "missing_tx") ==
-              "seq1"
+        @test_throws ErrorException Iduna.ResultsValidation._resolve_query_name(
+            msa, "missing_gene", "missing_tx")
         stats = Iduna.ResultsValidation.alignment_stats(sto)
         @test stats.n_sequences == 2
         @test stats.n_columns == 4
@@ -199,5 +199,72 @@
             Iduna.ResultsValidation._validation_dir(failure_workdir, missing_seed))
         @test failed_state["status"] == "failed"
         @test failed_state["exception"]["type"] == "ErrorException"
+    end
+end
+
+@testset "validation certifies only the requested query" begin
+    mktempdir() do tmp
+        uniprot = joinpath(tmp, "uniprot.fasta")
+        write(uniprot, ">reference\nACDE\n")
+        for (label, rows, succeeds) in (
+            ("absent", "wrong ACDE\nother ACDF\n", false),
+            ("gene", "ENSG1 ACDE\nother ACDF\n", true),
+            ("transcript", "ENST1 ACDE\nother ACDF\n", true),
+            ("variant", "1|ENSG1.2 ACDE\nother ACDF\n", true),
+            ("ambiguous", "1|ENSG1.2 ACDE\n2|ENSG1.3 ACDE\n", false),
+            ("two_ids", "ENSG1 ACDE\nENST1 ACDE\n", false))
+            sto = joinpath(tmp, "$(label).sto")
+            write(sto, "# STOCKHOLM 1.0\n$(rows)//\n")
+            seed = Iduna.SeedSelection(pid = 10.0, epli = 100.0,
+                stockholm_path = sto, summary_path = joinpath(tmp, "summary.csv"))
+            for reference in (nothing, uniprot)
+                target = Iduna.ResolvedTarget(input_id = "ENST1",
+                    input_kind = :ensembl_transcript, ensembl_gene_id = "ENSG1",
+                    transcript_id = "ENST1", uniprot_sequence_path = reference)
+                workdir = joinpath(tmp, label, reference === nothing ? "no_ref" : "ref")
+                if succeeds
+                    result = Iduna.ResultsValidation.validate_results(target, seed, nothing, workdir)
+                    @test result.status === :ok
+                    @test result.aln_identical === (reference === nothing ? nothing : true)
+                else
+                    @test_throws ErrorException Iduna.ResultsValidation.validate_results(
+                        target, seed, nothing, workdir)
+                    state = Iduna.Utils._read_stage_state(
+                        Iduna.ResultsValidation._validation_dir(workdir, seed))
+                    @test state["status"] == "failed"
+                    @test occursin("query", state["exception"]["message"])
+                end
+            end
+        end
+        seed_path = joinpath(tmp, "gene.sto")
+        seed = Iduna.SeedSelection(pid = 10.0, epli = 100.0,
+            stockholm_path = seed_path, summary_path = joinpath(tmp, "summary.csv"))
+        expansion = Iduna.ExpansionResult(run_dir = tmp, seed_stockholm = seed_path,
+            hits_fasta = uniprot, full_stockholm = joinpath(tmp, "absent.sto"),
+            match_stockholm = joinpath(tmp, "absent.sto"), a3m_path = uniprot,
+            db_dir = tmp, hmm_dir = tmp, logs_dir = tmp)
+        target = Iduna.ResolvedTarget(input_id = "ENST1", input_kind = :ensembl_transcript,
+            ensembl_gene_id = "ENSG1", transcript_id = "ENST1", uniprot_sequence_path = uniprot)
+        @test_throws ErrorException Iduna.ResultsValidation.validate_results(
+            target, seed, expansion, joinpath(tmp, "bad_expansion"))
+
+        # Saved directional columns must use the query-relative convention too.
+        write(seed_path, "# STOCKHOLM 1.0\nENSG1 ACDEF\nother ACDEF\n//\n")
+        result = Iduna.ResultsValidation.validate_results(target, seed, nothing, joinpath(tmp, "indel"))
+        @test (result.aln_insertions, result.aln_deletions) == (1, 0)
+        row = only(Iduna.ResultsValidation.CSV.File(result.stats_path))
+        @test (row.aln_insertions, row.aln_deletions) == (1, 0)
+        @test occursin("insertions=1", read(result.query_vs_uniprot_path, String))
+
+        # A pre-fix completion record must not reuse reversed saved diagnostics.
+        workdir = joinpath(tmp, "indel")
+        stage_dir = Iduna.ResultsValidation._validation_dir(workdir, seed)
+        state = Iduna.Utils._read_stage_state(stage_dir)
+        delete!(state["identity"], "validation_contract")
+        state["identity_hash"] = Iduna.Utils._identity_hash(state["identity"])
+        Iduna.Utils.write_json(Iduna.Utils._stage_state_path(stage_dir), state)
+        rebuilt = Iduna.ResultsValidation.validate_results(target, seed, nothing, workdir)
+        @test (rebuilt.aln_insertions, rebuilt.aln_deletions) == (1, 0)
+        @test Iduna.Utils._read_stage_state(stage_dir)["action"] == "rebuild"
     end
 end

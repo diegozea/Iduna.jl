@@ -215,8 +215,30 @@
         @test resolved.ensembl_gene_id == "ENSG_OVERRIDE"
         @test resolved.ensembl_protein_id == "ENSP_OVERRIDE"
         @test resolved.species == "custom_species"
-        @test resolved.sequence_validated === true
-        @test resolved.mapping_confirmed === true
+        @test resolved.sequence_validated === nothing
+        @test resolved.mapping_confirmed === nothing
+        @test !isfile(resolved.ensembl_protein_sequence_path)
+        @test any(contains("override"), resolved.warnings)
+
+        resolve_override(; kwargs...) = Iduna.IDMapping.resolve_target("P20963";
+            workdir = tmp,
+            _uniprot_entry_fetcher = _ -> candidate_entry,
+            _candidate_validator = (_, _) -> ([first_candidate], uniprot_path),
+            kwargs...)
+        unchanged = resolve_override(ensembl_gene_id = "ENSG000001",
+            ensembl_protein_id = "ENSP000001", species = "Homo sapiens")
+        @test unchanged.sequence_validated === true
+        @test unchanged.mapping_confirmed === true
+        @test isempty(unchanged.warnings)
+        for kwargs in ((ensembl_gene_id = "ENSG_OTHER",), (species = "other_species",))
+            overridden = resolve_override(; kwargs...)
+            @test overridden.sequence_validated === true
+            @test overridden.mapping_confirmed === nothing
+            @test !isempty(overridden.warnings)
+        end
+        changed_protein = resolve_override(ensembl_protein_id = "ENSP_OTHER")
+        @test changed_protein.sequence_validated === nothing
+        @test changed_protein.mapping_confirmed === nothing
 
         missing_gene_candidate = Iduna.IDMapping.EnsemblCandidate(;
             transcript_id = "ENST000004",

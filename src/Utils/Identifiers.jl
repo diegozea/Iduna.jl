@@ -80,7 +80,8 @@ end
 """
     protein_alignment_stats(query_seq, reference_seq; include_alignment=false)
 
-Align two protein sequences and count mismatches, insertions, and deletions.
+Align two protein sequences and count mismatches, query insertions relative to
+the reference, and reference residues deleted from the query.
 
 # Arguments
 
@@ -90,7 +91,7 @@ Align two protein sequences and count mismatches, insertions, and deletions.
 # Keywords
 
 - `include_alignment::Bool = false`: include the BioAlignments alignment object
-  in the returned value.
+  in the returned value, with the reference first and the query second.
 
 # Returns
 
@@ -103,8 +104,9 @@ function protein_alignment_stats(query_seq::AbstractString,
         LongAA(uppercase(String(query_seq))), _PROTEIN_ALIGNMENT_SCORE_MODEL)
     aln = alignment(result)
     mismatches = count_mismatches(aln)
-    insertions = count_insertions(aln)
-    deletions = count_deletions(aln)
+    # The alignment displays the reference first; report indels from the query's side.
+    insertions = count_deletions(aln)
+    deletions = count_insertions(aln)
     stats = (;
         identical = mismatches == 0 && insertions == 0 && deletions == 0,
         mismatches,

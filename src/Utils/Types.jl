@@ -27,8 +27,10 @@ Resolved IDs and sequence checks for one input protein or transcript.
   saved Ensembl protein sequence. `nothing` means no Ensembl sequence was saved.
 - `sequence_validated::Union{Nothing, Bool} = nothing`: Whether the UniProt and
   Ensembl protein sequences matched. `nothing` means the comparison was not run.
+  Changing the selected protein ID clears this flag until that protein is checked.
 - `mapping_confirmed::Union{Nothing, Bool} = nothing`: Whether the
   UniProt-to-Ensembl mapping was confirmed. `nothing` means it was not checked.
+  An override of the selected gene, protein or species clears this flag.
 - `workdir::Union{Nothing, String} = nothing`: Work directory used for paths
   stored in this result. `nothing` means paths are not tied to a work directory.
 - `warnings::Vector{String} = String[]`: Non-fatal problems found while resolving
