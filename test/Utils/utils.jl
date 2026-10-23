@@ -1,5 +1,73 @@
 import URIs
 
+@testset "Cleanup containment" begin
+    mktempdir() do tmp
+        root = mkpath(joinpath(tmp, "work"))
+        sibling = mkpath(joinpath(tmp, "work-other"))
+        sentinel = joinpath(sibling, "keep.txt")
+        write(sentinel, "outside")
+
+        @test_throws ErrorException Iduna.Utils.safe_rm(root, root)
+        @test_throws ErrorException Iduna.Utils.safe_rm(joinpath(root, "."), root)
+        @test_throws ErrorException Iduna.Utils.safe_rm(sentinel, root)
+        @test_throws ErrorException Iduna.Utils.safe_rm(
+            joinpath(root, "..", "work-other", "keep.txt"), root)
+        @test isfile(sentinel)
+
+        nested = mkpath(joinpath(root, "nested", "deeper"))
+        write(joinpath(nested, "owned.txt"), "inside")
+        @test isnothing(Iduna.Utils.safe_rm(dirname(nested), root))
+        @test !ispath(dirname(nested))
+        @test isnothing(Iduna.Utils.safe_rm(joinpath(root, "missing", "leaf"), root))
+        dot_directory = mkpath(joinpath(root, "..notes"))
+        @test isnothing(Iduna.Utils.safe_rm(dot_directory, root))
+        @test !ispath(dot_directory)
+
+        escape = joinpath(root, "escape")
+        symlink(sibling, escape; dir_target = true)
+        @test_throws ErrorException Iduna.Utils.safe_rm(joinpath(escape, "keep.txt"), root)
+        @test isfile(sentinel)
+        @test_throws ErrorException Iduna.Utils.safe_rm(joinpath(escape, "missing", "leaf"), root)
+        @test isnothing(Iduna.Utils.safe_rm(escape, root))
+        @test !islink(escape)
+        @test isfile(sentinel)
+
+        symlink(sibling, escape; dir_target = true)
+        @test isnothing(Iduna.Utils.safe_rm(joinpath(escape, "."), root))
+        @test !islink(escape)
+        @test isfile(sentinel)
+
+        internal = mkpath(joinpath(root, "internal"))
+        internal_link = joinpath(root, "internal-link")
+        symlink(internal, internal_link; dir_target = true)
+        write(joinpath(internal, "owned.txt"), "inside")
+        @test isnothing(Iduna.Utils.safe_rm(joinpath(internal_link, "owned.txt"), root))
+        @test !isfile(joinpath(internal, "owned.txt"))
+        write(joinpath(internal, "keep.txt"), "keep")
+        @test isnothing(Iduna.Utils.safe_rm(joinpath(internal_link, "."), root))
+        @test !islink(internal_link)
+        @test isfile(joinpath(internal, "keep.txt"))
+
+        dangling = joinpath(root, "dangling")
+        symlink(joinpath(sibling, "missing"), dangling; dir_target = true)
+        @test_throws ErrorException Iduna.Utils.safe_rm(joinpath(dangling, "leaf"), root)
+        @test islink(dangling)
+        @test isnothing(Iduna.Utils.safe_rm(dangling, root))
+        @test !islink(dangling)
+
+        linked_root = joinpath(tmp, "linked-work")
+        symlink(root, linked_root; dir_target = true)
+        linked_file = joinpath(root, "owned.txt")
+        write(linked_file, "inside")
+        @test isnothing(Iduna.Utils.safe_rm(joinpath(linked_root, "owned.txt"), linked_root))
+        @test !isfile(linked_file)
+        @test isdir(root)
+        @test_throws ErrorException Iduna.Utils.safe_rm(linked_root, linked_root)
+        @test islink(linked_root)
+        @test isfile(sentinel)
+    end
+end
+
 @testset "Utils" begin
     @test Iduna.Utils.id_kind("P20963") === :uniprot
     @test Iduna.Utils.id_kind("A0A0C4DGY3") === :uniprot

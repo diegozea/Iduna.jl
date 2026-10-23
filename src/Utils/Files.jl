@@ -92,10 +92,19 @@ function prepare_output_dir(input_id::AbstractString;
     return root
 end
 
+function _is_within_directory(path::AbstractString, root::AbstractString)
+    relative = relpath(path, root)
+    return !isabspath(relative) && first(splitpath(relative)) != ".."
+end
+
 """
     safe_rm(path, root)
 
-Remove a path only when it is inside the active work directory.
+Remove a path only when it and its resolved parent are inside the work directory.
+The root itself is never removed. A symlink at `path` is removed without following
+its target; parent symlinks must stay within the resolved root. Missing paths are
+ignored only after checking their existing ancestors. The root may be a symlink.
+This check assumes directories and symlinks are not changed concurrently.
 
 # Arguments
 
@@ -104,15 +113,25 @@ Remove a path only when it is inside the active work directory.
 
 # Throws
 
-- `ErrorException`: if `path` is outside `root`.
+- `ErrorException`: if `path` is the root, escapes it, or has an unresolved parent symlink.
 """
 function safe_rm(path::AbstractString, root::AbstractString)
-    abs_path = abspath(path)
+    # Strip trailing separators so rm unlinks a final directory symlink.
+    abs_path = joinpath(splitpath(abspath(path)))
     abs_root = abspath(root)
-    rel = relpath(abs_path, abs_root)
-    # Deletions are allowed only inside the active work directory.
-    if rel == "." || startswith(rel, "..") || isabspath(rel)
-        error("Refusing to remove $(abs_path) because it is outside workdir $(abs_root).")
+    if relpath(abs_path, abs_root) == "." || !_is_within_directory(abs_path, abs_root)
+        error("Refusing to remove $(abs_path): path must be strictly inside workdir $(abs_root).")
+    end
+    resolved_root = realpath(abs_root)
+    # Resolve the parent, so removing a symlink itself does not follow its target.
+    parent = dirname(abs_path)
+    while !ispath(parent)
+        islink(parent) &&
+            error("Refusing to remove $(abs_path): ancestor $(parent) is an unresolved symlink.")
+        parent = dirname(parent)
+    end
+    if !_is_within_directory(realpath(parent), resolved_root)
+        error("Refusing to remove $(abs_path): parent resolves outside workdir $(abs_root).")
     end
     rm(abs_path; recursive = true, force = true)
     return nothing
