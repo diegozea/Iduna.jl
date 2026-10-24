@@ -1,0 +1,14 @@
+{
+  "input_id": "Q13148",
+  "input_kind": "uniprot",
+  "uniprot_id": null,
+  "ensembl_gene_id": "ENSG1",
+  "transcript_id": "ENST1",
+  "ensembl_protein_id": null,
+  "species": null,
+  "uniprot_sequence_path": null,
+  "ensembl_protein_sequence_path": null,
+  "sequence_validated": null,
+  "mapping_confirmed": null,
+  "warnings": []
+}

@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "stage": "validation",
+  "stage_key": "validation:pid_30.00",
+  "status": "done",
+  "action": "run",
+  "identity": {
+    "validation_contract": 2,
+    "target": {
+      "input_id": "Q13148",
+      "input_kind": "uniprot",
+      "uniprot_id": null,
+      "ensembl_gene_id": "ENSG1",
+      "transcript_id": "ENST1",
+      "ensembl_protein_id": null,
+      "species": null
+    },
+    "seed": {
+      "pid": 30.001,
+      "stockholm_sha256": "c548aba82d6126cbbf4a064e641f7f3673ff8c2e27becab205d21603202b88a3"
+    },
+    "expansion": null,
+    "uniprot_sequence_sha256": null
+  },
+  "identity_hash": "3e82dc8cbb8af18825b6fb69938df92c236c43230f0f055e0d025459c93f3966",
+  "outputs": {
+    "query_vs_uniprot_path": null,
+    "stats_path": "validation/pid_30.00/stats.csv"
+  },
+  "warnings": [],
+  "exception": null,
+  "started_at": "2026-10-24T19:44:25.190",
+  "updated_at": "2026-10-24T19:44:27.408",
+  "finished_at": "2026-10-24T19:44:27.408"
+}

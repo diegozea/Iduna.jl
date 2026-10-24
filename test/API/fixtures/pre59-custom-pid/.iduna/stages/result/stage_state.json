@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "stage": "result",
+  "stage_key": "result",
+  "status": "done",
+  "action": "run",
+  "identity": {
+    "input_id": "Q13148",
+    "stage_hashes": [
+      "df92e7e27fb348d932165a70f6f8745d8c4acf2e009400e9286bbfba7e683a3b",
+      "3e82dc8cbb8af18825b6fb69938df92c236c43230f0f055e0d025459c93f3966"
+    ]
+  },
+  "identity_hash": "36958f4d0b3283125218308f0b5849527ac1b2e891847f0fa0b49c1610df9384",
+  "outputs": {
+    "result_json": "result.json"
+  },
+  "warnings": [],
+  "exception": null,
+  "started_at": "2026-10-24T19:44:27.808",
+  "updated_at": "2026-10-24T19:44:27.808",
+  "finished_at": "2026-10-24T19:44:27.808"
+}

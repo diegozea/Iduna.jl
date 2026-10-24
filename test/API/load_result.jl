@@ -43,6 +43,47 @@
     end
 
     mktempdir() do tmp
+        workdir = joinpath(tmp, "precise_pids")
+        pids = [30.001, 30.004, nextfloat(30.004)]
+        fixture = _write_load_result_fixture(workdir; pids, expansion = false)
+        loaded = Iduna.load_result(workdir)
+        @test [seed.pid for seed in loaded.thoraxe_msa.seeds] == pids
+        for field in (:sequence_fastas, :species_files, :thoraxe_dirs)
+            paths = getproperty(loaded.thoraxe_msa, field)
+            @test allunique(paths)
+            @test paths ==
+                  [relpath(path, workdir) for path in getproperty(fixture.thoraxe, field)]
+        end
+    end
+
+    for external in (false, true)
+        mktempdir() do tmp
+            workdir = joinpath(tmp, "custom_seed")
+            fixture = _write_load_result_fixture(workdir; pids = [30.001],
+                expansion = false, validation = false)
+            custom_seed = joinpath(external ? tmp : workdir, "custom-seeds", "seed.sto")
+            mkpath(dirname(custom_seed))
+            cp(fixture.seed.stockholm_path, custom_seed)
+            recorded_path = external ? custom_seed : relpath(custom_seed, workdir)
+            data = JSON.parse(read(fixture.result_json, String))
+            data["thoraxe_msa"]["seeds"][1]["stockholm_path"] = recorded_path
+            Iduna.Utils.write_json(fixture.result_json, data)
+
+            loaded = Iduna.load_result(workdir)
+            @test only(loaded.thoraxe_msa.seeds).stockholm_path == recorded_path
+            candidate = joinpath("thoraxe_msa", "candidates", "pid_30.001")
+            @test loaded.thoraxe_msa.sequence_fastas ==
+                  [joinpath(candidate, "sequences", "candidate_sequences_full.fasta")]
+            @test loaded.thoraxe_msa.species_files ==
+                  [joinpath(candidate, "species", "candidate_species_full.txt")]
+            @test loaded.thoraxe_msa.thoraxe_dirs ==
+                  [joinpath("thoraxe_msa", "runs", "pid_30.001", "full", "thoraxe")]
+            @test Iduna.ResultsValidation.stringsequence(Iduna.load_seed_msa(loaded), 1) ==
+                  "AC"
+        end
+    end
+
+    mktempdir() do tmp
         workdir = joinpath(tmp, "stage_summary")
         fixture = _write_load_result_fixture(workdir)
         data = JSON.parse(read(fixture.result_json, String))

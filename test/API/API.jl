@@ -4,6 +4,7 @@ import Logging
 @testset "API" begin
     include("core_and_fixtures.jl")
     include("load_result.jl")
+    include("legacy_archive.jl")
     include("stage_helpers_and_logging.jl")
     include("pretty_printing.jl")
     include("paths_and_options.jl")
