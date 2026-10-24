@@ -260,3 +260,44 @@ end
         @test JSON.parse(read(target_stage_path, String))["action"] == "rebuild"
     end
 end
+
+@testset "target provenance controls reuse" begin
+    mktempdir() do root
+        calls = Ref(0)
+        resolver = (primary; workdir, kwargs...) -> begin
+            calls[] += 1
+            Iduna.ResolvedTarget(; input_id = primary, input_kind = :uniprot,
+                ensembl_gene_id = "GENE", transcript_id = "TX", workdir)
+        end
+        kwargs = (; supplied_uniprot = nothing, ensembl_gene_id = nothing,
+            ensembl_protein_id = nothing, disambiguating_transcript = nothing,
+            species = nothing, overwrite = false, resolver)
+        Iduna._resolve_target_stage("P20963", root; kwargs...)
+        state_path = Iduna.Utils._stage_state_path(Iduna._target_stage_dir(root))
+        state = JSON.parse(read(state_path, String))
+        @test state["identity"]["implementation"]["source_sha256"] !== nothing
+        state["identity"]["implementation"]["source_sha256"] = "old-implementation"
+        state["identity_hash"] = Iduna.Utils._identity_hash(state["identity"])
+        Iduna.Utils.write_json(state_path, state)
+        Iduna._resolve_target_stage("P20963", root; kwargs...)
+        @test calls[] == 2
+        Iduna._resolve_target_stage("P20963", root; kwargs...)
+        @test calls[] == 2
+
+        # A selected environment without the loaded dependencies cannot authorize reuse.
+        previous_project = Base.active_project()
+        try
+            Iduna.Utils.Pkg.activate(joinpath(root, "empty-project"); io = devnull)
+            for expected in (3, 4)
+                Iduna._resolve_target_stage("P20963", root; kwargs...)
+                @test calls[] == expected
+                @test JSON.parse(read(state_path, String))["identity"]["implementation"] ===
+                      nothing
+            end
+        finally
+            Iduna.Utils.Pkg.activate(dirname(previous_project); io = devnull)
+        end
+        Iduna._resolve_target_stage("P20963", root; kwargs...)
+        @test calls[] == 5
+    end
+end

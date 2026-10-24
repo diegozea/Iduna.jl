@@ -54,7 +54,13 @@ Iduna writes a stable work directory. The main files and folders are:
 - `logs/`: logs from the external tools.
 
 Rerunning with `overwrite=false` reuses matching completed stages when their
-inputs and required outputs still match.
+inputs, implementation provenance and required output digests still match.
+MMseqs expansion reuse also needs an immutable database snapshot manifest, supplied
+as `mmseqs_db_manifest="/path/to/snapshot.json"` or `--mmseqs-db-manifest`.
+Without that declaration, expansion still runs but is recomputed on later calls.
+See the [output documentation](https://diegozea.github.io/Iduna.jl/dev/output/)
+for the manifest format and migration details. Preserve copies of earlier results
+before rerunning: untrustworthy legacy caches are rebuilt.
 
 ## Common Options
 

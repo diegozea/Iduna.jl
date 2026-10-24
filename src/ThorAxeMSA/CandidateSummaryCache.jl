@@ -40,7 +40,9 @@ function _candidate_run_metadata(input_dir::AbstractString,
         effective_specieslist::Union{Nothing, AbstractString},
         orthology::AbstractString,
         specieslist_filter::Bool,
-        biomart_datasets_filter::Bool)
+        biomart_datasets_filter::Bool,
+        provenance = nothing,
+        workdir::AbstractString = dirname(input_dir))
     return (;
         gene_id = target.ensembl_gene_id,
         transcript_id = target.transcript_id,
@@ -53,11 +55,14 @@ function _candidate_run_metadata(input_dir::AbstractString,
         requested_pid_sample_seed = requested_sample_seed,
         sampling_strategy = sampling_strategy,
         effective_specieslist = _normalized_specieslist(effective_specieslist),
+        specieslist_fingerprint = _specieslist_identity_hash(effective_specieslist),
         orthology = String(orthology),
         specieslist_filter = Bool(specieslist_filter),
         biomart_datasets_filter = Bool(biomart_datasets_filter),
         transcript_query_fingerprint = _bundle_fingerprint(input_dir),
-        selection_mode = sample_count == 0 ? "all_candidates" : "sampled_selection"
+        selection_mode = sample_count == 0 ? "all_candidates" : "sampled_selection",
+        reference_identity = _thoraxe_reference_identity(target, workdir),
+        provenance
     )
 end
 
@@ -132,10 +137,17 @@ function _thoraxe_msa_stage_cache(workdir::AbstractString,
         metadata,
         stage_identity;
         overwrite::Bool)
-    cache = overwrite ? (; reusable = false, status = :stale, warning = nothing) :
+    known = _known_thoraxe_provenance(get(metadata, :provenance, nothing),
+                get(metadata, :pid_sample_count, 0)) &&
+            get(metadata, :reference_identity, nothing) !== nothing &&
+            get(metadata, :specieslist_fingerprint, nothing) !== nothing
+    has_manifest = isfile(joinpath(_thoraxe_msa_stage_dir(workdir), "stage_state.json"))
+    cache = !known ?
+            (; reusable = false, status = has_manifest ? :stale : :missing,
+        warning = "ThorAxe MSA producer identity is unknown; cache reuse is disabled.") :
+            overwrite ? (; reusable = false, status = :stale, warning = nothing) :
             _classify_stage_state(_thoraxe_msa_stage_dir(workdir), stage_identity,
         (; pid_summary = summary_path); stage_label = "ThorAxe MSA")
-    has_manifest = isfile(joinpath(_thoraxe_msa_stage_dir(workdir), "stage_state.json"))
     summary_matches = cache.reusable &&
                       _has_matching_candidate_summary(summary_path, metadata)
     return (; cache, has_manifest, summary_matches)

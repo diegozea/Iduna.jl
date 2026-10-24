@@ -45,6 +45,12 @@ function _classify_thoraxe_input_stage(workdir::AbstractString,
         identity;
         overwrite::Bool)
     overwrite && return (; reusable = false, status = :stale, warning = nothing)
+    known = get(identity, :implementation_hash, nothing) !== nothing &&
+            get(identity, :specieslist_fingerprint, nothing) !== nothing &&
+            (get(identity, :source_kind, nothing) == "cached_input" ||
+             get(identity, :tool_hash, nothing) !== nothing)
+    known || return (; reusable = false, status = :stale,
+        warning = "ThorAxe input producer identity is unknown; cache reuse is disabled.")
     return _classify_stage_state(_thoraxe_input_stage_dir(workdir), identity,
         _thoraxe_input_outputs(input_dir); stage_label = "ThorAxe transcript_query input")
 end
@@ -110,17 +116,43 @@ function _expected_transcript_query_metadata(target::ResolvedTarget;
         orthology::AbstractString,
         source_kind::AbstractString,
         source_path::Union{Nothing, AbstractString} = nothing,
-        source_fingerprint::Union{Nothing, AbstractString} = nothing)
+        source_fingerprint::Union{Nothing, AbstractString} = nothing,
+        implementation = _thoraxe_implementation_identity(),
+        tool_identity = nothing)
     return (;
         gene_id = target.ensembl_gene_id,
         transcript_id = target.transcript_id,
         species = _normalize_species_name(target.species),
         specieslist = _normalized_specieslist(specieslist),
+        specieslist_fingerprint = _specieslist_identity_hash(specieslist),
         orthology = String(orthology),
         source_kind = String(source_kind),
         source_path = source_path === nothing ? nothing : abspath(String(source_path)),
-        source_fingerprint
+        source_fingerprint,
+        implementation_hash = implementation === nothing ? nothing :
+                              _identity_hash(implementation),
+        tool_hash = tool_identity === nothing ? nothing : _identity_hash(tool_identity)
     )
+end
+
+function _specieslist_identity_hash(specieslist::Union{Nothing, AbstractString})
+    value = _normalized_specieslist(specieslist)
+    return _inspect_thoraxe_identity() do
+        content = value !== nothing && isfile(value) ? _file_sha256(value) : nothing
+        _identity_hash((; value, content))
+    end
+end
+
+function _thoraxe_reference_identity(target::ResolvedTarget, workdir::AbstractString)
+    id = target.uniprot_id
+    path = target.uniprot_sequence_path
+    path === nothing && return (; id, status = :unrequested, sha256 = nothing)
+    artifact_workdir = target.workdir === nothing ? workdir : target.workdir
+    resolved = _resolve_artifact_path(path, artifact_workdir)
+    isfile(resolved) || return (; id, status = :missing, sha256 = nothing)
+    return _inspect_thoraxe_identity() do
+        (; id, status = :present, sha256 = _file_sha256(resolved))
+    end
 end
 
 function _metadata_value_matches(stored, expected)

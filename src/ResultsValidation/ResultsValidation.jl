@@ -15,7 +15,8 @@ using MIToS.MSA: A3M, AbstractMultipleSequenceAlignment, FASTA, Stockholm,
 using ..Utils: ExpansionResult, ResolvedTarget, SeedSelection, ValidationResult,
                _relative_artifact_path, _resolve_artifact_path, format_pid_dir,
                protein_alignment_stats, sequence_name_variants, safe_rm,
-               _classify_stage_state, _file_sha256, _read_stage_state,
+               _classify_stage_state, _file_sha256, _implementation_identity,
+               _read_stage_state,
                _write_stage_state
 
 # Expansion Presence
@@ -247,6 +248,7 @@ function _validation_identity(target::ResolvedTarget,
         paths)
     return (;
         validation_contract = 2,
+        implementation = _implementation_identity(),
         target = (;
             input_id = target.input_id,
             input_kind = String(target.input_kind),
@@ -529,7 +531,8 @@ function validate_results(target::ResolvedTarget,
     paths = _validation_input_paths(target, seed, expansion, workdir)
     outputs = _validation_outputs(workdir, seed, paths)
     identity = _validation_identity(target, seed, expansion, paths)
-    cache = overwrite ? (; reusable = false, status = :stale, warning = nothing) :
+    cache = overwrite || identity.implementation === nothing ?
+            (; reusable = false, status = :stale, warning = nothing) :
             _classify_stage_state(_validation_dir(workdir, seed), identity, outputs;
         stage_label = "validation")
     if cache.reusable

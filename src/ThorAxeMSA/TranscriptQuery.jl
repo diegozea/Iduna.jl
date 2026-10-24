@@ -193,12 +193,17 @@ function _ensure_transcript_query(target::ResolvedTarget, workdir::AbstractStrin
         orthology::AbstractString = "1:1",
         transcript_query_runner::Union{Nothing, Function} = nothing,
         thoraxe_runner_factory::Function = _transcript_query_thoraxe_runner,
-        sleep_fn::Function = sleep)
+        sleep_fn::Function = sleep,
+        _implementation = _thoraxe_implementation_identity(),
+        _tool_identity = cached_input_dir === nothing ?
+                         _transcript_query_tool_identity() : nothing)
     _orthology_relationships(orthology)
     metadata = _expected_transcript_query_metadata(target;
         specieslist,
         orthology,
-        source_kind = cached_input_dir === nothing ? "transcript_query" : "cached_input")
+        source_kind = cached_input_dir === nothing ? "transcript_query" : "cached_input",
+        implementation = _implementation,
+        tool_identity = _tool_identity)
     if cached_input_dir !== nothing
         @info "Preparing ThorAxe input from cached transcript_query bundle." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id source=cached_input_dir workdir
         return _ensure_cached_thoraxe_input(cached_input_dir, workdir; overwrite, metadata)

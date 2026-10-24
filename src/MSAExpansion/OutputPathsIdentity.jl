@@ -55,8 +55,14 @@ function _expansion_identity(target::ResolvedTarget,
         match_mode::Integer,
         match_ratio::Union{Nothing, Real},
         hmmbuild_symfrac::Real,
-        centroids::Bool)
+        centroids::Bool,
+        mmseqs_db_manifest::Union{Nothing, AbstractString} = nothing,
+        mmseqs_threads::Union{Nothing, Integer} = Threads.nthreads())
     return (;
+        implementation = _implementation_identity((HMMER_jll, MMseqs2_jll)),
+        tools = (;
+            mmseqs = _jll_tool_identity(MMseqs2_jll, (:mmseqs,)),
+            hmmer = _jll_tool_identity(HMMER_jll, (:hmmbuild, :hmmalign, :esl_alimask))),
         target = (;
             input_id = target.input_id,
             input_kind = String(target.input_kind),
@@ -74,10 +80,20 @@ function _expansion_identity(target::ResolvedTarget,
         ),
         expansion = (;
             mmseqs_db = abspath(String(mmseqs_db)),
+            database_snapshot = _mmseqs_snapshot_identity(mmseqs_db, mmseqs_db_manifest),
+            mmseqs_threads,
             match_mode = Int(match_mode),
             match_ratio = match_ratio === nothing ? nothing : Float64(match_ratio),
             hmmbuild_symfrac = Float64(hmmbuild_symfrac),
             centroids = Bool(centroids)
         )
     )
+end
+
+function _expansion_reuse_trusted(identity)
+    return identity.implementation !== nothing &&
+           all(!isnothing, values(identity.tools)) &&
+           identity.expansion.database_snapshot !== nothing &&
+           identity.expansion.mmseqs_threads !== nothing &&
+           identity.expansion.mmseqs_threads > 0
 end

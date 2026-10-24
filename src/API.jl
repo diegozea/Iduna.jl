@@ -39,6 +39,8 @@ selected seeds, validation statistics, warnings, and status.
 - `mmseqs_db = nothing`: MMseqs2 database prefix used for expansion. When
   `nothing`, expansion is only valid with `no_expansion=true`; otherwise Iduna
   throws an error.
+- `mmseqs_db_manifest = nothing`: immutable database snapshot manifest. Expansion
+  runs without one, but its results cannot be reused on subsequent calls.
 - `no_expansion::Bool = false`: run MMseqs2/HMMER expansion after the ThorAxe
   MSA stage. When `true`, Iduna stops after ThorAxe and `mmseqs_db` is not
   required.
@@ -116,6 +118,7 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
         ensembl_gene_id::Union{Nothing, AbstractString} = nothing,
         ensembl_protein_id::Union{Nothing, AbstractString} = nothing,
         mmseqs_db::Union{Nothing, AbstractString} = nothing,
+        mmseqs_db_manifest::Union{Nothing, AbstractString} = nothing,
         no_expansion::Bool = false,
         workdir::Union{Nothing, AbstractString} = nothing,
         output_dir::Union{Nothing, AbstractString} = nothing,
@@ -194,6 +197,7 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
                 push!(expansions,
                     _expand_msa(target, seed, root;
                         mmseqs_db,
+                        mmseqs_db_manifest,
                         overwrite,
                         match_mode,
                         match_ratio,
@@ -508,6 +512,7 @@ function _target_identity(primary::AbstractString;
         species)
     return (;
         target_contract = 2,
+        implementation = Utils._implementation_identity(),
         input_id = String(primary),
         input_kind = String(Utils.id_kind(primary)),
         uniprot_id = supplied_uniprot === nothing ? nothing : String(supplied_uniprot),
@@ -603,7 +608,8 @@ function _resolve_target_stage(primary::AbstractString, workdir::AbstractString;
         species)
     outputs = (; target_json = joinpath(workdir, "target.json"))
     stage_dir = _target_stage_dir(workdir)
-    cache = overwrite ? (; reusable = false, status = :stale, warning = nothing) :
+    cache = overwrite || identity.implementation === nothing ?
+            (; reusable = false, status = :stale, warning = nothing) :
             Utils._classify_stage_state(stage_dir, identity, outputs;
         stage_label = "target")
     cached_target = cache.reusable ? _read_cached_target(workdir, identity) : nothing
@@ -623,7 +629,7 @@ function _resolve_target_stage(primary::AbstractString, workdir::AbstractString;
 
     cache.warning === nothing || @warn String(cache.warning) workdir status=cache.status
     action = cache.status === :missing ? :run : :rebuild
-    (overwrite || cache.status !== :missing) && _clear_target_outputs!(workdir)
+    cache.status !== :missing && _clear_target_outputs!(workdir)
     Utils._write_stage_state(stage_dir;
         stage = "target",
         stage_key = "target",

@@ -2,7 +2,8 @@
 # ----------
 
 """
-    expand_msa(target, seed, workdir; mmseqs_db, overwrite=false, match_mode=1,
+    expand_msa(target, seed, workdir; mmseqs_db, mmseqs_db_manifest=nothing,
+               overwrite=false, match_mode=1,
                match_ratio=nothing, hmmbuild_symfrac=0.0, centroids=false,
                mmseqs_threads=Threads.nthreads()) -> ExpansionResult
 
@@ -18,9 +19,14 @@ Expand one selected seed MSA against an MMseqs2 database.
 # Keywords
 
 - `mmseqs_db::AbstractString`: MMseqs2 database prefix.
+- `mmseqs_db_manifest = nothing`: manifest declaring an immutable database
+  snapshot and SHA-256 checksums of all its component files. Without a valid
+  manifest, expansion runs but cached expansion results are not reused. Iduna
+  trusts the snapshot's immutability instead of rehashing the database each run.
 - `overwrite::Bool = false`: reuse package-owned expansion outputs when their
-  run identity and required-file digests still match. When `true`, Iduna rebuilds
-  those outputs. Older states without digests are rebuilt on the next run.
+  implementation, tools, database snapshot, thread settings, run identity and
+  required-file digests still match. When `true`, Iduna rebuilds those outputs.
+  Older states without this provenance are rebuilt on the next run.
 - `match_mode::Integer = 1`: MMseqs2 profile matching mode passed to
   `mmseqs msa2profile --match-mode`.
 - `match_ratio = nothing`: optional MMseqs2 match-ratio setting. When `nothing`,
@@ -32,6 +38,7 @@ Expand one selected seed MSA against an MMseqs2 database.
   also saves a centroid-level MSA.
 - `mmseqs_threads = Threads.nthreads()`: number of threads passed to MMseqs2.
   This uses the active Julia thread count unless another value is passed.
+  Passing `nothing` leaves the tool's thread default unspecified and disables reuse.
 
 # Returns
 
@@ -41,6 +48,7 @@ function expand_msa(target::ResolvedTarget,
         seed::SeedSelection,
         workdir::AbstractString;
         mmseqs_db::AbstractString,
+        mmseqs_db_manifest::Union{Nothing, AbstractString} = nothing,
         overwrite::Bool = false,
         match_mode::Integer = 1,
         match_ratio::Union{Nothing, Real} = nothing,
@@ -54,7 +62,8 @@ function expand_msa(target::ResolvedTarget,
     ensure_mmseqs_db(mmseqs_db)
 
     ctx = _expansion_context(target, seed, workdir, mmseqs_db;
-        match_mode, match_ratio, hmmbuild_symfrac, centroids)
+        match_mode, match_ratio, hmmbuild_symfrac, centroids,
+        mmseqs_db_manifest, mmseqs_threads)
     cache = _prepare_expansion_cache!(ctx.run_dir, workdir, ctx.identity, ctx.outputs;
         overwrite)
     cache.reusable && return _cached_expansion_result(ctx, workdir)

@@ -18,7 +18,8 @@ using ..Utils: ExpansionResult, ResolvedTarget, SeedSelection, _resolve_artifact
                ensure_mmseqs_db, format_pid, format_pid_dir, run_logged, safe_rm,
                s_exon_code_map, s_exon_codes, set_s_exon_annotations!, write_fasta,
                write_s_exon_blocks_tsv, _classify_stage_state, _file_sha256,
-               _read_stage_state, _stage_state_path, _write_stage_state
+               _read_stage_state, _stage_state_path, _write_stage_state,
+               _implementation_identity, _jll_tool_identity, _mmseqs_snapshot_identity
 
 export expand_msa,
        normalize_stockholm_annotations!,

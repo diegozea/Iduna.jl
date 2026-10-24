@@ -1,5 +1,44 @@
 ## Iduna.jl Release Notes
 
+### Unreleased correctness changes
+
+- Validation requires exactly one requested gene/transcript query, even without a
+  UniProt comparison. Indel counts now describe the query relative to the reference;
+  changing target identifiers clears validation claims that no longer apply.
+- Distinct effective PID thresholds keep distinct artifacts and logs. Empty,
+  duplicate, non-finite and out-of-range threshold lists fail before stage work.
+  Non-finite EPLI scores and normalization values fail explicitly. Finite EPLI
+  values retain their existing scientific definition and are not clamped.
+- ThorAxe invocations through Iduna now serialize for their complete duration to
+  protect the process environment and working directory. This can reduce parallel
+  throughput. Other code that changes global process state is outside this lock.
+- Cleanup rejects paths escaping through parent symlinks and unlinks final symlinks
+  without deleting their targets.
+- Completed stages verify required output digests and structure. Partial writes,
+  changed outputs and legacy manifests are not reusable; final result metadata is
+  published before its completion record.
+- Reuse records Iduna source, dependency/tool versions, executable fingerprints,
+  reference contents and execution settings. Unknown tool provenance disables
+  affected reuse. Source and loaded dependencies must remain stable for the Julia
+  process lifetime; restart Julia after changing them.
+  Python probes preserve virtual-environment interpreter paths, and path-developed
+  Julia dependencies include scientific data under `src` and `ext`. Earlier producer
+  fingerprints require recomputation.
+- MMseqs expansion requires an explicitly declared immutable database snapshot
+  manifest for reuse (`mmseqs_db_manifest` / `--mmseqs-db-manifest`). Computation
+  remains available without one, with reuse disabled. Rebuild the manifest after
+  changing the database; Iduna does not rehash a large database on every run.
+- Generic EPLI alignment reuse requires an explicit `aligner_cache_id` identifying
+  the callback, tool build and relevant external state. Without it, each call
+  realigns, including calls using built-in aligners.
+
+Earlier candidate caches and completion records require recomputation. No global
+cache deletion or archive migration is performed, but rerunning a stale stage
+replaces its package-owned outputs. Copy results you need to retain before rerunning.
+Reading recorded artifact paths in untouched archives does not certify their old
+scores or make them eligible for computational reuse. See the output and EPLI
+documentation for the cache contracts and immutable snapshot format.
+
 ### Changes from v0.8.0 to v0.9.0
 
 Breaking changes:

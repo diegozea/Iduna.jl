@@ -18,7 +18,8 @@ using MIToS.MSA: AbstractMultipleSequenceAlignment, AbstractSequence,
                  read_file, sequence_id, sequencenames, stringsequence, write_file
 using Statistics: median
 
-using ..Utils: _file_sha256, _sample_indices, _sample_rng, _terminal_progress_enabled,
+using ..Utils: _file_sha256, _implementation_identity, _sample_indices, _sample_rng,
+               _terminal_progress_enabled,
                write_fasta, write_json
 
 export comparable_positions_normalization,
