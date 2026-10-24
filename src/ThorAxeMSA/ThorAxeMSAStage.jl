@@ -347,7 +347,8 @@ Run or reuse the ThorAxe input and MSA stages for one resolved target.
 # Arguments
 
 - `target::ResolvedTarget`: resolved target metadata.
-- `workdir::AbstractString`: Iduna work directory.
+- `workdir::AbstractString`: Iduna work directory. Relative paths are resolved
+  against the current directory; returned artifact paths are absolute.
 
 # Keywords
 
@@ -411,6 +412,7 @@ function build_thoraxe_msa(target::ResolvedTarget, workdir::AbstractString;
         sampling_strategy::Symbol = :common,
         _provenance = nothing,
         _stage_runner::Function = _run_thoraxe_msa_stage!)
+    workdir = abspath(workdir)
     pid_thresholds = _validate_pid_thresholds(pid_thresholds)
     _orthology_relationships(orthology)
     _validate_pid_sampling_options(pid_sample_count, pid_sample_fraction)

@@ -706,7 +706,8 @@ end
 Rebuild an [`IdunaResult`](@ref) from an existing Iduna output directory.
 
 This reads `result.json` and related stage outputs. It does not run pipeline
-stages or write files.
+stages or write files. Saved candidate directory names are retained when loading
+older custom-PID archives, including after moving the output directory.
 
 # Arguments
 
@@ -856,6 +857,19 @@ function _load_result_seeds(data, _summary_path::AbstractString, workdir::Abstra
     return seeds
 end
 
+function _load_result_seed_artifacts(seed::Utils.SeedSelection, workdir::AbstractString)
+    artifacts = ThorAxeMSA._seed_artifacts(seed, workdir)
+    candidate_dir = dirname(artifacts.seed_path)
+    dirname(candidate_dir) == joinpath(workdir, "thoraxe_msa", "candidates") ||
+        return artifacts
+    # Archived custom PIDs may use a rounded name; follow the recorded seed directory.
+    return (; artifacts...,
+        sequence_fasta = joinpath(candidate_dir, "sequences", "candidate_sequences_full.fasta"),
+        species_file = joinpath(candidate_dir, "species", "candidate_species_full.txt"),
+        thoraxe_dir = joinpath(workdir, "thoraxe_msa", "runs", basename(candidate_dir),
+            "full", "thoraxe"))
+end
+
 function _load_result_thoraxe(summary, target::Utils.ResolvedTarget,
         workdir::AbstractString, status::Symbol)
     data = _result_section(summary, "thoraxe_msa")
@@ -866,7 +880,7 @@ function _load_result_thoraxe(summary, target::Utils.ResolvedTarget,
     summary_path = _path_or_default(get(data, "pid_summary", nothing),
         joinpath(workdir, "thoraxe_msa", "candidate_summary.csv"), workdir)
     seeds = _load_result_seeds(data, summary_path, workdir)
-    artifacts = [ThorAxeMSA._seed_artifacts(seed, workdir) for seed in seeds]
+    artifacts = [_load_result_seed_artifacts(seed, workdir) for seed in seeds]
     thoraxe_status = haskey(data, "status") ? Symbol(String(data["status"])) :
                      (isempty(seeds) && status === :error ? :error : :ok)
     return Utils.ThorAxeMSAResult(;

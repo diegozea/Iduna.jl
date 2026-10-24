@@ -249,7 +249,11 @@ expansion, target, and UniProt comparison inputs are unchanged.
 Reuse records the Iduna source fingerprint, Julia version, selected and loaded Julia
 dependency versions and source trees, and relevant external tool identities. Scientific
 stages include the hard dependency closure, rather than only direct package versions.
-Path-developed packages hash their `Project.toml` and Julia files under `src` and `ext`.
+Path-developed packages hash their `Project.toml` and all files under `src` and `ext`,
+including scientific data such as substitution matrices. Generated Julia coverage
+files (`*.jl.cov` and `*.jl.<pid>.cov`) are excluded.
+File symlinks hash their target contents. Untraversed directory symlinks make the
+source identity unknown and disable affected reuse.
 Registered package and JLL artifact trees are assumed immutable. Unknown package,
 source or executable identity disables the affected reuse, while computation remains
 available. Restart Julia after source or dependency changes; hot reload and concurrent
@@ -257,6 +261,9 @@ source editing during a run are outside this contract.
 
 ThorAxe provenance includes its actual Python interpreter, installed ThorAxe source
 and distribution dependencies, CLI scripts, ProGraphMSA, and HHsuite where used.
+The Python probe retains the CLI's interpreter invocation path and records its
+environment prefixes, including a virtual environment reached through a symlink.
+Different interpreter paths in the two CLI shebangs disable affected reuse.
 Python dependency versions and locations identify installed trees; their contents
 and the Python installation must remain immutable for those recorded versions.
 In-place edits to dependency code are not detected by version metadata.
@@ -272,7 +279,8 @@ reuse, including built-in callbacks. The caller must identify the callback imple
 external tool build and relevant external state. Without an ID each call realigns.
 See [EPLI](epli.md) for the callback contract; the EPLI formula is unchanged.
 
-Legacy completion records and candidate caches require recomputation. Iduna does not
+Legacy completion records and candidate caches require recomputation, including those
+whose producer fingerprints predate these interpreter and source-data checks. Iduna does not
 rename archives or delete all caches as a migration, but rerunning a stale stage replaces
 its package-owned outputs. Copy results you need to retain before rerunning. Loading
 recorded paths from untouched archives does not certify their historical scores.

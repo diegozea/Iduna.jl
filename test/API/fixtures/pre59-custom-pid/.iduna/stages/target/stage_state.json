@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "stage": "target",
+  "stage_key": "target",
+  "status": "done",
+  "action": "run",
+  "identity": {
+    "target_contract": 2,
+    "input_id": "Q13148",
+    "input_kind": "uniprot",
+    "uniprot_id": "Q13148",
+    "ensembl_gene_id": null,
+    "ensembl_protein_id": null,
+    "transcript_id": null,
+    "species": null
+  },
+  "identity_hash": "df92e7e27fb348d932165a70f6f8745d8c4acf2e009400e9286bbfba7e683a3b",
+  "outputs": {
+    "target_json": "target.json"
+  },
+  "warnings": [],
+  "exception": null,
+  "started_at": "2026-10-24T19:44:21.419",
+  "updated_at": "2026-10-24T19:44:22.289",
+  "finished_at": "2026-10-24T19:44:22.289"
+}

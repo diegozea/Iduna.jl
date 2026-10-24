@@ -333,3 +333,5 @@ end
         @test Iduna.Utils._read_stage_state(stage_dir)["action"] == "rebuild"
     end
 end
+
+include("relative_workdirs.jl")
