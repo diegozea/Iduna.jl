@@ -378,7 +378,9 @@ function _resolve_uniprot_target(input_id::AbstractString,
     end
     mapping_changed = (protein, gene, resolved_species) !=
                       (chosen.ensembl_protein_id, chosen.ensembl_gene_id, chosen.species)
+    mapping_confirmed = chosen.mapping_confirmed
     if mapping_changed
+        mapping_confirmed = nothing
         push!(warnings,
             "Identifier or species override was not mapping-validated; affected validation flags are unset.")
     end
@@ -393,7 +395,7 @@ function _resolve_uniprot_target(input_id::AbstractString,
         uniprot_sequence_path = uniprot_path,
         ensembl_protein_sequence_path = protein_path,
         sequence_validated = protein_changed ? nothing : chosen.sequence_validated,
-        mapping_confirmed = mapping_changed ? nothing : chosen.mapping_confirmed,
+        mapping_confirmed,
         workdir = String(workdir),
         warnings
     )
