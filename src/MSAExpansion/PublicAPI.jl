@@ -12,7 +12,8 @@ Expand one selected seed MSA against an MMseqs2 database.
 
 - `target::ResolvedTarget`: resolved target metadata.
 - `seed::SeedSelection`: selected ThorAxe seed to expand.
-- `workdir::AbstractString`: Iduna work directory.
+- `workdir::AbstractString`: Iduna work directory. Relative paths are resolved
+  against the current directory; returned artifact paths are absolute.
 
 # Keywords
 
@@ -46,6 +47,7 @@ function expand_msa(target::ResolvedTarget,
         hmmbuild_symfrac::Real = 0.0,
         centroids::Bool = false,
         mmseqs_threads::Union{Nothing, Integer} = Threads.nthreads())
+    workdir = abspath(workdir)
     0.0 <= hmmbuild_symfrac <= 1.0 ||
         error("hmmbuild_symfrac must be between 0.0 and 1.0.")
     @info "Preparing MSA expansion." pid=seed.pid mmseqs_db centroids

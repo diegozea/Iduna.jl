@@ -507,7 +507,8 @@ was supplied. A UniProt comparison is reported only when its reference is availa
 - `seed::SeedSelection`: selected ThorAxe seed to validate.
 - `expansion`: optional expansion result. Pass `nothing` or `missing` when the
   run stopped after the ThorAxe MSA stage.
-- `workdir::AbstractString`: Iduna work directory.
+- `workdir::AbstractString`: Iduna work directory. Relative paths are resolved
+  against the current directory; returned artifact paths are absolute.
 
 # Keywords
 
@@ -524,6 +525,7 @@ function validate_results(target::ResolvedTarget,
         expansion::_MaybeExpansion,
         workdir::AbstractString;
         overwrite::Bool = false)
+    workdir = abspath(workdir)
     paths = _validation_input_paths(target, seed, expansion, workdir)
     outputs = _validation_outputs(workdir, seed, paths)
     identity = _validation_identity(target, seed, expansion, paths)

@@ -217,7 +217,7 @@
         @test resolved.species == "custom_species"
         @test resolved.sequence_validated === nothing
         @test resolved.mapping_confirmed === nothing
-        @test !isfile(resolved.ensembl_protein_sequence_path)
+        @test resolved.ensembl_protein_sequence_path === nothing
         @test any(contains("override"), resolved.warnings)
 
         resolve_override(; kwargs...) = Iduna.IDMapping.resolve_target("P20963";

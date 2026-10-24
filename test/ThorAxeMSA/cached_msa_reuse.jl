@@ -131,6 +131,37 @@
         @test result.species_files == [paths.species_file]
         @test result.thoraxe_dirs == [thoraxe_dir]
 
+        @testset "public ThorAxe relative workdirs and relocation" begin
+            for path_kind in (:absolute, :relative, :dot)
+                @testset "$path_kind" begin
+                    relocated = joinpath(tmp, "moved_$(path_kind)")
+                    cp(workdir, relocated)
+                    cd(path_kind === :dot ? relocated : tmp) do
+                        requested = path_kind === :relative ? basename(relocated) :
+                                    path_kind === :dot ? "." : relocated
+                        logs, moved = Test.collect_test_logs() do
+                            Iduna.ThorAxeMSA.build_thoraxe_msa(target, requested;
+                                pid_thresholds = [10.0], specieslist = "homo_sapiens",
+                                cached_thoraxe_input_dir = source, pid_sample_count = 0,
+                                pid_sample_seed = 7)
+                        end
+                        @test any(
+                            log -> log.message ==
+                                   "Reusing cached ThorAxe MSA candidates.", logs)
+                        @test moved.input_dir == joinpath(relocated, "thoraxe_input")
+                        @test all(isfile, moved.baseline_stockholms)
+                        @test all(isfile, moved.sequence_fastas)
+                        @test all(isfile, moved.species_files)
+                        state = Iduna.Utils._read_stage_state(
+                            Iduna.ThorAxeMSA._thoraxe_msa_stage_dir(relocated))
+                        @test state["action"] == "reuse"
+                        @test all(!isabspath(path)
+                        for path in keys(state["output_digests"]))
+                    end
+                end
+            end
+        end
+
         # Independently edit each required artifact after a sound completion.
         # Metadata-only and candidate-file fallbacks must not turn a miss into a hit.
         for file in (paths.stockholm_path, paths.fasta_path, paths.sequence_fasta,
