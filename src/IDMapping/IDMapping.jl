@@ -373,6 +373,9 @@ function _resolve_uniprot_target(input_id::AbstractString,
                    joinpath(sequence_dir, "ensembl_proteins", "$(protein).fasta")
     resolved_species = species === nothing ? chosen.species : String(species)
     protein_changed = protein != chosen.ensembl_protein_id
+    if protein_changed && !isfile(protein_path)
+        protein_path = nothing
+    end
     mapping_changed = (protein, gene, resolved_species) !=
                       (chosen.ensembl_protein_id, chosen.ensembl_gene_id, chosen.species)
     if mapping_changed
@@ -444,14 +447,16 @@ for ThorAxe and validation.
 # Keywords
 
 - `workdir::AbstractString`: Iduna work directory where fetched sequences are
-  saved.
+  saved. Relative paths are resolved against the current directory.
 - `uniprot_id = nothing`: UniProt accession to record when the main input is a
   transcript. When `nothing`, no UniProt accession is attached unless the input
   itself is UniProt.
 - `ensembl_gene_id = nothing`: Ensembl gene ID to use instead of a fetched value.
   When `nothing`, Iduna fetches or infers the gene ID.
 - `ensembl_protein_id = nothing`: Ensembl protein ID to use instead of a fetched
-  value. When `nothing`, Iduna uses fetched metadata when available.
+  value. When `nothing`, Iduna uses fetched metadata when available. Changing the
+  selected protein clears sequence and mapping validation. Its saved sequence path
+  is `nothing` when that protein was not fetched.
 - `transcript_id = nothing`: Ensembl transcript ID to prefer when resolving a
   UniProt ID. When `nothing`, Iduna chooses from validated candidates.
 - `species = nothing`: Species name to use instead of a fetched value. When
@@ -471,6 +476,7 @@ function resolve_target(input_id::AbstractString;
         _transcript_metadata_resolver::Function = _resolve_transcript_metadata,
         _uniprot_entry_fetcher::Function = fetch_uniprot_entry,
         _candidate_validator::Function = _validate_candidates)
+    workdir = abspath(workdir)
     kind = id_kind(input_id)
     sequence_dir = joinpath(workdir, "sequences")
     kind === :uniprot &&
