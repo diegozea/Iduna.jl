@@ -5,5 +5,6 @@
         include("cache_and_state.jl")
         include("workflow.jl")
         include("relative_workdirs.jl")
+        include("cluster_member_regression.jl")
     end
 end
