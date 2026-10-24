@@ -31,7 +31,9 @@
                 calls = Ref(0)
                 resolver = override_resolver(calls)
                 target = resolver("P20963"; workdir = "relative_resolver")
-                @test target.workdir == joinpath(root, "relative_resolver")
+                @test isabspath(target.workdir)
+                @test realpath(target.workdir) ==
+                      realpath(joinpath(root, "relative_resolver"))
                 @test isabspath(target.uniprot_sequence_path)
                 @test isabspath(target.ensembl_protein_sequence_path)
                 @test read(target.uniprot_sequence_path, String) == ">P20963\nACDE\n"
