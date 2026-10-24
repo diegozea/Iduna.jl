@@ -154,7 +154,9 @@
                         @test any(
                             log -> log.message ==
                                    "Reusing cached ThorAxe MSA candidates.", logs)
-                        @test moved.input_dir == joinpath(relocated, "thoraxe_input")
+                        @test isabspath(moved.input_dir)
+                        @test realpath(moved.input_dir) ==
+                              realpath(joinpath(relocated, "thoraxe_input"))
                         @test all(isfile, moved.baseline_stockholms)
                         @test all(isfile, moved.sequence_fastas)
                         @test all(isfile, moved.species_files)

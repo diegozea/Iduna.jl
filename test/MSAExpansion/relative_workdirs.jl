@@ -3,7 +3,8 @@
         fresh = Iduna.MSAExpansion.expand_msa(target, success_seed, "relative_expansion";
             mmseqs_db = success_db, mmseqs_db_manifest = success_manifest, mmseqs_threads = 1)
         @test fresh.status === :ok
-        @test fresh.workdir == joinpath(tmp, "relative_expansion")
+        @test isabspath(fresh.workdir)
+        @test realpath(fresh.workdir) == realpath(joinpath(tmp, "relative_expansion"))
         @test isfile(fresh.match_stockholm)
         for requested in (fresh.workdir, "relative_expansion")
             cached = Iduna.MSAExpansion.expand_msa(target, success_seed, requested;
@@ -23,7 +24,12 @@
             mmseqs_db = success_db, mmseqs_db_manifest = success_manifest, mmseqs_threads = 1)
         @test relocated.status === :skipped
         @test isfile(relocated.match_stockholm)
-        @test startswith(relocated.match_stockholm, abspath("relocated_expansion"))
+        @test isabspath(relocated.match_stockholm)
+        expected_match = joinpath(tmp, "relocated_expansion", "expansion",
+            target.ensembl_gene_id, target.transcript_id,
+            Iduna.Utils.format_pid_dir(success_seed.pid), "expanded_msa",
+            "$(target.transcript_id)_matchonly.sto")
+        @test realpath(relocated.match_stockholm) == realpath(expected_match)
         state = Iduna.Utils._read_stage_state(relocated.run_dir)
         @test all(!isabspath(path) for path in keys(state["output_digests"]))
     end
