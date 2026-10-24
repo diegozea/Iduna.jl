@@ -1,0 +1,116 @@
+{
+  "input_id": "Q13148",
+  "status": "ok",
+  "warnings": [],
+  "stages": [
+    {
+      "stage": "result",
+      "stage_key": "result",
+      "status": "done",
+      "action": "run",
+      "identity_hash": "36958f4d0b3283125218308f0b5849527ac1b2e891847f0fa0b49c1610df9384",
+      "state_path": ".iduna/stages/result/stage_state.json",
+      "outputs": {
+        "result_json": "result.json"
+      },
+      "warnings": [],
+      "exception": null
+    },
+    {
+      "stage": "target",
+      "stage_key": "target",
+      "status": "done",
+      "action": "run",
+      "identity_hash": "df92e7e27fb348d932165a70f6f8745d8c4acf2e009400e9286bbfba7e683a3b",
+      "state_path": ".iduna/stages/target/stage_state.json",
+      "outputs": {
+        "target_json": "target.json"
+      },
+      "warnings": [],
+      "exception": null
+    },
+    {
+      "stage": "validation",
+      "stage_key": "validation:pid_30.00",
+      "status": "done",
+      "action": "run",
+      "identity_hash": "3e82dc8cbb8af18825b6fb69938df92c236c43230f0f055e0d025459c93f3966",
+      "state_path": "validation/pid_30.00/stage_state.json",
+      "outputs": {
+        "query_vs_uniprot_path": null,
+        "stats_path": "validation/pid_30.00/stats.csv"
+      },
+      "warnings": [],
+      "exception": null
+    }
+  ],
+  "target": {
+    "input_kind": "uniprot",
+    "uniprot_id": null,
+    "ensembl_gene_id": "ENSG1",
+    "transcript_id": "ENST1",
+    "ensembl_protein_id": null,
+    "species": null,
+    "uniprot_sequence_path": null,
+    "ensembl_protein_sequence_path": null,
+    "sequence_validated": null,
+    "mapping_confirmed": null
+  },
+  "thoraxe_msa": {
+    "baseline_fastas": [
+      "thoraxe_msa/candidates/pid_30.00/candidate_msa_full.fasta"
+    ],
+    "baseline_stockholms": [
+      "thoraxe_msa/candidates/pid_30.00/candidate_msa_full.sto"
+    ],
+    "pid_summary": "thoraxe_msa/candidate_summary.csv",
+    "seeds": [
+      {
+        "pid": 30.001,
+        "epli": 100.0,
+        "stockholm_path": "thoraxe_msa/candidates/pid_30.00/candidate_msa_full.sto",
+        "fasta_path": "thoraxe_msa/candidates/pid_30.00/candidate_msa_full.fasta",
+        "s_exon_blocks_tsv": null,
+        "summary_path": "thoraxe_msa/candidate_summary.csv",
+        "used_fallback_dir": false
+      }
+    ],
+    "selected_pids": [
+      30.001
+    ],
+    "seed_stockholms": [
+      "thoraxe_msa/candidates/pid_30.00/candidate_msa_full.sto"
+    ],
+    "s_exon_blocks_tsvs": [
+      null
+    ],
+    "pid_sample_count": 0,
+    "pid_sample_fraction": 1.0,
+    "pid_sample_seed": 0,
+    "sampling_strategy": "independent",
+    "warnings": [],
+    "status": "ok"
+  },
+  "expansions": [],
+  "validations": [
+    {
+      "stats_path": "validation/pid_30.00/stats.csv",
+      "query_name": null,
+      "query_vs_uniprot_path": null,
+      "seed_nseq": 1,
+      "seed_ncol": 4,
+      "seed_clusters62": 1,
+      "seed_neff80": 1.0,
+      "expanded_nseq": null,
+      "expanded_ncol": null,
+      "expanded_clusters62": null,
+      "expanded_neff80": null,
+      "aln_identical": null,
+      "aln_mismatches": null,
+      "aln_insertions": null,
+      "aln_deletions": null,
+      "warnings": [],
+      "status": "ok"
+    }
+  ]
+}
