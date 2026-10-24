@@ -1,5 +1,11 @@
 @testset "validation relative workdirs and relocation" begin
-    mktempdir() do tmp
+    mktempdir() do parent
+        # Exercise temporary-parent aliases on Linux as well as macOS.
+        physical = mkpath(joinpath(parent, "physical"))
+        aliased = joinpath(parent, "aliased")
+        symlink(physical, aliased)
+        tmp = mkpath(joinpath(aliased, "work"))
+        @test tmp != realpath(tmp)
         target = Iduna.ResolvedTarget(; input_id = "ENST000001",
             input_kind = :ensembl_transcript, ensembl_gene_id = "GENE",
             transcript_id = "ENST000001")
@@ -17,8 +23,9 @@
                                     path_kind === :dot ? "." : root
                         result = Iduna.ResultsValidation.validate_results(
                             target, seed, nothing, requested)
-                        @test result.stats_path ==
-                              joinpath(root, "validation", "pid_10.00", "stats.csv")
+                        @test isabspath(result.stats_path)
+                        @test realpath(result.stats_path) ==
+                              realpath(joinpath(root, "validation", "pid_10.00", "stats.csv"))
                         @test result.seed_nseq == 2
                         reused = Iduna.ResultsValidation.validate_results(
                             target, seed, nothing, requested)
@@ -33,7 +40,9 @@
                     result = Iduna.ResultsValidation.validate_results(
                         target, seed, nothing, basename(relocated))
                     @test result.seed_nseq == 2
-                    @test startswith(result.stats_path, relocated)
+                    @test isabspath(result.stats_path)
+                    @test realpath(result.stats_path) ==
+                          realpath(joinpath(relocated, "validation", "pid_10.00", "stats.csv"))
                     @test Iduna.Utils._read_stage_state(dirname(result.stats_path))["action"] ==
                           "reuse"
                 end
