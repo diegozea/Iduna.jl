@@ -1,0 +1,2 @@
+input_id,uniprot_id,gene_id,transcript_id,pid,seed_path,expanded_path,seed_nseq,expanded_nseq,seed_ncol,expanded_ncol,seed_clusters62,expanded_clusters62,seed_neff80,expanded_neff80,query_name,query_vs_uniprot_path,aln_identical,aln_mismatches,aln_insertions,aln_deletions
+Q13148,,ENSG1,ENST1,30.001,thoraxe_msa/candidates/pid_30.00/candidate_msa_full.sto,,1,,4,,1,,1.0,,,,,,,

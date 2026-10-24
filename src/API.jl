@@ -49,7 +49,11 @@ selected seeds, validation statistics, warnings, and status.
 - `overwrite::Bool = false`: reuse package-owned stage outputs when their run
   identity still matches. When `true`, Iduna rebuilds those outputs.
 - `pid_thresholds = DEFAULT_PID_THRESHOLDS`: ThorAxe percent identity (PID)
-  thresholds to test; currently `[10, 20, 30, 60, 80]`.
+  thresholds to test; currently `[10, 20, 30, 60, 80]`. The list must be nonempty,
+  finite, in `[0, 100]`, and distinct after `Float64` conversion. Signed zero is
+  treated as zero. Invalid thresholds are rejected before creating outputs.
+  Earlier candidate caches are rebuilt, including default-threshold runs. Default
+  directory names are retained; archived results remain readable from recorded paths.
 - `species = nothing`: species name to use instead of a fetched value. When
   `nothing`, Iduna uses fetched metadata when available.
 - `specieslist::AbstractString = "ases"`: species preset, list, file, or name.
@@ -137,6 +141,7 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
         _build_thoraxe_msa::Function = ThorAxeMSA.build_thoraxe_msa,
         _expand_msa::Function = MSAExpansion.expand_msa,
         _validate_results::Function = ResultsValidation.validate_results)
+    pid_thresholds = Utils._validate_pid_thresholds(pid_thresholds)
     primary, disambiguating_transcript,
     supplied_uniprot = _normalize_primary_input(;
         id, uniprot_id, ensembl_transcript_id, transcript_id)
@@ -661,7 +666,8 @@ end
 Rebuild an [`IdunaResult`](@ref) from an existing Iduna output directory.
 
 This reads `result.json` and related stage outputs. It does not run pipeline
-stages or write files.
+stages or write files. Saved candidate directory names are retained when loading
+older custom-PID archives, including after moving the output directory.
 
 # Arguments
 
@@ -811,6 +817,19 @@ function _load_result_seeds(data, _summary_path::AbstractString, workdir::Abstra
     return seeds
 end
 
+function _load_result_seed_artifacts(seed::Utils.SeedSelection, workdir::AbstractString)
+    artifacts = ThorAxeMSA._seed_artifacts(seed, workdir)
+    candidate_dir = dirname(artifacts.seed_path)
+    dirname(candidate_dir) == joinpath(workdir, "thoraxe_msa", "candidates") ||
+        return artifacts
+    # Archived custom PIDs may use a rounded name; follow the recorded seed directory.
+    return (; artifacts...,
+        sequence_fasta = joinpath(candidate_dir, "sequences", "candidate_sequences_full.fasta"),
+        species_file = joinpath(candidate_dir, "species", "candidate_species_full.txt"),
+        thoraxe_dir = joinpath(workdir, "thoraxe_msa", "runs", basename(candidate_dir),
+            "full", "thoraxe"))
+end
+
 function _load_result_thoraxe(summary, target::Utils.ResolvedTarget,
         workdir::AbstractString, status::Symbol)
     data = _result_section(summary, "thoraxe_msa")
@@ -821,7 +840,7 @@ function _load_result_thoraxe(summary, target::Utils.ResolvedTarget,
     summary_path = _path_or_default(get(data, "pid_summary", nothing),
         joinpath(workdir, "thoraxe_msa", "candidate_summary.csv"), workdir)
     seeds = _load_result_seeds(data, summary_path, workdir)
-    artifacts = [ThorAxeMSA._seed_artifacts(seed, workdir) for seed in seeds]
+    artifacts = [_load_result_seed_artifacts(seed, workdir) for seed in seeds]
     thoraxe_status = haskey(data, "status") ? Symbol(String(data["status"])) :
                      (isempty(seeds) && status === :error ? :error : :ok)
     return Utils.ThorAxeMSAResult(;

@@ -352,7 +352,11 @@ Run or reuse the ThorAxe input and MSA stages for one resolved target.
 # Keywords
 
 - `pid_thresholds = DEFAULT_PID_THRESHOLDS`: ThorAxe percent identity (PID)
-  thresholds to test; currently `[10, 20, 30, 60, 80]`.
+  thresholds to test; currently `[10, 20, 30, 60, 80]`. The list must be nonempty,
+  finite, in `[0, 100]`, and distinct after `Float64` conversion. Signed zero is
+  treated as zero. Invalid thresholds are rejected before species filters or writes.
+  Earlier candidate caches are rebuilt, including default-threshold runs. Default
+  directory names are retained; archived results remain readable from recorded paths.
 - `specieslist::AbstractString = "ases"`: species preset, list, file, or name.
   Accepted presets are `"ases"` for the default curated set used on the Ases
   webserver, and `"all"` or `""` for unrestricted ThorAxe species selection.
@@ -400,10 +404,10 @@ function build_thoraxe_msa(target::ResolvedTarget, workdir::AbstractString;
         pid_sample_fraction::Real = 0.8,
         pid_sample_seed::Union{Nothing, Integer} = nothing,
         sampling_strategy::Symbol = :common)
+    pid_thresholds = _validate_pid_thresholds(pid_thresholds)
     _orthology_relationships(orthology)
     _validate_pid_sampling_options(pid_sample_count, pid_sample_fraction)
     sampling_strategy = _validate_sampling_strategy(sampling_strategy)
-    isempty(pid_thresholds) && error("pid_thresholds cannot be empty.")
     sample_seed = pid_sample_seed === nothing ? UInt64(rand(UInt32)) :
                   _normalize_pid_sample_seed(pid_sample_seed)
     # Species filters run only when transcript_query will create new input.

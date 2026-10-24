@@ -79,6 +79,32 @@ end
     @test Iduna.Utils.format_pid_dir(10) == "pid_10.00"
     @test Iduna.Utils.format_pid_dir(12.34) == "pid_12.34"
 
+    @testset "PID artifact identities" begin
+        @test Iduna.Utils.format_pid_dir(-0.0) == "pid_0.00"
+        @test Iduna.Utils.format_pid_dir(100) == "pid_100.00"
+        @test Iduna.Utils.format_pid_dir(30.001) == "pid_30.001"
+        @test Iduna.Utils.format_pid_dir(30.004) == "pid_30.004"
+        values = [0.0, nextfloat(0.0), 0.1, 10.0, nextfloat(10.0),
+            12.34, Float64(Float32(12.34)), 30.001, 30.004, prevfloat(100.0), 100.0]
+        names = Iduna.Utils.format_pid_dir.(values)
+        @test allunique(names)
+        @test [parse(Float64, name[5:end]) for name in names] == values
+        validated = Iduna.Utils._validate_pid_thresholds(Real[-0.0, 10, 100])
+        @test validated == [0.0, 10.0, 100.0]
+        @test eltype(validated) === Float64
+        @test !signbit(first(validated))
+        @test Iduna.Utils._validate_pid_thresholds(values) == values
+        for invalid in (NaN, Inf, -Inf, -eps(), nextfloat(100.0))
+            @test_throws ArgumentError Iduna.Utils.format_pid_dir(invalid)
+            @test_throws ArgumentError Iduna.Utils._validate_pid_thresholds([invalid])
+        end
+        for duplicate in ([10, 10], [-0.0, 0.0],
+            [BigFloat(10), nextfloat(BigFloat(10))])
+            @test_throws ArgumentError Iduna.Utils._validate_pid_thresholds(duplicate)
+        end
+        @test_throws ArgumentError Iduna.Utils._validate_pid_thresholds(Float64[])
+    end
+
     @testset "s-exon provenance annotations" begin
         mktempdir() do tmp
             sto = joinpath(tmp, "annotated.sto")

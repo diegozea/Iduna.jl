@@ -118,6 +118,20 @@
         @test result_state["outputs"]["result_json"] == "result.json"
         @test Iduna.ResultsValidation.nsequences(Iduna.load_seed_msa(result)) == 1
         @test Iduna.ResultsValidation.nsequences(Iduna.load_expanded_msa(result)) == 1
+
+        # Archived explicit paths remain readable even when the old PID name was rounded.
+        archived_seed = written["thoraxe_msa"]["seeds"][1]
+        archived_seed["pid"] = 30.001
+        old_path = joinpath("thoraxe_msa", "candidates", "pid_30.00", "archived.sto")
+        mkpath(dirname(joinpath(workdir, old_path)))
+        cp(abs_seed.stockholm_path, joinpath(workdir, old_path))
+        archived_seed["stockholm_path"] = old_path
+        write(joinpath(workdir, "result.json"), JSON.json(written))
+        archived = Iduna.load_result(workdir)
+        @test only(archived.thoraxe_msa.seeds).pid == 30.001
+        @test only(archived.thoraxe_msa.seeds).stockholm_path == old_path
+        @test Iduna.ResultsValidation.stringsequence(Iduna.load_seed_msa(archived), 1) ==
+              "AC"
     end
 end
 
@@ -157,6 +171,7 @@ end
             id = "Q13148",
             workdir = joinpath(tmp, "pid_sampling_forwarding"),
             no_expansion = true,
+            pid_thresholds = Real[-0.0, Float32(12.34), 100],
             pid_sample_count = 12,
             pid_sample_fraction = 0.65,
             pid_sample_seed = 42,
@@ -170,6 +185,9 @@ end
             _validate_results = (args...; kwargs...) -> validation)
 
         @test isempty(result.expansions)
+        @test captured[][:pid_thresholds] == [0.0, Float64(Float32(12.34)), 100.0]
+        @test eltype(captured[][:pid_thresholds]) === Float64
+        @test !signbit(first(captured[][:pid_thresholds]))
         @test captured[][:pid_sample_count] == 12
         @test captured[][:pid_sample_fraction] == 0.65
         @test captured[][:pid_sample_seed] == 42
@@ -207,5 +225,24 @@ end
             end,
             _validate_results = (args...; kwargs...) -> validation)
         @test captured_all[][:specieslist] == "all"
+    end
+end
+
+@testset "Invalid PIDs fail before pipeline side effects" begin
+    mktempdir() do tmp
+        calls = Ref(0)
+        unexpected = (args...; kwargs...) -> begin
+            calls[] += 1
+            error("Invalid PID input reached a pipeline callback.")
+        end
+        for pids in (Float64[], [NaN], [Inf], [-Inf], [-1.0], [101.0],
+            [10.0, 10.0], [-0.0, 0.0], [BigFloat(10), nextfloat(BigFloat(10))])
+            workdir = joinpath(tmp, "unused")
+            @test_throws ArgumentError Iduna.iduna(; id = "Q13148", no_expansion = true,
+                workdir, pid_thresholds = pids, _resolve_target = unexpected,
+                _build_thoraxe_msa = unexpected, _validate_results = unexpected)
+            @test calls[] == 0
+            @test !ispath(workdir)
+        end
     end
 end

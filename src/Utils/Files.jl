@@ -15,13 +15,39 @@ format_pid(pid::Real) = @sprintf("%.1f", Float64(pid))
 """
     format_pid_dir(pid) -> String
 
-Format a percent identity value as a stable directory name.
+Format a percent identity threshold as a distinct directory name for its effective
+`Float64` value. Keep two decimal places when they represent that value exactly;
+otherwise use a spelling that preserves its full precision. Signed zero uses `pid_0.00`.
 
 # Arguments
 
-- `pid::Real`: percent identity value.
+- `pid::Real`: finite percent identity threshold in `[0, 100]` after `Float64` conversion.
+
+# Throws
+
+- `ArgumentError`: if the effective threshold is non-finite or outside `[0, 100]`.
 """
-format_pid_dir(pid::Real) = "pid_$(@sprintf("%.2f", Float64(pid)))"
+function format_pid_dir(pid::Real)
+    value = _effective_pid(pid)
+    short = @sprintf("%.2f", value)
+    token = parse(Float64, short) == value ? short : repr(value)
+    return "pid_$(token)"
+end
+
+function _effective_pid(pid::Real)
+    value = Float64(pid)
+    isfinite(value) && 0.0 <= value <= 100.0 ||
+        throw(ArgumentError("PID thresholds must be finite percentages in [0, 100]; got $(pid)."))
+    return iszero(value) ? 0.0 : value
+end
+
+function _validate_pid_thresholds(pid_thresholds::AbstractVector{<:Real})
+    isempty(pid_thresholds) && throw(ArgumentError("pid_thresholds cannot be empty."))
+    values = _effective_pid.(pid_thresholds)
+    allunique(values) ||
+        throw(ArgumentError("pid_thresholds must be distinct after Float64 conversion."))
+    return values
+end
 
 function _body_bytes(body)::Vector{UInt8}
     body isa AbstractVector{UInt8} && return Vector{UInt8}(body)

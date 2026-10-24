@@ -8,8 +8,7 @@ using ArgParse: ArgParseSettings, @add_arg_table!, parse_args
 
 function _parse_pid_thresholds(value::AbstractString)
     vals = parse.(Float64, strip.(split(value, ',')))
-    isempty(vals) && error("--pid-thresholds cannot be empty.")
-    return vals
+    return Utils._validate_pid_thresholds(vals)
 end
 
 function _throw_parse_error(settings, err)
