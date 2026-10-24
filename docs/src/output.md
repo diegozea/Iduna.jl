@@ -88,6 +88,26 @@ identity hash, declared outputs, warnings, and exception summary when a stage
 fails. `result.json` includes a compact `"stages"` list copied from these
 manifests, making reruns auditable without using it as the source of truth.
 
+Completed manifests also record SHA-256 digests for every required scientific file.
+Reuse requires the current schema, matching inputs and output paths, and unchanged
+contents of all those files. Empty raw-hit files are valid; final alignments must
+parse and contain sequences. Logs and reproducible s-exon block tables are excluded
+from the required digest set; missing block tables are rebuilt from verified alignments.
+A result directory can be moved without invalidating its internal file paths.
+
+Older manifests, metadata-only caches and partial outputs are not adopted. The next
+requested run rebuilds the affected package-owned stage and may replace its previous
+outputs. There is no automatic archive migration or global cache deletion. Untouched
+archived copies remain available through `load_result`, which reads historical files
+without certifying their provenance. Use one writer per work directory; these checks
+do not synchronize simultaneous runs or other programs modifying the same files.
+
+Custom EPLI aligners must return a nonempty aligned FASTA with unique full record IDs
+matching the input, equal row lengths, and unchanged ungapped residues. Case and gap
+characters (`-` or `.`) do not affect the residue comparison; row reordering, wrapping,
+and alternate returned file paths are supported. A failed callback leaves no reusable
+completion marker for its partially written output.
+
 `thoraxe_msa/runs/` keeps the raw ThorAxe output for each percent identity (PID)
 candidate and its species samples. `thoraxe_msa/candidates/` stores each PID's
 full-species candidate `msa_0`, sampled species list paths, gap-free sequence

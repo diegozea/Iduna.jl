@@ -224,17 +224,22 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
                             for stage in current_stages
                             if stage.identity_hash !== nothing &&
                 stage.stage_key != "result"])
-        Utils._write_stage_state(Utils._pipeline_stage_dir(root, "result");
+        result_stage_dir = Utils._pipeline_stage_dir(root, "result")
+        result_outputs = (; result_json = joinpath(root, "result.json"))
+        Utils._write_stage_state(result_stage_dir;
             stage = "result",
             stage_key = "result",
-            status = :done,
+            status = :running,
             identity = result_identity,
-            outputs = (; result_json = joinpath(root, "result.json")),
+            outputs = result_outputs,
             action = :run,
             workdir = root)
         stages = Utils.collect_stage_summaries(root;
             stage_keys = _current_stage_keys(target, thoraxe, expansions, validations;
                 include_result = true))
+        # The result embeds the stable summary, not its own digest. Publish its
+        # completion record only after the final result bytes are written.
+        stages = map(_completed_result_stage_summary, stages)
         result = Utils.IdunaResult(;
             input_id = primary,
             workdir = root,
@@ -250,6 +255,10 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
         @info "Writing Iduna result artifact." result_path=joinpath(
             root, "result.json")
         Utils.write_json(joinpath(root, "result.json"), Utils.result_summary(result))
+        Utils._write_stage_state(result_stage_dir;
+            stage = "result", stage_key = "result", status = :done,
+            identity = result_identity, outputs = result_outputs,
+            action = :run, workdir = root)
         @info "Iduna pipeline completed." status=result.status
         return result
     catch err
@@ -260,6 +269,11 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
         end
         rethrow()
     end
+end
+
+function _completed_result_stage_summary(stage)
+    stage.stage_key == "result" ?
+    merge(stage, (; status = "done")) : stage
 end
 
 iduna(id::AbstractString; kwargs...) = iduna(; id, kwargs...)
@@ -527,19 +541,37 @@ function _target_from_summary(data, workdir::AbstractString)
 end
 
 function _target_artifacts_exist(target::Utils.ResolvedTarget, workdir::AbstractString)
+    root = target.workdir === nothing ? workdir : target.workdir
     for path in (target.uniprot_sequence_path, target.ensembl_protein_sequence_path)
         path === nothing && continue
-        isfile(Utils._resolve_artifact_path(path, workdir)) || return false
+        resolved = Utils._resolve_artifact_path(path, root)
+        isfile(resolved) || return false
+        contents = strip(read(resolved, String))
+        startswith(contents, '>') && Utils.fasta_sequence(contents) !== nothing ||
+            return false
     end
     return true
 end
 
-function _read_cached_target(workdir::AbstractString)
+function _target_outputs(target::Utils.ResolvedTarget, workdir::AbstractString)
+    root = target.workdir === nothing ? workdir : target.workdir
+    return (; target_json = joinpath(workdir, "target.json"),
+        uniprot_sequence = Utils._resolve_artifact_path(target.uniprot_sequence_path, root),
+        ensembl_sequence = Utils._resolve_artifact_path(
+            target.ensembl_protein_sequence_path, root))
+end
+
+function _read_cached_target(workdir::AbstractString, identity = nothing)
     path = joinpath(workdir, "target.json")
     isfile(path) || return nothing
     try
         target = _target_from_summary(JSON.parse(read(path, String)), workdir)
         _target_artifacts_exist(target, workdir) || return nothing
+        if identity !== nothing
+            cache = Utils._classify_stage_state(_target_stage_dir(workdir), identity,
+                _target_outputs(target, workdir); stage_label = "target")
+            cache.reusable || return nothing
+        end
         return target
     catch err
         err isa InterruptException && rethrow()
@@ -574,7 +606,7 @@ function _resolve_target_stage(primary::AbstractString, workdir::AbstractString;
     cache = overwrite ? (; reusable = false, status = :stale, warning = nothing) :
             Utils._classify_stage_state(stage_dir, identity, outputs;
         stage_label = "target")
-    cached_target = cache.reusable ? _read_cached_target(workdir) : nothing
+    cached_target = cache.reusable ? _read_cached_target(workdir, identity) : nothing
     if cached_target !== nothing
         @info "Reusing cached target metadata."
         Utils._write_stage_state(stage_dir;
@@ -582,7 +614,7 @@ function _resolve_target_stage(primary::AbstractString, workdir::AbstractString;
             stage_key = "target",
             status = :done,
             identity,
-            outputs,
+            outputs = _target_outputs(cached_target, workdir),
             action = :reuse,
             workdir,
             warnings = cached_target.warnings)
@@ -609,6 +641,8 @@ function _resolve_target_stage(primary::AbstractString, workdir::AbstractString;
             ensembl_protein_id,
             transcript_id = disambiguating_transcript,
             species)
+        _target_artifacts_exist(target, workdir) ||
+            error("Resolved target sequence artifacts are missing.")
         @info "Writing target metadata." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id
         Utils.write_json(outputs.target_json, _target_summary(target, workdir))
         Utils._write_stage_state(stage_dir;
@@ -616,7 +650,7 @@ function _resolve_target_stage(primary::AbstractString, workdir::AbstractString;
             stage_key = "target",
             status = :done,
             identity,
-            outputs,
+            outputs = _target_outputs(target, workdir),
             action,
             workdir,
             warnings = target.warnings)

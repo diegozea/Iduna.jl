@@ -155,6 +155,58 @@ end
             _expand_msa = (args...; kwargs...) -> expansion,
             _validate_results = (args...; kwargs...) -> validation)
         @test JSON.parse(read(state_path, String))["identity_hash"] == rerun_hash
+        state = JSON.parse(read(state_path, String))
+        @test state["output_digests"]["result.json"] ==
+              Iduna.Utils._file_sha256(joinpath(workdir, "result.json"))
+        @test Iduna.Utils._classify_stage_state(dirname(state_path), state["identity"],
+            (; result_json = joinpath(workdir, "result.json"))).reusable
+        saved = JSON.parse(read(joinpath(workdir, "result.json"), String))
+        @test only(filter(stage -> stage["stage_key"] == "result", saved["stages"]))["status"] ==
+              "done"
+    end
+end
+
+@testset "target sequence files participate in cache integrity" begin
+    mktempdir() do root
+        calls = Ref(0)
+        resolver = (primary; workdir, kwargs...) -> begin
+            calls[] += 1
+            sequence = joinpath(workdir, "sequences", "reference.fasta")
+            mkpath(dirname(sequence))
+            write(sequence, ">reference\nACDE\n")
+            Iduna.ResolvedTarget(; input_id = primary, input_kind = :uniprot,
+                ensembl_gene_id = "GENE", transcript_id = "TX",
+                uniprot_sequence_path = sequence, workdir)
+        end
+        kwargs = (; supplied_uniprot = nothing, ensembl_gene_id = nothing,
+            ensembl_protein_id = nothing, disambiguating_transcript = nothing,
+            species = nothing, overwrite = false, resolver)
+        first_target = Iduna._resolve_target_stage("P20963", root; kwargs...)
+        Iduna._resolve_target_stage("P20963", root; kwargs...)
+        @test calls[] == 1
+        write(first_target.uniprot_sequence_path, ">reference\nACDF\n")
+        rebuilt = Iduna._resolve_target_stage("P20963", root; kwargs...)
+        @test calls[] == 2
+        @test read(rebuilt.uniprot_sequence_path, String) == ">reference\nACDE\n"
+        state_path = Iduna.Utils._stage_state_path(Iduna._target_stage_dir(root))
+        state = JSON.parse(read(state_path, String))
+        delete!(state, "output_digests")
+        Iduna.Utils.write_json(state_path, state)
+        Iduna._resolve_target_stage("P20963", root; kwargs...)
+        @test calls[] == 3
+        state = JSON.parse(read(state_path, String))
+        delete!(state["required_outputs"], "uniprot_sequence")
+        delete!(state["output_digests"], joinpath("sequences", "reference.fasta"))
+        Iduna.Utils.write_json(state_path, state)
+        Iduna._resolve_target_stage("P20963", root; kwargs...)
+        @test calls[] == 4
+
+        broken_resolver = (primary; workdir, kwargs...) -> Iduna.ResolvedTarget(;
+            input_id = primary, input_kind = :uniprot,
+            ensembl_gene_id = "GENE", transcript_id = "TX",
+            uniprot_sequence_path = joinpath(workdir, "missing.fasta"))
+        @test_throws ErrorException Iduna._resolve_target_stage("P20963", root;
+            merge(kwargs, (; overwrite = true, resolver = broken_resolver))...)
     end
 end
 

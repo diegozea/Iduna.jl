@@ -32,7 +32,7 @@ Column code used when an MSA column has no assigned s-exon. The value is `'.'`.
 """
 const S_EXON_MISSING_CODE = '.'
 
-const _STAGE_STATE_SCHEMA_VERSION = 1
+const _STAGE_STATE_SCHEMA_VERSION = 2
 const _STAGE_STATE_FILE = "stage_state.json"
 const _PROTEIN_ALIGNMENT_SCORE_MODEL = AffineGapScoreModel(
     BLOSUM62, gap_open = -10, gap_extend = -1)

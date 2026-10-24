@@ -10,7 +10,7 @@ function write_outputs(outputs; centroids::Bool = false)
         "# STOCKHOLM 1.0\n#=GF SExonCodeMap \"0\"=>\"1_0\"\nseed ACDE\n#=GC SExonCode 0000\n//\n")
     write(outputs.match_stockholm,
         "# STOCKHOLM 1.0\n#=GF SExonCodeMap \"0\"=>\"1_0\"\nseed ACDE\n#=GC SExonCode 0000\n//\n")
-    write(outputs.a3m_path, "cached a3m\n")
+    write(outputs.a3m_path, ">seed\nACDE\n")
     write(outputs.hits_fasta, ">seed one\nACDE\n>hit one\nACDFG\n>hit_two\nACD\n")
     if centroids
         mkpath(dirname(outputs.centroid_full_stockholm))
@@ -18,7 +18,7 @@ function write_outputs(outputs; centroids::Bool = false)
             "# STOCKHOLM 1.0\n#=GF SExonCodeMap \"0\"=>\"1_0\"\nseed ACDE\n#=GC SExonCode 0000\n//\n")
         write(outputs.centroid_match_stockholm,
             "# STOCKHOLM 1.0\n#=GF SExonCodeMap \"0\"=>\"1_0\"\nseed ACDE\n#=GC SExonCode 0000\n//\n")
-        write(outputs.centroid_a3m_path, "cached centroid a3m\n")
+        write(outputs.centroid_a3m_path, ">seed\nACDE\n")
         write(outputs.centroid_hits_fasta, ">hit one\nACDF\n")
     end
     return outputs
@@ -180,7 +180,7 @@ missing_centroid_dir = joinpath(
     tmp, "expansion", gene_id, transcript_id, "pid_30.00")
 missing_centroid_outputs = write_outputs(
     Iduna.MSAExpansion._expansion_output_paths(
-    missing_centroid_dir, transcript_id; centroids = true))
+        missing_centroid_dir, transcript_id; centroids = true); centroids = true)
 missing_centroid_seed = Iduna.SeedSelection(;
     pid = 30.0,
     epli = 100.0,
@@ -196,6 +196,7 @@ missing_centroid_identity = Iduna.MSAExpansion._expansion_identity(
 Iduna.MSAExpansion._write_step_state(
     missing_centroid_dir, :done, missing_centroid_identity,
     missing_centroid_outputs)
+rm(missing_centroid_outputs.centroid_a3m_path)
 missing_centroids = Iduna.MSAExpansion._classify_step_state(
     missing_centroid_dir, missing_centroid_identity, missing_centroid_outputs)
 @test missing_centroids.reusable === false
@@ -255,3 +256,89 @@ legacy = Iduna.MSAExpansion._classify_step_state(
 stale_failure_dir = joinpath(tmp, "expansion", gene_id, transcript_id, "pid_50.00")
 stale_failure_outputs = write_outputs(
     Iduna.MSAExpansion._expansion_output_paths(stale_failure_dir, transcript_id))
+
+@testset "Expansion completion validates scientific files" begin
+    completion_dir = joinpath(tmp, "completion_validation")
+    completion_outputs = Iduna.MSAExpansion._expansion_output_paths(
+        completion_dir, transcript_id; centroids = true)
+    for (name, invalid_content) in (
+        (:full_stockholm, ""),
+        (:match_stockholm, "# STOCKHOLM 1.0\n//\n"),
+        (:full_stockholm, "# STOCKHOLM 1.0\nseed ACDE\n"),
+        (:a3m_path, "cached a3m\n"),
+        (:a3m_path, ">seed\n\n"),
+        (:centroid_a3m_path, ""),
+        (:hits_fasta, ">hit\n\n"))
+        write_outputs(completion_outputs; centroids = true)
+        write(getproperty(completion_outputs, name), invalid_content)
+        state_path = Iduna.MSAExpansion._step_state_path(completion_dir)
+        rm(state_path; force = true)
+        @test_throws Exception Iduna.MSAExpansion._write_step_state(
+            completion_dir, :done, centroids_identity, completion_outputs)
+        @test !isfile(state_path)
+    end
+end
+
+@testset "Expansion cache rejects changed or uncertified output" begin
+    for mutation in (:residue, :truncate, :missing, :legacy, :path, :json)
+        mutation_workdir = joinpath(tmp, "integrity_$(mutation)")
+        mutation_ctx = Iduna.MSAExpansion._expansion_context(
+            target, seed, mutation_workdir, db;
+            match_mode = 1, match_ratio = nothing, hmmbuild_symfrac = 0.0,
+            centroids = false)
+        write_outputs(mutation_ctx.outputs)
+        Iduna.MSAExpansion._write_step_state(mutation_ctx.run_dir, :done,
+            mutation_ctx.identity, mutation_ctx.outputs)
+        state_path = Iduna.MSAExpansion._step_state_path(mutation_ctx.run_dir)
+        if mutation === :residue
+            path = mutation_ctx.outputs.full_stockholm
+            write(path, replace(read(path, String), "ACDE" => "ACDF"))
+        elseif mutation === :truncate
+            write(mutation_ctx.outputs.a3m_path, "")
+        elseif mutation === :missing
+            rm(mutation_ctx.outputs.match_stockholm)
+        elseif mutation === :json
+            write(state_path, "{interrupted")
+        else
+            saved = Iduna.MSAExpansion._read_step_state(mutation_ctx.run_dir)
+            if mutation === :legacy
+                saved["schema_version"] = 1
+            else
+                saved["outputs"]["full_stockholm"] = saved["outputs"]["match_stockholm"]
+            end
+            Iduna.Utils.write_json(state_path, saved)
+        end
+        # The deliberately unusable tiny DB makes a rebuild observable without
+        # performing a search: accepting the cache would return successfully.
+        @test_throws Base.ProcessFailedException Iduna.MSAExpansion.expand_msa(
+            target, seed, mutation_workdir; mmseqs_db = db, mmseqs_threads = 1)
+        rejected = Iduna.MSAExpansion._read_step_state(mutation_ctx.run_dir)
+        @test rejected.status == "failed"
+        @test !isfile(mutation_ctx.outputs.full_stockholm)
+    end
+end
+
+@testset "Zero-hit expansion and movable verified caches" begin
+    zero_workdir = joinpath(tmp, "zero_hits")
+    zero_ctx = Iduna.MSAExpansion._expansion_context(target, seed, zero_workdir, db;
+        match_mode = 1, match_ratio = nothing, hmmbuild_symfrac = 0.0,
+        centroids = false)
+    write_outputs(zero_ctx.outputs)
+    write(zero_ctx.outputs.hits_fasta, "")
+    Iduna.MSAExpansion._write_step_state(zero_ctx.run_dir, :done,
+        zero_ctx.identity, zero_ctx.outputs)
+    @test !isfile(zero_ctx.outputs.s_exon_blocks_tsv)
+    zero_result = Iduna.MSAExpansion.expand_msa(
+        target, seed, zero_workdir; mmseqs_db = db)
+    @test zero_result.status === :skipped
+    @test zero_result.n_hits == zero_result.n_new_hits == 0
+    @test isfile(zero_result.s_exon_blocks_tsv)
+    rm(zero_result.s_exon_blocks_tsv)
+    moved_workdir = joinpath(tmp, "moved_zero_hits")
+    cp(zero_workdir, moved_workdir)
+    moved_result = Iduna.MSAExpansion.expand_msa(
+        target, seed, moved_workdir; mmseqs_db = db)
+    @test moved_result.status === :skipped
+    @test moved_result.n_hits == moved_result.n_new_hits == 0
+    @test isfile(moved_result.s_exon_blocks_tsv)
+end

@@ -3,7 +3,7 @@
 
 function _thoraxe_input_outputs(input_dir::AbstractString)
     ensembl_dir = joinpath(input_dir, "Ensembl")
-    outputs = Dict{String, Any}("ensembl_dir" => ensembl_dir)
+    outputs = Dict{String, Any}()
     for file in _REQUIRED_ENSEMBL_FILES
         outputs[file] = joinpath(ensembl_dir, file)
     end
@@ -22,6 +22,12 @@ function _write_thoraxe_input_state(workdir::AbstractString,
         action,
         warnings::AbstractVector{<:AbstractString} = String[],
         exception = nothing)
+    if status === :done
+        _has_valid_ensembl_bundle(input_dir) ||
+            error("Cannot complete an invalid Ensembl bundle.")
+        metadata = JSON.parse(read(_transcript_query_metadata_path(input_dir), String))
+        metadata isa AbstractDict || error("Transcript-query metadata must be an object.")
+    end
     return _write_stage_state(_thoraxe_input_stage_dir(workdir);
         stage = "thoraxe_input",
         stage_key = "thoraxe_input",
@@ -46,22 +52,13 @@ end
 function _maybe_reuse_thoraxe_input(workdir::AbstractString,
         input_dir::AbstractString,
         identity,
-        expected,
         cache;
         overwrite::Bool,
-        manifest_message::AbstractString,
-        legacy_message::AbstractString)
+        manifest_message::AbstractString)
     overwrite && return nothing
     if cache.reusable
         @info manifest_message input_dir
         _write_thoraxe_input_state(workdir, input_dir, :done, identity; action = :reuse)
-        return input_dir
-    end
-    if _has_valid_ensembl_bundle(input_dir) &&
-       _has_matching_transcript_query_metadata(input_dir, expected)
-        @info legacy_message input_dir
-        _write_thoraxe_input_state(workdir, input_dir, :done,
-            _thoraxe_input_identity(input_dir, expected); action = :reuse)
         return input_dir
     end
     return nothing
@@ -135,23 +132,6 @@ function _metadata_value_matches(stored, expected)
     return String(stored) == String(expected)
 end
 
-function _metadata_matches(path::AbstractString, expected)
-    isfile(path) || return false
-    try
-        metadata = JSON.parse(read(path, String))
-        for (key, expected_value) in pairs(expected)
-            string_key = String(key)
-            haskey(metadata, string_key) || return false
-            _metadata_value_matches(get(metadata, string_key, nothing), expected_value) ||
-                return false
-        end
-        return true
-    catch err
-        err isa InterruptException && rethrow()
-        return false
-    end
-end
-
 function _write_transcript_query_metadata!(input_dir::AbstractString, expected)
     metadata = merge(expected,
         (;
@@ -160,13 +140,6 @@ function _write_transcript_query_metadata!(input_dir::AbstractString, expected)
         ))
     path = _transcript_query_metadata_path(input_dir)
     return write_json(path, metadata)
-end
-
-function _has_matching_transcript_query_metadata(input_dir::AbstractString, expected)
-    expected_with_fingerprint = merge(expected,
-        (; input_fingerprint = _bundle_fingerprint(input_dir)))
-    return _metadata_matches(_transcript_query_metadata_path(input_dir),
-        expected_with_fingerprint)
 end
 
 function _missing_transcript_query_outputs(tmp_gene_dir::AbstractString)

@@ -1,5 +1,92 @@
 import URIs
 
+@testset "Completed output integrity" begin
+    mktempdir() do tmp
+        root = mkpath(joinpath(tmp, "original"))
+        stage_dir = Iduna.Utils._pipeline_stage_dir(root, "integrity")
+        artifact = joinpath(root, "artifact.txt")
+        other = joinpath(root, "other.txt")
+        write(artifact, "ACDE")
+        write(other, "FGHI")
+        identity = (; input = "independent fixture")
+        outputs = (; artifact, nested = Dict("files" => [other]), absent = nothing)
+        complete() = Iduna.Utils._write_stage_state(stage_dir;
+            stage = "integrity", stage_key = "integrity", status = :done,
+            identity, outputs, workdir = root)
+        reusable() = Iduna.Utils._classify_stage_state(stage_dir, identity,
+            (; artifact)).reusable
+        state_path = complete()
+        @test reusable()
+
+        # The caller initially knows only the summary path, but all recorded
+        # scientific outputs must remain intact, including same-length changes.
+        write(other, "FGHV")
+        @test !reusable()
+        write(other, "FGHI")
+        @test reusable()
+        write(artifact, "")
+        @test !reusable()
+        write(artifact, "ACDE")
+        rm(other)
+        @test !reusable()
+        write(other, "FGHI")
+
+        valid_state = Iduna.Utils.JSON.parse(read(state_path, String))
+        for status in ("failed", "skipped")
+            Iduna.Utils.write_json(state_path, merge(valid_state, Dict("status" => status)))
+            @test !reusable()
+        end
+        complete()
+        rm(artifact)
+        @test !reusable()
+        rm(state_path)
+        @test !reusable()
+        write(artifact, "ACDE")
+        complete()
+
+        for bad in (merge(valid_state, Dict("schema_version" => 0)),
+            filter(pair -> first(pair) != "schema_version", valid_state),
+            merge(valid_state, Dict("status" => 1)),
+            merge(valid_state, Dict("identity_hash" => 1)),
+            merge(valid_state, Dict("output_root" => 1)),
+            merge(valid_state, Dict("output_root" => root)),
+            merge(valid_state, Dict("output_digests" => nothing)),
+            merge(valid_state, Dict("output_digests" => Dict())),
+            merge(valid_state, Dict("output_digests" =>
+            Dict("artifact.txt" => 12, "other.txt" => "invalid"))),
+            merge(valid_state, Dict("required_outputs" => 7)),
+            merge(valid_state, Dict("outputs" => Dict("artifact" => "other.txt"))))
+            Iduna.Utils.write_json(state_path, bad)
+            @test !reusable()
+        end
+        for malformed in ("{", "null", "[]", "17")
+            write(state_path, malformed)
+            @test !reusable()
+        end
+        invalid_path = merge(valid_state,
+            Dict("outputs" => Dict("artifact" => "\0bad"),
+                "required_outputs" => Dict("artifact" => "\0bad"),
+                "output_digests" => Dict("\0bad" => repeat("a", 64))))
+        Iduna.Utils.write_json(state_path, invalid_path)
+        @test !Iduna.Utils._classify_stage_state(stage_dir, identity, (;)).reusable
+        complete()
+        @test reusable()
+        @test !Iduna.Utils._classify_stage_state(stage_dir, identity,
+            (; artifact, nested = Dict("files" => [artifact]))).reusable
+        @test !Iduna.Utils._classify_stage_state(stage_dir, identity,
+            (; artifact, nested = Dict("files" => [other, artifact]))).reusable
+        @test_throws ErrorException Iduna.Utils._write_stage_state(stage_dir;
+            stage = "integrity", stage_key = "integrity", status = :done,
+            identity, outputs, required_outputs = (; artifact = other), workdir = root)
+
+        moved = joinpath(tmp, "moved")
+        mv(root, moved)
+        @test Iduna.Utils._classify_stage_state(
+            Iduna.Utils._pipeline_stage_dir(moved, "integrity"), identity,
+            (; artifact = joinpath(moved, "artifact.txt"))).reusable
+    end
+end
+
 @testset "Cleanup containment" begin
     mktempdir() do tmp
         root = mkpath(joinpath(tmp, "work"))

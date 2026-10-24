@@ -91,6 +91,9 @@
         Iduna.ThorAxeMSA.write_file(
             paths.stockholm_path, seed_msa, Iduna.ThorAxeMSA.Stockholm)
 
+        stage_identity = Iduna.ThorAxeMSA._thoraxe_msa_identity(metadata, workdir)
+        Iduna.ThorAxeMSA._write_thoraxe_msa_state(workdir, summary_path, [seed],
+            :done, stage_identity; action = :run)
         reuse_logs,
         result = Test.collect_test_logs() do
             Iduna.ThorAxeMSA.build_thoraxe_msa(
@@ -127,6 +130,113 @@
         @test result.sequence_fastas == [paths.sequence_fasta]
         @test result.species_files == [paths.species_file]
         @test result.thoraxe_dirs == [thoraxe_dir]
+
+        @testset "public ThorAxe relative workdirs and relocation" begin
+            for path_kind in (:absolute, :relative, :dot)
+                @testset "$path_kind" begin
+                    relocated = joinpath(tmp, "moved_$(path_kind)")
+                    cp(workdir, relocated)
+                    cd(path_kind === :dot ? relocated : tmp) do
+                        requested = path_kind === :relative ? basename(relocated) :
+                                    path_kind === :dot ? "." : relocated
+                        logs, moved = Test.collect_test_logs() do
+                            Iduna.ThorAxeMSA.build_thoraxe_msa(target, requested;
+                                pid_thresholds = [10.0], specieslist = "homo_sapiens",
+                                cached_thoraxe_input_dir = source, pid_sample_count = 0,
+                                pid_sample_seed = 7)
+                        end
+                        @test any(
+                            log -> log.message ==
+                                   "Reusing cached ThorAxe MSA candidates.", logs)
+                        @test isabspath(moved.input_dir)
+                        @test realpath(moved.input_dir) ==
+                              realpath(joinpath(relocated, "thoraxe_input"))
+                        @test all(isfile, moved.baseline_stockholms)
+                        @test all(isfile, moved.sequence_fastas)
+                        @test all(isfile, moved.species_files)
+                        state = Iduna.Utils._read_stage_state(
+                            Iduna.ThorAxeMSA._thoraxe_msa_stage_dir(relocated))
+                        @test state["action"] == "reuse"
+                        @test all(!isabspath(path)
+                        for path in keys(state["output_digests"]))
+                    end
+                end
+            end
+        end
+
+        # Independently edit each required artifact after a sound completion.
+        # Metadata-only and candidate-file fallbacks must not turn a miss into a hit.
+        for file in (paths.stockholm_path, paths.fasta_path, paths.sequence_fasta,
+            paths.species_file, joinpath(thoraxe_dir, "path_table.csv"), summary_path)
+            original = read(file, String)
+            write(file, replace(original, first(original) => '!'; count = 1))
+            cache = Iduna.ThorAxeMSA._thoraxe_msa_stage_cache(workdir,
+                summary_path, metadata, stage_identity; overwrite = false)
+            @test !cache.cache.reusable
+            @test Iduna.ThorAxeMSA._maybe_cached_thoraxe_msa(input_dir, summary_path,
+                target, workdir, metadata, stage_identity, cache, nothing, nothing;
+                overwrite = false, pid_sample_count = 0, pid_sample_fraction = 0.8) ===
+                  nothing
+            write(file, original)
+        end
+        stage_path = Iduna.Utils._stage_state_path(Iduna.ThorAxeMSA._thoraxe_msa_stage_dir(workdir))
+        valid_manifest = read(stage_path, String)
+        write(stage_path, "{}")
+        stale = Iduna.ThorAxeMSA._thoraxe_msa_stage_cache(workdir,
+            summary_path, metadata, stage_identity; overwrite = false)
+        @test !stale.cache.reusable
+        @test Iduna.ThorAxeMSA._maybe_cached_thoraxe_msa(input_dir, summary_path,
+            target, workdir, metadata, stage_identity, stale, nothing, nothing;
+            overwrite = false, pid_sample_count = 0, pid_sample_fraction = 0.8) === nothing
+        write(stage_path, valid_manifest)
+        incomplete_manifest = Iduna.Utils.JSON.parse(valid_manifest)
+        delete!(incomplete_manifest["required_outputs"], "seed_fastas")
+        delete!(incomplete_manifest["output_digests"], relpath(paths.fasta_path, workdir))
+        Iduna.Utils.write_json(stage_path, incomplete_manifest)
+        incomplete = Iduna.ThorAxeMSA._thoraxe_msa_stage_cache(workdir,
+            summary_path, metadata, stage_identity; overwrite = false)
+        @test incomplete.cache.reusable
+        @test Iduna.ThorAxeMSA._maybe_cached_thoraxe_msa(input_dir, summary_path,
+            target, workdir, metadata, stage_identity, incomplete, nothing, nothing;
+            overwrite = false, pid_sample_count = 0, pid_sample_fraction = 0.8) === nothing
+        write(stage_path, valid_manifest)
+
+        rm(paths.s_exon_blocks_tsv)
+        cached_again = Iduna.ThorAxeMSA._cached_selected_seeds(summary_path, workdir, metadata)
+        @test cached_again !== nothing
+        @test isfile(paths.s_exon_blocks_tsv)
+
+        auto_metadata = merge(metadata, (; requested_pid_sample_seed = nothing))
+        auto_identity = Iduna.ThorAxeMSA._thoraxe_msa_identity(auto_metadata, workdir)
+        Iduna.ThorAxeMSA._write_thoraxe_msa_state(workdir, summary_path, [seed],
+            :done, auto_identity; action = :run)
+        auto_reuse = Iduna.ThorAxeMSA.build_thoraxe_msa(target, workdir;
+            pid_thresholds = [10.0], specieslist = "homo_sapiens",
+            cached_thoraxe_input_dir = source, pid_sample_count = 0)
+        @test auto_reuse.pid_sample_seed == UInt64(7)
+
+        original_sto = read(paths.stockholm_path, String)
+        write(paths.stockholm_path, "not Stockholm")
+        @test !Iduna.ThorAxeMSA._selected_artifacts_exist(seed, workdir)
+        @test_throws ErrorException Iduna.ThorAxeMSA._write_thoraxe_msa_state(workdir,
+            summary_path, [seed], :done, auto_identity; action = :run)
+        write(paths.stockholm_path, original_sto)
+        original_fasta = read(paths.fasta_path, String)
+        write(paths.fasta_path, ">ENSG00000000001\n")
+        @test !Iduna.ThorAxeMSA._selected_artifacts_exist(seed, workdir)
+        @test_throws ErrorException Iduna.ThorAxeMSA._write_thoraxe_msa_state(workdir,
+            summary_path, [seed], :done, auto_identity; action = :run)
+        write(paths.fasta_path, original_fasta)
+        @test_throws ErrorException Iduna.ThorAxeMSA._write_thoraxe_msa_state(workdir,
+            summary_path, [seed], :done, merge(auto_identity, (; pid_path_contract = 1));
+            action = :run)
+        alternative_fasta = joinpath(workdir, "other_seed.fasta")
+        cp(paths.fasta_path, alternative_fasta)
+        different_path = Iduna.SeedSelection(; pid = seed.pid, epli = seed.epli,
+            stockholm_path = seed.stockholm_path, fasta_path = alternative_fasta,
+            summary_path)
+        @test_throws ErrorException Iduna.ThorAxeMSA._write_thoraxe_msa_state(workdir,
+            summary_path, [different_path], :done, auto_identity; action = :run)
 
         function write_cached_test_thoraxe_dir(thoraxe_root::AbstractString)
             msa_dir = joinpath(thoraxe_root, "msa")
@@ -196,14 +306,23 @@
         end
         scored_logs,
         scored_result = Test.collect_test_logs() do
-            Iduna.ThorAxeMSA.build_thoraxe_msa(target, scored_workdir;
-                pid_thresholds = [20.0, 30.0],
-                specieslist = "all",
-                cached_thoraxe_input_dir = source,
-                specieslist_filter = false,
-                biomart_datasets_filter = false,
+            identity = Iduna.ThorAxeMSA._thoraxe_msa_identity(scored_metadata, scored_workdir)
+            cache = Iduna.ThorAxeMSA._thoraxe_msa_stage_cache(scored_workdir,
+                scored_summary, scored_metadata, identity; overwrite = false)
+            @test !cache.cache.reusable
+            prepared = Iduna.ThorAxeMSA._prepare_thoraxe_msa_stage!(scored_workdir,
+                scored_summary, identity, cache; overwrite = false)
+            @test prepared.force_pid_rerun
+            fake_thoraxe = (
+                input, run_root; kwargs...) -> write_cached_test_thoraxe_dir(joinpath(run_root, "thoraxe"))
+            filters = (; species_filter = (; warnings = String[]),
+                biomart_filter = (; warnings = String[]))
+            Iduna.ThorAxeMSA._run_thoraxe_msa_stage!(target, scored_input,
+                scored_workdir, scored_summary, [20.0, 30.0], nothing,
+                scored_metadata, identity, filters, prepared;
                 pid_sample_count = 0,
-                pid_sample_seed = 9)
+                pid_sample_fraction = 0.8, sample_seed = UInt64(9),
+                sampling_strategy = :common, thoraxe_fn = fake_thoraxe)
         end
         build_log = only([log
                           for log in scored_logs
@@ -215,5 +334,27 @@
         @test length(scored_result.baseline_stockholms) == 2
         @test all(isfile, scored_result.baseline_stockholms)
         @test isfile(scored_result.pid_summary)
+        rerun = Iduna.ThorAxeMSA.build_thoraxe_msa(target, scored_workdir;
+            pid_thresholds = [20.0, 30.0], specieslist = "all",
+            cached_thoraxe_input_dir = source, specieslist_filter = false,
+            biomart_datasets_filter = false, pid_sample_count = 0, pid_sample_seed = 9)
+        @test [seed.pid for seed in rerun.seeds] == [20.0, 30.0]
+
+        # A rejected stage must attempt a rebuild and retain failed state if its
+        # output directory is blocked. This fails locally before invoking ThorAxe.
+        blocked_workdir = joinpath(tmp, "blocked_work")
+        mkpath(blocked_workdir)
+        blocked_output = Iduna.ThorAxeMSA._thoraxe_msa_dir(blocked_workdir)
+        write(blocked_output, "blocking file")
+        @test_throws Base.IOError Iduna.ThorAxeMSA.build_thoraxe_msa(
+            target, blocked_workdir;
+            pid_thresholds = [20.0], specieslist = "all",
+            cached_thoraxe_input_dir = source, specieslist_filter = false,
+            biomart_datasets_filter = false, pid_sample_count = 0, pid_sample_seed = 9)
+        failed = Iduna.Utils._read_stage_state(
+            Iduna.ThorAxeMSA._thoraxe_msa_stage_dir(blocked_workdir))
+        @test failed["status"] == "failed"
+        @test failed["output_digests"] === nothing
+        @test read(blocked_output, String) == "blocking file"
     end
 end
