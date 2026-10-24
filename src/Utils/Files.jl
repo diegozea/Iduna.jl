@@ -330,7 +330,9 @@ function _source_fingerprint(root::AbstractString)
             isdir(path) || continue
             for (parent, _, names) in walkdir(path), name in names
 
-                endswith(name, ".jl") || continue
+                # walkdir lists untraversed directory symlinks among file entries.
+                isfile(joinpath(parent, name)) || return nothing
+                occursin(r"\.jl(?:\.\d+)?\.cov$", name) && continue
                 push!(files, relpath(joinpath(parent, name), root))
             end
         end

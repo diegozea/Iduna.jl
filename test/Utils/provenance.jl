@@ -22,6 +22,23 @@ using Iduna.Utils: _source_fingerprint, _implementation_identity, _executable_id
         with_extension = _source_fingerprint(root)
         write(extension, "extension() = 2\n")
         @test _source_fingerprint(root) != with_extension
+        for directory in ("src", "ext")
+            asset = joinpath(mkpath(joinpath(root, directory, "data")), "scores")
+            before_asset = _source_fingerprint(root)
+            write(asset, "A 4\n")
+            with_asset = _source_fingerprint(root)
+            @test with_asset != before_asset
+            write(asset, "A -99\n")
+            @test _source_fingerprint(root) != with_asset
+            rm(asset)
+            @test _source_fingerprint(root) == before_asset
+        end
+        before_coverage = _source_fingerprint(root)
+        write(source * ".cov", "generated Julia coverage\n")
+        write(source * ".123.cov", "generated Julia coverage\n")
+        @test _source_fingerprint(root) == before_coverage
+        write(joinpath(root, "src", "data", "scores.cov"), "scientific data\n")
+        @test _source_fingerprint(root) != before_coverage
         id = _implementation_identity((JSON, SHA); source_sha256 = before)
         @test id.source_sha256 == before
         @test id.julia == string(VERSION)
@@ -251,6 +268,14 @@ const common = (
         @test Iduna.Utils._julia_dependency_identity((root,); graph) != initial
         write(source, "const value = 1\n")
         @test Iduna.Utils._julia_dependency_identity((root,); graph) == initial
+        matrix = joinpath(mkpath(joinpath(tmp, "src", "data")), "matrix")
+        write(matrix, "A 4\n")
+        with_matrix = Iduna.Utils._julia_dependency_identity((root,); graph)
+        @test with_matrix != initial
+        write(matrix, "A -99\n")
+        @test Iduna.Utils._julia_dependency_identity((root,); graph) != with_matrix
+        rm(matrix)
+        @test Iduna.Utils._julia_dependency_identity((root,); graph) == initial
         changed[leaf] = merge(graph[leaf], (; tree_hash = nothing))
         @test Iduna.Utils._julia_dependency_identity((root,); graph = changed) === nothing
         changed[leaf] = merge(graph[leaf], (; version = nothing))
@@ -324,5 +349,8 @@ const common = (
     @test std.source_sha256 === nothing
     @test std.tree_hash === nothing
 end
+
+include("source_asset_symlinks.jl")
+include("path_dependency_provenance.jl")
 
 end

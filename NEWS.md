@@ -21,6 +21,9 @@
   reference contents and execution settings. Unknown tool provenance disables
   affected reuse. Source and loaded dependencies must remain stable for the Julia
   process lifetime; restart Julia after changing them.
+  Python probes preserve virtual-environment interpreter paths, and path-developed
+  Julia dependencies include scientific data under `src` and `ext`. Earlier producer
+  fingerprints require recomputation.
 - MMseqs expansion requires an explicitly declared immutable database snapshot
   manifest for reuse (`mmseqs_db_manifest` / `--mmseqs-db-manifest`). Computation
   remains available without one, with reuse disabled. Rebuild the manifest after

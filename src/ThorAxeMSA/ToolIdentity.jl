@@ -19,7 +19,8 @@ records = ''.join(p.relative_to(root).as_posix() + '\0'
 dist = pkg_resources.get_distribution('thoraxe')
 dependencies = pkg_resources.working_set.resolve([dist.as_requirement()])
 print(json.dumps(dict(
-    python_executable=str(Path(sys.executable).resolve()), python_version=sys.version,
+    python_executable=sys.executable, python_version=sys.version,
+    python_prefix=sys.prefix, python_base_prefix=sys.base_prefix,
     import_paths=sys.path, python_environment=python_environment,
     thoraxe_version=__version__, distribution_version=dist.version,
     source_sha256=hashlib.sha256(records.encode()).hexdigest(), source_files=len(files),
@@ -36,7 +37,8 @@ function _thoraxe_python_identity()
     shebangs = readline.(paths)
     all(startswith(line, "#!/") && !occursin(r"\s", line)
     for line in shebangs) || error("Unsupported ThorAxe CLI interpreter.")
-    interpreters = realpath.([line[3:end] for line in shebangs])
+    # The invocation path selects a virtual environment even when Python is a symlink.
+    interpreters = [line[3:end] for line in shebangs]
     length(unique(interpreters)) == 1 ||
         error("ThorAxe CLI commands use different interpreters.")
     command = `$(first(interpreters)) -B -c $_THORAXE_IDENTITY_PROBE $(first(paths))`

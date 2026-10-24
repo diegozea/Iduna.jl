@@ -57,3 +57,5 @@ using Iduna, Test
         @test_throws ErrorException msa._thoraxe_aligner_identity()
     end
 end
+
+include("venv_provenance.jl")
