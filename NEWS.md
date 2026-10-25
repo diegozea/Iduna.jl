@@ -24,6 +24,10 @@
   Python probes preserve virtual-environment interpreter paths, and path-developed
   Julia dependencies include scientific data under `src` and `ext`. Earlier producer
   fingerprints require recomputation.
+  The loaded protein alignment matrix and gap penalties now participate in reuse;
+  differing compiled models invalidate earlier validation results. After dependency
+  data edits, refresh the dependency and Iduna precompile caches as well as restarting
+  Julia, so the edited data is actually loaded.
 - MMseqs expansion requires an explicitly declared immutable database snapshot
   manifest for reuse (`mmseqs_db_manifest` / `--mmseqs-db-manifest`). Computation
   remains available without one, with reuse disabled. Rebuild the manifest after

@@ -76,10 +76,13 @@ machine-readable `result.json` with `status: "error"`, `failed_stage`, any
 available partial `target` metadata, accumulated warnings, and exception
 details.
 
-When `thoraxe_input_dir` is supplied, that source bundle is treated as read-only
-and copied into `thoraxe_input/`; the copied layout is then preserved like a
-fresh `transcript_query` result. Iduna fingerprints the required Ensembl bundle
-files and records a `thoraxe_input` stage manifest, so later reruns reuse the
+When `thoraxe_input_dir` is supplied, Iduna copies that bundle into
+`thoraxe_input/` without changing the source. If the source already resolves to
+that destination, including through a symlinked parent, Iduna validates it in
+place and refreshes its own metadata while preserving the Ensembl files and
+any extra files. The layout is preserved like a fresh `transcript_query` result.
+Iduna fingerprints the required Ensembl bundle files and records a
+`thoraxe_input` stage manifest, so later reruns reuse the
 copied or previously generated `transcript_query` result when the target,
 species list, orthology, and filter options still match.
 
@@ -254,10 +257,19 @@ including scientific data such as substitution matrices. Generated Julia coverag
 files (`*.jl.cov` and `*.jl.<pid>.cov`) are excluded.
 File symlinks hash their target contents. Untraversed directory symlinks make the
 source identity unknown and disable affected reuse.
+The effective protein alignment score model is also fingerprinted: all loaded amino-acid
+substitution scores and both gap penalties. Different loaded model values cannot share
+validation results even when their on-disk package files match. These scores
+come from the model actually used by Iduna, which may differ from an edited matrix file.
 Registered package and JLL artifact trees are assumed immutable. Unknown package,
-source or executable identity disables the affected reuse, while computation remains
-available. Restart Julia after source or dependency changes; hot reload and concurrent
-source editing during a run are outside this contract.
+source, alignment model or executable identity disables the affected reuse, while
+computation remains available. Restart Julia after source or dependency changes; hot
+reload and concurrent source editing during a run are outside this contract.
+After editing dependency data, also refresh the dependency and Iduna precompile caches
+to load those edits. A restart alone can retain earlier compiled data when a dependency
+does not register its data files for precompilation. Disk fingerprints do not certify
+other unregistered data serialized by dependencies; those precompile caches must be
+kept consistent with their files.
 
 ThorAxe provenance includes its actual Python interpreter, installed ThorAxe source
 and distribution dependencies, CLI scripts, ProGraphMSA, and HHsuite where used.

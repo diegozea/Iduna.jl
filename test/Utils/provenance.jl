@@ -351,6 +351,8 @@ const common = (
 end
 
 include("source_asset_symlinks.jl")
+include("protein_alignment_provenance.jl")
 include("path_dependency_provenance.jl")
+include("compiled_dependency_provenance.jl")
 
 end
