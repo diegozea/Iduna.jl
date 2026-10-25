@@ -50,7 +50,8 @@ function _ensure_cached_thoraxe_input(source_dir::AbstractString,
     action = _stage_action(cache)
     try
         _write_thoraxe_input_state(workdir, dest, :running, identity; action)
-        if abspath(dest) != source
+        # Parent symlinks can make different paths refer to the supplied bundle itself.
+        if !samefile(source, dest)
             isdir(dest) && safe_rm(dest, workdir)
             mkpath(dirname(dest))
             cp(source, dest; force = true)

@@ -1,3 +1,5 @@
+include("cached_input_aliases.jl")
+
 mktempdir() do tmp
     target = Iduna.ResolvedTarget(;
         input_id = "ENST",

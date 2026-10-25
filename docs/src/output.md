@@ -76,10 +76,13 @@ machine-readable `result.json` with `status: "error"`, `failed_stage`, any
 available partial `target` metadata, accumulated warnings, and exception
 details.
 
-When `thoraxe_input_dir` is supplied, that source bundle is treated as read-only
-and copied into `thoraxe_input/`; the copied layout is then preserved like a
-fresh `transcript_query` result. Iduna fingerprints the required Ensembl bundle
-files and records a `thoraxe_input` stage manifest, so later reruns reuse the
+When `thoraxe_input_dir` is supplied, Iduna copies that bundle into
+`thoraxe_input/` without changing the source. If the source already resolves to
+that destination, including through a symlinked parent, Iduna validates it in
+place and refreshes its own metadata while preserving the Ensembl files and
+any extra files. The layout is preserved like a fresh `transcript_query` result.
+Iduna fingerprints the required Ensembl bundle files and records a
+`thoraxe_input` stage manifest, so later reruns reuse the
 copied or previously generated `transcript_query` result when the target,
 species list, orthology, and filter options still match.
 
