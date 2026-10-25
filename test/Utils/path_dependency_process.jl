@@ -25,6 +25,8 @@ result = (; source_sha256 = dependency.source_sha256,
     implementation_hash = utils._identity_hash(identity),
     package_path = pkgdir(utils.BioAlignments),
     blosum62_aa = utils.BLOSUM62[utils.BioSequences.AA_A, utils.BioSequences.AA_A],
+    model_aa = utils._PROTEIN_ALIGNMENT_SCORE_MODEL.submat['A', 'A'],
+    model_sha256 = identity.protein_alignment_sha256,
     action = state["action"], cached = result_fields(cached), fresh = result_fields(fresh))
 write(joinpath(root, phase * ".json"), JSON.json(result))
 println(JSON.json(result))

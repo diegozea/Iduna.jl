@@ -429,6 +429,22 @@ function _julia_dependency_identity(modules; graph = nothing)
     end
 end
 
+function _protein_alignment_score_identity(model = _PROTEIN_ALIGNMENT_SCORE_MODEL)
+    try
+        model.submat isa BioAlignments.SubstitutionMatrix || return nothing
+        # Include ambiguous, rare and stop residues; pairalign uses these effective scores.
+        alphabet = filter(aa -> Char(aa) != '-',
+            BioSequences.symbols(BioSequences.AminoAcidAlphabet()))
+        return _identity_hash((; model = string(typeof(model)),
+            matrix = string(typeof(model.submat)), alphabet = join(Char.(alphabet)),
+            scores = [model.submat[a, b] for a in alphabet, b in alphabet],
+            gap_open = model.gap_open, gap_extend = model.gap_extend))
+    catch err
+        err isa InterruptException && rethrow()
+        return nothing
+    end
+end
+
 function _implementation_identity(dependencies = (); source_sha256 = _loaded_source_identity())
     if source_sha256 === nothing
         @warn "Iduna source identity unavailable; affected cache reuse is disabled."
@@ -442,7 +458,13 @@ function _implementation_identity(dependencies = (); source_sha256 = _loaded_sou
         @warn "Julia dependency identity unavailable; affected cache reuse is disabled."
         return nothing
     end
-    return (; contract = 1, source_sha256, julia = string(VERSION),
+    protein_alignment_sha256 = _protein_alignment_score_identity()
+    if protein_alignment_sha256 === nothing
+        @warn "Protein alignment model identity unavailable; affected cache reuse is disabled."
+        return nothing
+    end
+    return (;
+        contract = 2, source_sha256, protein_alignment_sha256, julia = string(VERSION),
         platform = Sys.MACHINE, cpu = Sys.CPU_NAME, cpu_threads = Sys.CPU_THREADS,
         julia_threads = Threads.nthreads(),
         thread_environment = Dict(name => get(ENV, name, nothing)

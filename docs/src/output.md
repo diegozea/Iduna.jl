@@ -254,10 +254,19 @@ including scientific data such as substitution matrices. Generated Julia coverag
 files (`*.jl.cov` and `*.jl.<pid>.cov`) are excluded.
 File symlinks hash their target contents. Untraversed directory symlinks make the
 source identity unknown and disable affected reuse.
+The effective protein alignment score model is also fingerprinted: all loaded amino-acid
+substitution scores and both gap penalties. Different loaded model values cannot share
+validation results even when their on-disk package files match. These scores
+come from the model actually used by Iduna, which may differ from an edited matrix file.
 Registered package and JLL artifact trees are assumed immutable. Unknown package,
-source or executable identity disables the affected reuse, while computation remains
-available. Restart Julia after source or dependency changes; hot reload and concurrent
-source editing during a run are outside this contract.
+source, alignment model or executable identity disables the affected reuse, while
+computation remains available. Restart Julia after source or dependency changes; hot
+reload and concurrent source editing during a run are outside this contract.
+After editing dependency data, also refresh the dependency and Iduna precompile caches
+to load those edits. A restart alone can retain earlier compiled data when a dependency
+does not register its data files for precompilation. Disk fingerprints do not certify
+other unregistered data serialized by dependencies; those precompile caches must be
+kept consistent with their files.
 
 ThorAxe provenance includes its actual Python interpreter, installed ThorAxe source
 and distribution dependencies, CLI scripts, ProGraphMSA, and HHsuite where used.
