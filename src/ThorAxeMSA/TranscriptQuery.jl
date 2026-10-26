@@ -25,6 +25,33 @@ function _run_transcript_query_once(gene_core::AbstractString,
     return nothing
 end
 
+function _check_cached_input_overlap(source::AbstractString, dest::AbstractString)
+    samefile(source, dest) && return nothing
+    ancestor = abspath(dest)
+    while !ispath(ancestor) && !islink(ancestor)
+        ancestor = dirname(ancestor)
+    end
+    resolved_dest = normpath(joinpath(realpath(ancestor), relpath(abspath(dest), ancestor)))
+    overlap = _is_within_directory(resolved_dest, realpath(source))
+    if islink(dest)
+        # Rebuilding replaces the link with a directory at its resolved parent.
+        replacement = joinpath(realpath(dirname(dest)), basename(dest))
+        overlap |= _is_within_directory(replacement, realpath(source))
+    end
+    # Check source ancestors too, including outward symlinks reached through dest.
+    # Like safe_rm, this assumes paths are not changed concurrently.
+    ancestor = source
+    while !overlap
+        overlap = _is_within_directory(realpath(ancestor), resolved_dest)
+        parent = dirname(ancestor)
+        parent == ancestor && break
+        ancestor = parent
+    end
+    overlap && throw(ArgumentError(
+        "Cached ThorAxe input at $(source) overlaps destination $(dest); use separate directories or the same physical directory."))
+    return nothing
+end
+
 function _ensure_cached_thoraxe_input(source_dir::AbstractString,
         workdir::AbstractString;
         overwrite::Bool = false,
@@ -33,6 +60,7 @@ function _ensure_cached_thoraxe_input(source_dir::AbstractString,
     source = abspath(String(source_dir))
     _has_valid_ensembl_bundle(source) ||
         error("Cached ThorAxe input at $(source) is not a valid transcript_query bundle.")
+    _check_cached_input_overlap(source, dest)
     source_fingerprint = _bundle_fingerprint(source)
     expected = merge(metadata,
         (;

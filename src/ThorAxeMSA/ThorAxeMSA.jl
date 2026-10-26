@@ -24,7 +24,8 @@ using StatsBase: sample
 
 using ..EPLI
 using ..Utils: DEFAULT_PID_THRESHOLDS, ResolvedTarget, SeedSelection, ThorAxeMSAResult,
-               _http_get_request, _http_get_with_retries, _relative_artifact_path,
+               _http_get_request, _http_get_with_retries, _is_within_directory,
+               _relative_artifact_path,
                _resolve_artifact_path, _sample_indices, _sample_rng,
                _terminal_progress_enabled, _validate_pid_thresholds,
                decode_body,
