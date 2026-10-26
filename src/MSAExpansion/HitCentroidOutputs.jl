@@ -104,6 +104,8 @@ function _write_centroid_msa(transcript_id::AbstractString,
         _restore_s_exon_annotations!(match_alignment, archived)
         write_file(full_stockholm, full_alignment, Stockholm)
         write_file(match_stockholm, match_alignment, Stockholm)
+        normalize_stockholm_annotations!(full_stockholm)
+        normalize_stockholm_annotations!(match_stockholm)
         write_file(joinpath(centroid_dir, "$(transcript_id)_centroids.a3m"),
             match_alignment, A3M)
         s_exon_blocks_tsv = joinpath(

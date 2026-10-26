@@ -485,3 +485,199 @@ mktempdir() do tmp
     scores = Iduna.EPLI.DataFrame(Iduna.EPLI.CSV.File(result.scores_path))
     @test scores.normalization_score == fill(20.0, 2)
 end
+
+@testset "Alignment output integrity" begin
+    mktempdir() do tmp
+        input = joinpath(tmp, "input.fasta")
+        output = joinpath(tmp, "alignment.fasta")
+        write(input, ">ref full description\nACD\n>other\nAE\n")
+        expected = ">other\nA-E\n>ref full description\nACD\n"
+        calls = Ref(0)
+        fail_after_write = Ref(false)
+        aligner = function (source, destination; kwargs...)
+            calls[] += 1
+            write(destination, fail_after_write[] ? ">other\nA-" : expected)
+            fail_after_write[] && error("interrupted alignment")
+            return destination
+        end
+        run_cached = (; overwrite = false) -> Iduna.EPLI._run_aligner(
+            aligner, input, output; logs_dir = nothing, run_label = "integrity",
+            overwrite, aligner_args = Cmd(String[]))
+        @test run_cached() == output
+        @test run_cached() == output
+        @test calls[] == 1
+
+        # Same-length sequence changes are invisible to existence/size checks.
+        for corrupted in (replace(expected, "A-E" => "A-F"), "")
+            write(output, corrupted)
+            before = calls[]
+            @test run_cached() == output
+            @test calls[] == before + 1
+            @test read(output, String) == expected
+        end
+        rm(output)
+        @test run_cached() == output
+
+        cache_path = Iduna.EPLI._alignment_cache_path(output)
+        for change in (
+            state -> delete!(state, "schema_version"),
+            state -> (state["schema_version"] = 3.0),
+            state -> delete!(state, "output_sha256"),
+            state -> (state["output_sha256"] = [1, 2]),
+            state -> (state["alignment_path"] = "missing.fasta"),
+            state -> (state["alignment_path"] = nothing),
+            state -> (state["alignment_path"] = "bad\0path"),
+            state -> (state["output_fasta"] = "different.fasta"))
+            state = Iduna.EPLI._read_alignment_cache(output)
+            change(state)
+            Iduna.Utils.write_json(cache_path, state)
+            before = calls[]
+            @test run_cached() == output
+            @test calls[] == before + 1
+        end
+        for malformed in ("{", "[]", "null", "1")
+            write(cache_path, malformed)
+            before = calls[]
+            @test run_cached() == output
+            @test calls[] == before + 1
+        end
+
+        fail_after_write[] = true
+        @test_throws ErrorException run_cached(; overwrite = true)
+        @test !isfile(cache_path)
+        fail_after_write[] = false
+        before = calls[]
+        @test run_cached() == output
+        @test calls[] == before + 1
+        @test read(output, String) == expected
+        @test run_cached() == output
+        @test calls[] == before + 1
+        @test !isfile(string(cache_path, ".tmp"))
+    end
+
+    mktempdir() do tmp
+        input = joinpath(tmp, "input.fasta")
+        output = joinpath(tmp, "alignment.fasta")
+        write(input, ">a\nACD\n>b\nAE\n")
+        for bad_output in (
+            ">a\nACD\n>b\nAE\n", # unequal original row lengths
+            ">a\nACD\n>b\nA-F\n", # substituted residue
+            ">a\nACD\n>wrong\nA-E\n", # changed ID
+            ">a\nACD\n", # missing record
+            ">a\nACD\n>a\nA-E\n", # duplicate ID
+            ">a\n\n>b\n\n", # zero-column alignment
+            ">\nACD\n", # empty ID
+            "ACD\n>a\nACD\n", # sequence before first header
+            "", ">a")
+            aligner = (source, destination; kwargs...) -> write(destination, bad_output)
+            returning_aligner = function (source, destination; kwargs...)
+                aligner(source, destination; kwargs...)
+                return nothing
+            end
+            @test_throws ErrorException Iduna.EPLI._run_aligner(
+                returning_aligner, input, output; logs_dir = nothing,
+                run_label = "invalid", overwrite = true, aligner_args = Cmd(String[]))
+            @test !isfile(Iduna.EPLI._alignment_cache_path(output))
+        end
+        missing_aligner = (source, destination; kwargs...) -> nothing
+        rm(output; force = true)
+        @test_throws ErrorException Iduna.EPLI._run_aligner(
+            missing_aligner, input, output; logs_dir = nothing,
+            run_label = "missing", overwrite = false, aligner_args = Cmd(String[]))
+
+        alternate = joinpath(tmp, "alternate.fasta")
+        calls = Ref(0)
+        alternate_aligner = function (source, destination; kwargs...)
+            calls[] += 1
+            write(alternate, ">b\na.e\n>a\na\ncd\n")
+            return (; fasta_path = alternate)
+        end
+        for _ in 1:2
+            @test Iduna.EPLI._run_aligner(alternate_aligner, input, output;
+                logs_dir = nothing, run_label = "alternate", overwrite = false,
+                aligner_args = Cmd(String[])) == alternate
+        end
+        @test calls[] == 1
+        @test !isfile(output)
+
+        # Compare raw letters before an MSA reader can map unknown residues to X.
+        write(input, ">a\nUOX\n>b\nABZ\n")
+        replacing_aligner = function (source, destination; kwargs...)
+            write(destination, ">a\nXXX\n>b\nABZ\n")
+            return destination
+        end
+        @test_throws ErrorException Iduna.EPLI._run_aligner(
+            replacing_aligner, input, output; logs_dir = nothing,
+            run_label = "raw_residues", overwrite = true, aligner_args = Cmd(String[]))
+        @test !isfile(Iduna.EPLI._alignment_cache_path(output))
+    end
+
+    mktempdir() do tmp
+        workdir = mkpath(joinpath(tmp, "before"))
+        input = joinpath(workdir, "input.fasta")
+        output = joinpath(workdir, "alignment.fasta")
+        write(input, ">a\nACD\n>b\nACE\n")
+        calls = Ref(0)
+        aligner = function (source, destination; kwargs...)
+            calls[] += 1
+            cp(source, destination; force = true)
+            return destination
+        end
+        Iduna.EPLI._run_aligner(aligner, input, output; logs_dir = nothing,
+            run_label = "movable", overwrite = false, aligner_args = Cmd(String[]))
+        moved = joinpath(tmp, "after")
+        mv(workdir, moved)
+        moved_output = joinpath(moved, "alignment.fasta")
+        @test Iduna.EPLI._run_aligner(
+            aligner, joinpath(moved, "input.fasta"), moved_output;
+            logs_dir = nothing, run_label = "movable", overwrite = false,
+            aligner_args = Cmd(String[])) == moved_output
+        @test calls[] == 1
+    end
+end
+
+@testset "Unreadable cached alignment" begin
+    @test_throws ArgumentError Iduna.EPLI._alignment_output_matches("bad\0path", "")
+    if !Sys.isunix() || ccall(:geteuid, Cuint, ()) == 0
+        @test_skip false # chmod cannot deny reads reliably on these platforms/users.
+    else
+        mktempdir() do tmp
+            input = joinpath(tmp, "input.fasta")
+            output = joinpath(tmp, "alignment.fasta")
+            cache_path = Iduna.EPLI._alignment_cache_path(output)
+            write(input, ">a\nACD\n>b\nACE\n")
+            calls = Ref(0)
+            fail_rebuild = Ref(false)
+            marker_visible = Ref{Union{Nothing, Bool}}(nothing)
+            aligner = function (source, destination; kwargs...)
+                calls[] += 1
+                if fail_rebuild[]
+                    marker_visible[] = isfile(cache_path)
+                    error("rebuild callback attempted")
+                end
+                cp(source, destination; force = true)
+                return destination
+            end
+            run_cached = () -> Iduna.EPLI._run_aligner(aligner, input, output;
+                logs_dir = nothing, run_label = "unreadable", overwrite = false,
+                aligner_args = Cmd(String[]))
+            @test run_cached() == output
+            @test calls[] == 1
+            original_mode = stat(output).mode & 0o777
+            chmod(output, 0o000)
+            try
+                fail_rebuild[] = true
+                @test_throws ErrorException run_cached()
+                @test calls[] == 2
+                @test marker_visible[] === false
+                @test !isfile(cache_path)
+            finally
+                chmod(output, original_mode)
+            end
+            fail_rebuild[] = false
+            @test run_cached() == output
+            @test run_cached() == output
+            @test calls[] == 3
+        end
+    end
+end

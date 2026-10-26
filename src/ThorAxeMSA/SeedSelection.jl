@@ -204,13 +204,32 @@ end
 function _selected_artifacts_exist(seed::SeedSelection, workdir::AbstractString)
     artifacts = _seed_artifacts(seed, workdir)
     path_table = joinpath(artifacts.thoraxe_dir, "path_table.csv")
-    return isfile(artifacts.seed_path) &&
-           artifacts.seed_fasta !== nothing &&
-           isfile(artifacts.seed_fasta) &&
-           isfile(artifacts.sequence_fasta) &&
-           isfile(artifacts.species_file) &&
-           isfile(path_table) &&
-           _seed_has_s_exon_annotations(artifacts.seed_path)
+    artifacts.seed_fasta === nothing && return false
+    all(isfile,
+        (artifacts.seed_path, artifacts.seed_fasta, artifacts.sequence_fasta,
+            artifacts.species_file, path_table)) || return false
+    try
+        _selected_alignment_matches(artifacts) || return false
+        table = CSV.File(path_table)
+        return !isempty(table) && :TranscriptIDCluster in propertynames(table) &&
+               :Path in propertynames(table)
+    catch err
+        err isa InterruptException && rethrow()
+        return false
+    end
+end
+
+function _selected_alignment_matches(artifacts)
+    records = EPLI._alignment_fasta_records(artifacts.seed_fasta)
+    input = EPLI._alignment_fasta_records(artifacts.sequence_fasta)
+    EPLI._validate_alignment_output(input, artifacts.seed_fasta)
+    msa = read_file(artifacts.seed_path, Stockholm; keepinserts = true)
+    has_s_exon_annotations(msa) || return false
+    length(filter(!isempty, strip.(readlines(artifacts.species_file)))) ==
+    nsequences(msa) ||
+        return false
+    aligned = Dict(String(name) => stringsequence(msa, name) for name in sequencenames(msa))
+    return records == aligned
 end
 
 function _cached_selected_seeds(summary_path::AbstractString, workdir::AbstractString,

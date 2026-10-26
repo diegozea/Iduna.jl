@@ -59,6 +59,57 @@ function _relative_output_value(outputs::AbstractDict, workdir::AbstractString)
     for (name, value) in pairs(outputs))
 end
 
+# Required files are separate from descriptive outputs: derived tables may be
+# regenerated, and directories must never be recursively hashed as artifacts.
+_stage_output_files(::Nothing) = String[]
+_stage_output_files(path::AbstractString) = [String(path)]
+function _stage_output_files(outputs::Union{NamedTuple, AbstractDict, AbstractVector})
+    return reduce(vcat, (_stage_output_files(value) for value in values(outputs));
+        init = String[])
+end
+
+_output_mapping_matches(expected, stored) = expected === nothing && stored === nothing
+_output_mapping_matches(expected::AbstractString, stored) = expected == stored
+
+function _output_mapping_matches(expected::AbstractVector, stored)
+    return stored isa AbstractVector && length(expected) == length(stored) &&
+           all(_output_mapping_matches(a, b) for (a, b) in zip(expected, stored))
+end
+
+function _output_mapping_matches(expected::Union{NamedTuple, AbstractDict}, stored)
+    return stored isa AbstractDict &&
+           all(haskey(stored, String(key)) &&
+               _output_mapping_matches(value, stored[String(key)])
+    for (key, value) in pairs(expected))
+end
+
+function _stage_output_digests(outputs, workdir::AbstractString)
+    paths = unique(_stage_output_files(outputs))
+    return Dict(path => _file_sha256(_resolve_artifact_path(path, workdir))
+    for path in paths)
+end
+
+function _stage_output_digest_matches(path::AbstractString, digest, workdir::AbstractString)
+    digest isa AbstractString && occursin(r"^[0-9a-f]{64}$", digest) || return false
+    file = _resolve_artifact_path(path, workdir)
+    return isfile(file) && _file_sha256(file) == digest
+end
+
+function _stage_output_integrity_matches(state, stage_dir::AbstractString, requested)
+    root = get(state, "output_root", nothing)
+    root isa AbstractString && !isabspath(root) || return false
+    workdir = normpath(joinpath(stage_dir, root))
+    required = get(state, "required_outputs", nothing)
+    digests = get(state, "output_digests", nothing)
+    digests isa AbstractDict || return false
+    _output_mapping_matches(required, get(state, "outputs", nothing)) || return false
+    _output_mapping_matches(_relative_output_value(requested, workdir), required) ||
+        return false
+    paths = unique(_stage_output_files(required))
+    Set(keys(digests)) == Set(paths) || return false
+    return all(_stage_output_digest_matches(path, digests[path], workdir) for path in paths)
+end
+
 # State Reading
 # -------------
 
@@ -78,6 +129,8 @@ function _stage_state_unreadable_message(state)
         return "state file disappeared while reading"
     elseif state isa NamedTuple && haskey(state, :unreadable)
         return state.unreadable
+    elseif !(state isa AbstractDict)
+        return "state must be a JSON object"
     end
     return nothing
 end
@@ -86,7 +139,7 @@ function _stage_existing_started_at(
         stage_dir::AbstractString, identity_hash::AbstractString)
     state = _read_stage_state(stage_dir)
     state isa AbstractDict || return nothing
-    String(get(state, "identity_hash", "")) == identity_hash || return nothing
+    get(state, "identity_hash", nothing) == identity_hash || return nothing
     started = get(state, "started_at", nothing)
     return started isa AbstractString ? String(started) : nothing
 end
@@ -96,7 +149,8 @@ end
 
 """
     _write_stage_state(stage_dir; stage, stage_key, status, identity,
-                       outputs=NamedTuple(), warnings=String[], exception=nothing,
+                       outputs=NamedTuple(), required_outputs=outputs,
+                       warnings=String[], exception=nothing,
                        action=nothing, workdir=stage_dir,
                        preserve_started_at=false, extra=NamedTuple())
 
@@ -116,6 +170,8 @@ are stored as relative paths so a result directory can be moved.
 - `status::Symbol`: stage status, such as `:running`, `:done`, or `:failed`.
 - `identity`: JSON-serializable data that defines the run inputs.
 - `outputs = NamedTuple()`: JSON-serializable output paths or path groups.
+- `required_outputs = outputs`: files whose contents must remain unchanged for
+  reuse. Exclude directories, logs and regenerable derived artifacts.
 - `warnings::AbstractVector{<:AbstractString} = String[]`: non-fatal warnings to
   record.
 - `exception = nothing`: exception summary to record for failed stages.
@@ -132,6 +188,7 @@ function _write_stage_state(stage_dir::AbstractString;
         status::Symbol,
         identity,
         outputs = NamedTuple(),
+        required_outputs = outputs,
         warnings::AbstractVector{<:AbstractString} = String[],
         exception = nothing,
         action::Union{Nothing, Symbol, AbstractString} = nothing,
@@ -147,6 +204,11 @@ function _write_stage_state(stage_dir::AbstractString;
         started_at = timestamp
     end
     finished_at = status in (:done, :failed, :skipped) ? timestamp : nothing
+    relative_outputs = _relative_output_value(outputs, workdir)
+    required = _relative_output_value(required_outputs, workdir)
+    _output_mapping_matches(required, relative_outputs) ||
+        error("Required stage files must match their declared output paths.")
+    digests = status === :done ? _stage_output_digests(required, workdir) : nothing
     state = merge(
         (;
             schema_version = _STAGE_STATE_SCHEMA_VERSION,
@@ -156,7 +218,10 @@ function _write_stage_state(stage_dir::AbstractString;
             action = action === nothing ? nothing : String(action),
             identity,
             identity_hash = hash,
-            outputs = _relative_output_value(outputs, workdir),
+            outputs = relative_outputs,
+            output_root = relpath(abspath(workdir), abspath(stage_dir)),
+            required_outputs = required,
+            output_digests = digests,
             warnings = String.(warnings),
             exception,
             started_at,
@@ -169,6 +234,33 @@ function _write_stage_state(stage_dir::AbstractString;
     # Replace the state file only after the new JSON has been written completely.
     mv(tmp_path, state_path; force = true)
     return state_path
+end
+
+function _stage_manifest_mismatch(state, expected_hash, stage_label)
+    if get(state, "schema_version", nothing) !== _STAGE_STATE_SCHEMA_VERSION ||
+       !(get(state, "status", nothing) isa AbstractString)
+        return (; reusable = false, status = :stale,
+            warning = "$(stage_label) state has an unsupported schema or status; rebuilding.")
+    end
+    status = Symbol(state["status"])
+    if status == :running
+        return (;
+            reusable = false,
+            status = :unfinished,
+            warning = "Previous $(stage_label) status was running; rebuilding unfinished outputs.")
+    elseif status != :done
+        return (;
+            reusable = false,
+            status,
+            warning = "Previous $(stage_label) status was $(status); rebuilding.")
+    end
+    if get(state, "identity_hash", nothing) != expected_hash
+        return (;
+            reusable = false,
+            status = :stale,
+            warning = "$(stage_label) inputs changed; rebuilding stale cached outputs.")
+    end
+    return nothing
 end
 
 """
@@ -195,7 +287,6 @@ function _classify_stage_state(stage_dir::AbstractString,
         identity,
         required_outputs;
         stage_label::AbstractString = "stage")
-    expected_hash = _identity_hash(identity)
     outputs_ready = _stage_output_exists(required_outputs)
     state_path = _stage_state_path(stage_dir)
     if !isfile(state_path)
@@ -212,7 +303,6 @@ function _classify_stage_state(stage_dir::AbstractString,
         end
         return (; reusable = false, status = :missing, warning = nothing)
     end
-
     state = _read_stage_state(stage_dir)
     unreadable = _stage_state_unreadable_message(state)
     if unreadable !== nothing
@@ -221,31 +311,23 @@ function _classify_stage_state(stage_dir::AbstractString,
             status = :stale,
             warning = "Could not read $(stage_label) $(_STAGE_STATE_FILE): $(unreadable); rebuilding.")
     end
-
-    status = Symbol(String(get(state, "status", "stale")))
-    if status == :running
-        return (;
-            reusable = false,
-            status = :unfinished,
-            warning = "Previous $(stage_label) status was running; rebuilding unfinished outputs.")
-    elseif status != :done
-        return (;
-            reusable = false,
-            status,
-            warning = "Previous $(stage_label) status was $(status); rebuilding.")
-    end
-    if String(get(state, "identity_hash", "")) != expected_hash
-        return (;
-            reusable = false,
-            status = :stale,
-            warning = "$(stage_label) inputs changed; rebuilding stale cached outputs.")
-    end
+    mismatch = _stage_manifest_mismatch(state, _identity_hash(identity), stage_label)
+    mismatch === nothing || return mismatch
     if !outputs_ready
         return (;
             reusable = false,
             status = :unfinished,
             warning = "$(stage_label) outputs are incomplete despite a done $(_STAGE_STATE_FILE); rebuilding.")
     end
-    # Matching inputs plus present outputs are the two requirements for reuse.
+    intact = try
+        _stage_output_integrity_matches(state, stage_dir, required_outputs)
+    catch err
+        err isa InterruptException && rethrow()
+        false
+    end
+    if !intact
+        return (; reusable = false, status = :stale,
+            warning = "$(stage_label) output integrity could not be verified; rebuilding.")
+    end
     return (; reusable = true, status = :done, warning = nothing)
 end

@@ -85,10 +85,13 @@ function _thoraxe_msa_outputs(summary_path::AbstractString,
         seeds::AbstractVector{SeedSelection},
         workdir::AbstractString)
     outputs = Dict{String, Any}("pid_summary" => summary_path)
-    outputs["seed_stockholms"] = [_resolve_artifact_path(seed.stockholm_path, workdir)
-                                  for seed in seeds]
-    outputs["seed_fastas"] = [_resolve_artifact_path(seed.fasta_path, workdir)
-                              for seed in seeds if seed.fasta_path !== nothing]
+    artifacts = [_seed_artifacts(seed, workdir) for seed in seeds]
+    outputs["seed_stockholms"] = [item.seed_path for item in artifacts]
+    outputs["seed_fastas"] = [item.seed_fasta for item in artifacts]
+    outputs["sequence_fastas"] = [item.sequence_fasta for item in artifacts]
+    outputs["species_files"] = [item.species_file for item in artifacts]
+    outputs["path_tables"] = [joinpath(item.thoraxe_dir, "path_table.csv")
+                              for item in artifacts]
     return outputs
 end
 
@@ -100,6 +103,18 @@ function _write_thoraxe_msa_state(workdir::AbstractString,
         action,
         warnings::AbstractVector{<:AbstractString} = String[],
         exception = nothing)
+    if status === :done
+        isempty(seeds) &&
+            error("Cannot complete a ThorAxe MSA stage without selected seeds.")
+        all(seed -> _selected_artifacts_exist(seed, workdir), seeds) ||
+            error("Cannot complete a ThorAxe MSA stage with invalid selected artifacts.")
+        _has_matching_candidate_summary(summary_path, identity) ||
+            error("Candidate summary metadata does not match the completed stage.")
+        selected = _selected_candidate_seeds(summary_path)
+        _thoraxe_msa_outputs(summary_path, selected, workdir) ==
+        _thoraxe_msa_outputs(summary_path, seeds, workdir) ||
+            error("Selected seed artifacts do not match the candidate summary.")
+    end
     return _write_stage_state(_thoraxe_msa_stage_dir(workdir);
         stage = "thoraxe_msa",
         stage_key = "thoraxe_msa",
@@ -121,7 +136,8 @@ function _thoraxe_msa_stage_cache(workdir::AbstractString,
             _classify_stage_state(_thoraxe_msa_stage_dir(workdir), stage_identity,
         (; pid_summary = summary_path); stage_label = "ThorAxe MSA")
     has_manifest = isfile(joinpath(_thoraxe_msa_stage_dir(workdir), "stage_state.json"))
-    summary_matches = !overwrite && _has_matching_candidate_summary(summary_path, metadata)
+    summary_matches = cache.reusable &&
+                      _has_matching_candidate_summary(summary_path, metadata)
     return (; cache, has_manifest, summary_matches)
 end
 
@@ -137,13 +153,15 @@ function _maybe_cached_thoraxe_msa(input_dir::AbstractString,
         overwrite::Bool,
         pid_sample_count::Integer,
         pid_sample_fraction::Real)
-    can_try_cache = stage_cache.cache.reusable ||
-                    (!overwrite && stage_cache.summary_matches)
+    can_try_cache = !overwrite && stage_cache.cache.reusable
     can_try_cache || return nothing
-    # Pre-manifest summaries can still be trusted after metadata and file checks pass.
     cached = _cached_selected_seeds(summary_path, workdir, metadata)
     cached === nothing && return nothing
-    @info "Reusing cached ThorAxe MSA candidates." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id n_seeds=length(cached.seeds) summary_path adopted_legacy=(!stage_cache.cache.reusable&&!stage_cache.has_manifest)
+    verified = _classify_stage_state(_thoraxe_msa_stage_dir(workdir), stage_identity,
+        _thoraxe_msa_outputs(summary_path, cached.seeds, workdir);
+        stage_label = "ThorAxe MSA")
+    verified.reusable || return nothing
+    @info "Reusing cached ThorAxe MSA candidates." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id n_seeds=length(cached.seeds) summary_path
     result = _cached_thoraxe_msa_result(
         input_dir, summary_path, target, workdir, cached,
         species_filter, biomart_filter;
@@ -165,16 +183,11 @@ function _prepare_thoraxe_msa_stage!(workdir::AbstractString,
         @warn String(stage_cache.cache.warning) summary_path status=stage_cache.cache.status
     end
     action = _stage_action(stage_cache.cache)
-    if overwrite || (stage_cache.cache.status !== :missing && stage_cache.has_manifest)
-        isdir(_thoraxe_msa_dir(workdir)) && safe_rm(_thoraxe_msa_dir(workdir), workdir)
-    end
-    # A legacy summary can still be reused when all required files and metadata match.
-    local_artifacts_are_current = !overwrite && !stage_cache.has_manifest &&
-                                  stage_cache.summary_matches
-    force_pid_rerun = overwrite || !local_artifacts_are_current
+    isdir(_thoraxe_msa_dir(workdir)) && safe_rm(_thoraxe_msa_dir(workdir), workdir)
     _write_thoraxe_msa_state(workdir, summary_path, SeedSelection[], :running,
         stage_identity; action)
-    return (; action, local_artifacts_are_current, force_pid_rerun)
+    # Rejected stage state cannot authorize reuse of any inner candidate files.
+    return (; action, local_artifacts_are_current = false, force_pid_rerun = true)
 end
 
 function _run_thoraxe_msa_stage!(target::ResolvedTarget,
@@ -190,7 +203,8 @@ function _run_thoraxe_msa_stage!(target::ResolvedTarget,
         pid_sample_count::Integer,
         pid_sample_fraction::Real,
         sample_seed::UInt64,
-        sampling_strategy::Symbol)
+        sampling_strategy::Symbol,
+        thoraxe_fn::Function = ThorAxe.thoraxe)
     build_details = (;
         n_pids = length(pid_thresholds),
         pid_thresholds_preview = _pid_thresholds_preview(pid_thresholds),
@@ -202,7 +216,8 @@ function _run_thoraxe_msa_stage!(target::ResolvedTarget,
         pid_sample_count,
         pid_sample_fraction,
         sample_seed,
-        overwrite = prepared.force_pid_rerun)
+        overwrite = prepared.force_pid_rerun,
+        thoraxe_fn)
     _summarize_candidate_scores(score_rows, summary_path)
     @info "Selecting ThorAxe seed candidates." summary_path pid_sample_count
     seeds = _select_scored_candidate_seeds(summary_path, pid_sample_count)

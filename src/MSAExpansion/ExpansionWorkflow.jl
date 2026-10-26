@@ -201,6 +201,8 @@ function _write_expansion_alignment_outputs!(target::ResolvedTarget,
     _restore_s_exon_annotations!(match_alignment, archived)
     write_file(full_stockholm, full_alignment, Stockholm)
     write_file(match_stockholm, match_alignment, Stockholm)
+    normalize_stockholm_annotations!(full_stockholm)
+    normalize_stockholm_annotations!(match_stockholm)
 
     a3m_path = joinpath(unpack_dir, "$(target.transcript_id)_expanded.a3m")
     write_file(a3m_path, match_alignment, A3M)
@@ -279,7 +281,6 @@ function _run_expansion_workflow!(target::ResolvedTarget,
             hits.raw_hits_fasta, archived, archived.seed_pid)
         _write_centroids_if_requested!(
             target, mmseqs_db, db_paths, tmp_dir, ctx, archived, hmm_paths, centroids)
-        @info "MSA expansion completed." pid=archived.seed_pid n_hits=length(hits.all_hits) n_new_hits=length(hits.filtered_hits)
         return (;
             output_paths,
             n_hits = length(hits.all_hits),

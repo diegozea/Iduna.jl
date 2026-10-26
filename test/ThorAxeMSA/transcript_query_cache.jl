@@ -1,3 +1,5 @@
+include("cached_input_aliases.jl")
+
 mktempdir() do tmp
     target = Iduna.ResolvedTarget(;
         input_id = "ENST",
@@ -189,14 +191,14 @@ mktempdir() do tmp
         merge(random_requested_seed, (; pid_sample_seed = UInt64(7))), tmp)
     random_identity = Iduna.ThorAxeMSA._thoraxe_msa_identity(
         random_requested_seed, tmp)
-    Iduna.ThorAxeMSA._write_thoraxe_msa_state(
+    @test_throws ErrorException Iduna.ThorAxeMSA._write_thoraxe_msa_state(
         tmp, summary, Iduna.SeedSelection[], :done, random_identity; action = :run)
     random_stage_cache = Iduna.ThorAxeMSA._thoraxe_msa_stage_cache(
         tmp, summary, random_requested_seed,
         Iduna.ThorAxeMSA._thoraxe_msa_identity(
             merge(random_requested_seed, (; pid_sample_seed = UInt64(7))), tmp);
         overwrite = false)
-    @test random_stage_cache.cache.reusable === true
+    @test random_stage_cache.cache.reusable === false
 
     no_species_metadata = merge(metadata, (; effective_specieslist = nothing))
     fasta = joinpath(tmp, "candidate_summary_candidate.fasta")

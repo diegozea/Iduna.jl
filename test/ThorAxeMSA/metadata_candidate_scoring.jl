@@ -1,4 +1,9 @@
 mktempdir() do tmp
+    regenerated = Ref(0)
+    regenerate_thoraxe = (input, run_root; kwargs...) -> begin
+        regenerated[] += 1
+        write_fake_thoraxe_dir(joinpath(run_root, "thoraxe"))
+    end
     fasta = joinpath(tmp, "candidate.fasta")
     write(fasta, ">ENSG\nA-C\n>ORTHO1\nABC\n")
     msa = Iduna.ThorAxeMSA.read_file(fasta, Iduna.ThorAxeMSA.FASTA)
@@ -36,7 +41,7 @@ mktempdir() do tmp
             ensembl_gene_id = "ENSG",
             transcript_id = "ENST"),
         joinpath(tmp, "input"), tmp, 60.0, nothing, 0;
-        keep_thoraxe_dir = true) ==
+        keep_thoraxe_dir = true, thoraxe_fn = regenerate_thoraxe) ==
           (paths.fasta_path, paths.stockholm_path, thoraxe_dir)
 
     kept_paths = Iduna.ThorAxeMSA._pid_sample_paths(tmp, 90.0, 0)
@@ -51,9 +56,10 @@ mktempdir() do tmp
             transcript_id = "ENST"),
         joinpath(tmp, "input"), tmp, kept_paths, kept_thoraxe_dir,
         joinpath(kept_thoraxe_dir, "path_table.csv"), 90.0, nothing, 0,
-        command -> nothing, false) ==
+        command -> nothing, false, regenerate_thoraxe) ==
           (kept_paths.fasta_path, kept_paths.stockholm_path, kept_thoraxe_dir)
     @test isfile(kept_paths.stockholm_path)
+    @test regenerated[] == 2
 
     fake_calls = Ref(0)
     fake_thoraxe = (input_dir, run_root; identity, specieslist, phylosofs,
@@ -99,7 +105,7 @@ mktempdir() do tmp
             input_kind = :ensembl_transcript,
             ensembl_gene_id = "ENSG",
             transcript_id = "ENST"),
-        joinpath(tmp, "input"), tmp, generated_pid, nothing)
+        joinpath(tmp, "input"), tmp, generated_pid, nothing; thoraxe_fn = regenerate_thoraxe)
     @test generated_candidate.fasta_path == generated_paths.fasta_path
     @test generated_candidate.stockholm_path == generated_paths.stockholm_path
     @test generated_candidate.thoraxe_dir == generated_thoraxe_dir
@@ -137,7 +143,7 @@ mktempdir() do tmp
         sample_count = 0,
         sample_fraction = 1.0,
         sample_seed = UInt64(11),
-        metadata = zero_sample_metadata)
+        metadata = zero_sample_metadata, thoraxe_fn = regenerate_thoraxe)
     @test zero_sample_row.pid == zero_sample_pid
     @test zero_sample_row.eligible
     @test zero_sample_row.selection_mode == "all_candidates"
@@ -171,7 +177,7 @@ mktempdir() do tmp
         sample_count = 0,
         sample_fraction = 1.0,
         sample_seed = UInt64(13),
-        metadata = invalid_metadata)
+        metadata = invalid_metadata, thoraxe_fn = regenerate_thoraxe)
     @test invalid_row.pid == invalid_pid
     @test !invalid_row.eligible
     @test invalid_row.msa0_status == "invalid_msa0"
