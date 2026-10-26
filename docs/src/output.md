@@ -81,6 +81,10 @@ When `thoraxe_input_dir` is supplied, Iduna copies that bundle into
 that destination, including through a symlinked parent, Iduna validates it in
 place and refreshes its own metadata while preserving the Ensembl files and
 any extra files. The layout is preserved like a fresh `transcript_query` result.
+Otherwise, the source and destination directories must not contain one another,
+including through symlinks. Iduna rejects overlapping roots before input-stage
+cleanup or state updates; move the supplied bundle outside `thoraxe_input/` before
+retrying.
 Iduna fingerprints the required Ensembl bundle files and records a
 `thoraxe_input` stage manifest, so later reruns reuse the
 copied or previously generated `transcript_query` result when the target,
@@ -276,6 +280,13 @@ and distribution dependencies, CLI scripts, ProGraphMSA, and HHsuite where used.
 The Python probe retains the CLI's interpreter invocation path and records its
 environment prefixes, including a virtual environment reached through a symlink.
 Different interpreter paths in the two CLI shebangs disable affected reuse.
+Directory symlinks inside the ThorAxe source tree also disable affected reuse,
+because their scientific files cannot be certified by a partial source traversal.
+The effective `PATH` must contain only absolute entries for tool-based reuse:
+relative or empty entries can select a different executable after transcript-query
+changes directory. These unsupported layouts still permit computation, but each
+affected operation recomputes its outputs. Ordinary file symlinks and virtual
+environment interpreter aliases remain supported.
 Python dependency versions and locations identify installed trees; their contents
 and the Python installation must remain immutable for those recorded versions.
 In-place edits to dependency code are not detected by version metadata.

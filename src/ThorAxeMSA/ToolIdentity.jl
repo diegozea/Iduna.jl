@@ -12,7 +12,11 @@ sys.path[0] = str(Path(sys.argv[1]).resolve().parent)
 import thoraxe, pkg_resources
 from thoraxe.version import __version__
 root = Path(thoraxe.__file__).resolve().parent
-files = sorted(p for p in root.rglob('*') if p.is_file()
+entries = list(root.rglob('*'))
+# rglob does not traverse directory links; never certify an incomplete source tree.
+if any(p.is_symlink() and not p.is_file() for p in entries):
+    raise RuntimeError('Unsupported ThorAxe source directory or unreadable symlink.')
+files = sorted(p for p in entries if p.is_file()
                and '__pycache__' not in p.parts and p.suffix not in ('.pyc', '.pyo'))
 records = ''.join(p.relative_to(root).as_posix() + '\0'
                   + hashlib.sha256(p.read_bytes()).hexdigest() + '\n' for p in files)
@@ -30,6 +34,10 @@ print(json.dumps(dict(
 
 # Both discovery helpers run under the ThorAxe lock and activated environment.
 function _thoraxe_python_identity()
+    # The wrapper launches bare CLI names after changing the working directory.
+    all(isabspath, split(get(ENV, "PATH", ""), Sys.iswindows() ? ';' : ':';
+        keepempty = true)) ||
+        error("Relative PATH cannot identify tools across working directories.")
     paths = [Sys.which(name) for name in ("thoraxe", "transcript_query")]
     any(isnothing, paths) && error("Missing ThorAxe CLI commands.")
     length(unique(dirname.(realpath.(paths)))) == 1 ||

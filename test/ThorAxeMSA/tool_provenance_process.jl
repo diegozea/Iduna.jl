@@ -8,6 +8,7 @@ using Iduna, Test
     # Use a fresh directory so cached tools cannot hide missing setup.
     wrapper.ALIGNER_PATH[] = mktempdir()
     wrapper.aligner_executable()
+    installed_aligner_path = wrapper.ALIGNER_PATH[]
     tools = msa._thoraxe_tool_identity(; aligner = false)
     @test tools !== nothing
     if tools !== nothing
@@ -56,6 +57,8 @@ using Iduna, Test
         end
         @test_throws ErrorException msa._thoraxe_aligner_identity()
     end
+    wrapper.ALIGNER_PATH[] = installed_aligner_path
 end
 
 include("venv_provenance.jl")
+include("relative_path_provenance.jl")
