@@ -81,6 +81,10 @@ When `thoraxe_input_dir` is supplied, Iduna copies that bundle into
 that destination, including through a symlinked parent, Iduna validates it in
 place and refreshes its own metadata while preserving the Ensembl files and
 any extra files. The layout is preserved like a fresh `transcript_query` result.
+Otherwise, the source and destination directories must not contain one another,
+including through symlinks. Iduna rejects overlapping roots before input-stage
+cleanup or state updates; move the supplied bundle outside `thoraxe_input/` before
+retrying.
 Iduna fingerprints the required Ensembl bundle files and records a
 `thoraxe_input` stage manifest, so later reruns reuse the
 copied or previously generated `transcript_query` result when the target,
