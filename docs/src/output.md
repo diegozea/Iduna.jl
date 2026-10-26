@@ -276,6 +276,13 @@ and distribution dependencies, CLI scripts, ProGraphMSA, and HHsuite where used.
 The Python probe retains the CLI's interpreter invocation path and records its
 environment prefixes, including a virtual environment reached through a symlink.
 Different interpreter paths in the two CLI shebangs disable affected reuse.
+Directory symlinks inside the ThorAxe source tree also disable affected reuse,
+because their scientific files cannot be certified by a partial source traversal.
+The effective `PATH` must contain only absolute entries for tool-based reuse:
+relative or empty entries can select a different executable after transcript-query
+changes directory. These unsupported layouts still permit computation, but each
+affected operation recomputes its outputs. Ordinary file symlinks and virtual
+environment interpreter aliases remain supported.
 Python dependency versions and locations identify installed trees; their contents
 and the Python installation must remain immutable for those recorded versions.
 In-place edits to dependency code are not detected by version metadata.

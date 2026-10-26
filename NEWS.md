@@ -24,6 +24,9 @@
   Python probes preserve virtual-environment interpreter paths, and path-developed
   Julia dependencies include scientific data under `src` and `ext`. Earlier producer
   fingerprints require recomputation.
+  ThorAxe source-directory symlinks and relative or empty effective `PATH` entries
+  disable affected reuse, so incomplete source traversal or working-directory
+  changes cannot certify the wrong producer. Computation remains available.
   The loaded protein alignment matrix and gap penalties now participate in reuse;
   differing compiled models invalidate earlier validation results. After dependency
   data edits, refresh the dependency and Iduna precompile caches as well as restarting

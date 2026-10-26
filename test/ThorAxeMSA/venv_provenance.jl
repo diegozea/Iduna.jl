@@ -1,5 +1,7 @@
 using Iduna, Test
 
+include("source_symlink_provenance.jl")
+
 @testset "ThorAxe symlink virtual environment provenance" begin
     msa = Iduna.ThorAxeMSA
     conda = msa.CondaPkg
@@ -92,6 +94,8 @@ using Iduna, Test
                         @test Iduna.Utils._read_stage_state(
                             msa._thoraxe_input_stage_dir(workdir))["action"] == "rebuild"
                     end
+
+                    test_thoraxe_source_symlinks(root, package, python)
 
                     other_venv = joinpath(root, "other_venv")
                     run(`$(installed.python) -m venv --without-pip --system-site-packages --symlinks $other_venv`)
