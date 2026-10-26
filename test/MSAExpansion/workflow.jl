@@ -24,10 +24,14 @@ success_seed = Iduna.SeedSelection(;
     summary_path = joinpath(tmp, "seed_summary.csv")
 )
 success_db = build_self_hit_mmseqs_db(joinpath(tmp, "self_hit_mmseqs"))
+success_manifest = write_test_mmseqs_manifest(success_db)
+@test length(Iduna.Utils._read_mmseqs_snapshot(success_db, success_manifest).components) ==
+      19
 success_logs,
 success = Test.collect_test_logs() do
     Iduna.MSAExpansion.expand_msa(
-        target, success_seed, tmp; mmseqs_db = success_db, centroids = true,
+        target, success_seed, tmp; mmseqs_db = success_db,
+        mmseqs_db_manifest = success_manifest, centroids = true,
         mmseqs_threads = 1)
 end
 @test isempty([log
@@ -83,7 +87,8 @@ success_digest = Iduna.Utils._file_sha256(success.full_stockholm)
 success_reuse_logs,
 success_reused = Test.collect_test_logs() do
     Iduna.MSAExpansion.expand_msa(
-        target, success_seed, tmp; mmseqs_db = success_db, centroids = true,
+        target, success_seed, tmp; mmseqs_db = success_db,
+        mmseqs_db_manifest = success_manifest, centroids = true,
         mmseqs_threads = 1)
 end
 @test success_reused.status === :skipped
@@ -105,3 +110,22 @@ unfinished = Iduna.MSAExpansion._classify_step_state(
     legacy_dir, legacy_identity, legacy_outputs)
 @test unfinished.reusable === false
 @test unfinished.status === :unfinished
+
+@testset "Missing database provenance recomputes real expansion" begin
+    no_manifest_workdir = joinpath(tmp, "without_snapshot_manifest")
+    for attempt in 1:2
+        logs, result = Test.collect_test_logs() do
+            Iduna.MSAExpansion.expand_msa(target, success_seed, no_manifest_workdir;
+                mmseqs_db = success_db, mmseqs_threads = 1)
+        end
+        @test result.status === :ok
+        @test result.n_new_hits == 0
+        @test any(log -> log.message == "Running MMseqs expansion workflow.", logs)
+        @test !any(log -> log.message == "Reusing cached MSA expansion.", logs)
+        @test any(log -> occursin("no immutable snapshot manifest", string(log.message)), logs)
+        alignment = Iduna.MSAExpansion.read_file(result.full_stockholm,
+            Iduna.MSAExpansion.Stockholm; keepinserts = true)
+        @test Iduna.MSAExpansion.nsequences(alignment) == 1
+        @test Iduna.MSAExpansion.ncolumns(alignment) == 20
+    end
+end

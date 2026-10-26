@@ -166,6 +166,8 @@ Compute EPLI for an aligner over sequence-row subsamples.
 - `score_fn = hhsuite_identity_score`: pairwise profile score function.
 - `normalization_fn = comparable_positions_normalization`: score normalization.
 - `aligner_args::Cmd = Cmd(String[])`: extra command arguments passed to `aligner_fn`.
+- `aligner_cache_id = nothing`: caller-supplied identity of the callback, tool build,
+  dependencies and external state. Without a nonblank identity, alignments are rebuilt.
 - `sample_count::Integer = 45`: number of sequence-row samples.
 - `sample_fraction::Real = 0.8`: fraction of non-reference rows per sample.
 - `sample_seed = nothing`: random seed; `nothing` records a generated seed.
@@ -179,6 +181,13 @@ An optional `normalization_score` must be finite or `missing`. Invalid scores
 raise `ArgumentError` (wrapped in a task failure during parallel scoring);
 samples are never silently discarded. Finite negative scores and normalization
 ratios above 100 remain valid.
+
+# Alignment Reuse
+
+Reuse requires both `aligner_cache_id` and known Iduna implementation provenance.
+Change the ID whenever the callback, external tool or relevant state changes; Iduna
+cannot verify this caller assertion. Built-in callbacks follow the same rule.
+Input, arguments and output integrity must also match. Scores are always recomputed.
 """
 function epli_score(
         input::Union{AbstractString, AbstractMultipleSequenceAlignment,
@@ -188,6 +197,7 @@ function epli_score(
         score_fn::Function = hhsuite_identity_score,
         normalization_fn::Function = comparable_positions_normalization,
         aligner_args::Cmd = Cmd(String[]),
+        aligner_cache_id::Union{Nothing, AbstractString} = nothing,
         sample_count::Integer = 45,
         sample_fraction::Real = 0.8,
         sample_seed::Union{Nothing, Integer} = nothing,
@@ -206,6 +216,7 @@ function epli_score(
            _normalize_sample_seed(sample_seed)
     sequences = _sequence_records(input)
     reference_idx = _reference_index(sequences.names, reference_sequence)
+    aligner_provenance = _aligner_provenance(aligner_cache_id)
     full_input = joinpath(workdir, "input", "full_sequences.fasta")
     reference_msa = joinpath(workdir, "msa", "reference_msa.fasta")
     logs_dir = joinpath(workdir, "logs")
@@ -216,7 +227,8 @@ function epli_score(
         logs_dir = joinpath(logs_dir, "aligner"),
         run_label = "full",
         overwrite,
-        aligner_args)
+        aligner_args,
+        aligner_provenance)
     sample_specs = NamedTuple[]
     for sample_idx in 1:Int(sample_count)
         label = _sample_label(sample_idx)
@@ -239,7 +251,8 @@ function epli_score(
                     logs_dir = joinpath(logs_dir, "aligner"),
                     run_label = spec.sample_label,
                     overwrite,
-                    aligner_args)))
+                    aligner_args,
+                    aligner_provenance)))
     end
     scored = _score_alignment_samples(reference_msa, sample_specs;
         score_fn,

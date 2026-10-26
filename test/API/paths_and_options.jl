@@ -148,6 +148,7 @@ end
             workdir = joinpath(tmp, "centroids_forwarding"),
             centroids = true,
             mmseqs_threads = 7,
+            mmseqs_db_manifest = "snapshot.json",
             _resolve_target = (args...; kwargs...) -> target,
             _build_thoraxe_msa = (args...; kwargs...) -> thoraxe,
             _expand_msa = (
@@ -161,6 +162,7 @@ end
         @test captured[][:centroids] === true
         @test captured[][:mmseqs_db] == "db"
         @test captured[][:mmseqs_threads] == 7
+        @test captured[][:mmseqs_db_manifest] == "snapshot.json"
     end
 end
 

@@ -31,12 +31,15 @@ result = Iduna.EPLI.epli_score(
 
 # output
 
+[ Info: EPLI alignment reuse disabled: no aligner_cache_id was supplied.
 (45, "mitos_sequences", true)
 ```
 
 The call writes a full input FASTA under `workdir`, runs ProGraphMSA for the full
 sequence set and for each sampled subset, compares each sampled MSA to the full
 MSA with HHsuite, and stores the median normalized score in `result.epli`.
+This temporary-directory example does not enable persistent alignment reuse, so
+Iduna reports an informational cache notice.
 
 The main output files are:
 
@@ -105,6 +108,27 @@ EPLI sets these arguments when it calls the wrapper:
 keeps EPLI options separate from command-line options for the external aligner.
 Wrappers must accept `run_label` and `aligner_args`, even when callers use the
 default empty command.
+
+## Reusing Alignments
+
+By default, `epli_score` runs the aligner again. To enable persistent alignment
+reuse, supply a nonblank `aligner_cache_id` that identifies the callback code,
+external tool build, optional dependencies and any other state that affects its
+output. Change this ID when any of those inputs changes. Iduna trusts this caller
+assertion; a label or function name alone does not establish provenance. The same
+rule applies to the bundled aligner wrappers.
+
+Reuse also requires known Iduna source and Julia dependency identities, matching
+input sequences, arguments and run labels, and verified output contents. The
+implementation record is saved in each alignment's `.iduna_cache.json` sidecar.
+An unavailable identity disables reuse; computation remains available. Old
+function-hash caches rebuild once a trustworthy identity is supplied. Scores are
+always recomputed, and sampling and the EPLI formula are unchanged.
+
+Source files and loaded dependencies must stay unchanged for the Julia process;
+restart Julia after editing them. A fixed `sample_seed` reproduces sequence-row
+subsets, but does not make a stochastic external aligner deterministic. Include
+relevant tool seeds and configuration in the callback identity or its arguments.
 
 ## Optional JLL Aligners
 

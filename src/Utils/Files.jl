@@ -313,3 +313,193 @@ end
 function _identity_hash(identity)
     return bytes2hex(SHA.sha256(JSON.json(identity)))
 end
+
+# Implementation Identity
+# -----------------------
+
+# Source and loaded dependency versions must stay stable during this Julia process.
+# External executable bytes are checked separately for each public operation.
+const _IMPLEMENTATION_IDENTITY_LOCK = ReentrantLock()
+const _IMPLEMENTATION_SOURCE = Ref{Union{Nothing, String}}(nothing)
+
+function _source_fingerprint(root::AbstractString)
+    try
+        files = String["Project.toml"]
+        for directory in ("src", "ext")
+            path = joinpath(root, directory)
+            isdir(path) || continue
+            for (parent, _, names) in walkdir(path), name in names
+
+                # walkdir lists untraversed directory symlinks among file entries.
+                isfile(joinpath(parent, name)) || return nothing
+                occursin(r"\.jl(?:\.\d+)?\.cov$", name) && continue
+                push!(files, relpath(joinpath(parent, name), root))
+            end
+        end
+        records = [(path = file, sha256 = _file_sha256(joinpath(root, file)))
+                   for file in sort!(files)]
+        return _identity_hash(records)
+    catch err
+        err isa InterruptException && rethrow()
+        return nothing
+    end
+end
+
+function _loaded_source_identity()
+    return lock(_IMPLEMENTATION_IDENTITY_LOCK) do
+        if _IMPLEMENTATION_SOURCE[] === nothing
+            _IMPLEMENTATION_SOURCE[] = _source_fingerprint(dirname(dirname(@__DIR__)))
+        end
+        _IMPLEMENTATION_SOURCE[]
+    end
+end
+
+# Upgraded or path-based stdlibs need their own package source identity.
+function _is_bundled_stdlib(uuid, info)
+    return Pkg.Types.is_stdlib(uuid) && !info.is_tracking_path &&
+           info.tree_hash === nothing
+end
+
+function _dependency_record(uuid, info)
+    stdlib = _is_bundled_stdlib(uuid, info)
+    source_sha256 = nothing
+    if !stdlib
+        info.version === nothing && return nothing
+        if info.is_tracking_path
+            source_sha256 = _source_fingerprint(info.source)
+            source_sha256 === nothing && return nothing
+        else
+            info.tree_hash === nothing && return nothing
+            isdir(info.source) || return nothing
+        end
+    end
+    return (;
+        uuid = string(uuid),
+        name = info.name,
+        version = info.version === nothing ? nothing : string(info.version),
+        tree_hash = info.tree_hash,
+        source_sha256,
+        julia = stdlib ? string(VERSION) : nothing
+    )
+end
+
+function _dependency_module_matches(mod, uuid, info, record)
+    Base.PkgId(mod) == Base.PkgId(uuid, info.name) || return false
+    Base.pkgversion(mod) == info.version || return false
+    source = pkgdir(mod)
+    source === nothing && return record.julia !== nothing
+    if isdir(source) && isdir(info.source)
+        return realpath(source) == realpath(info.source)
+    end
+    return record.julia !== nothing && normpath(source) == normpath(info.source)
+end
+
+function _dependency_records(roots, graph)
+    pending = collect(keys(roots))
+    seen = Set{Base.UUID}()
+    records = NamedTuple[]
+    while !isempty(pending)
+        uuid = pop!(pending)
+        uuid in seen && continue
+        push!(seen, uuid)
+        info = get(graph, uuid, nothing)
+        info === nothing && return nothing
+        record = _dependency_record(uuid, info)
+        record === nothing && return nothing
+        mod = get(roots, uuid, get(Base.loaded_modules, Base.PkgId(uuid, info.name), nothing))
+        mod === nothing ||
+            _dependency_module_matches(mod, uuid, info, record) ||
+            return nothing
+        push!(records, record)
+        append!(pending, values(info.dependencies))
+    end
+    return sort!(records; by = record -> record.uuid)
+end
+
+function _julia_dependency_identity(modules; graph = nothing)
+    try
+        selected = graph === nothing ? Pkg.dependencies() : graph
+        roots = Dict(Base.PkgId(mod).uuid => mod for mod in modules)
+        records = _dependency_records(roots, selected)
+        records === nothing && return nothing
+        return (; julia = string(VERSION), packages = records)
+    catch err
+        err isa InterruptException && rethrow()
+        return nothing
+    end
+end
+
+function _protein_alignment_score_identity(model = _PROTEIN_ALIGNMENT_SCORE_MODEL)
+    try
+        model.submat isa BioAlignments.SubstitutionMatrix || return nothing
+        # Include ambiguous, rare and stop residues; pairalign uses these effective scores.
+        alphabet = filter(aa -> Char(aa) != '-',
+            BioSequences.symbols(BioSequences.AminoAcidAlphabet()))
+        return _identity_hash((; model = string(typeof(model)),
+            matrix = string(typeof(model.submat)), alphabet = join(Char.(alphabet)),
+            scores = [model.submat[a, b] for a in alphabet, b in alphabet],
+            gap_open = model.gap_open, gap_extend = model.gap_extend))
+    catch err
+        err isa InterruptException && rethrow()
+        return nothing
+    end
+end
+
+function _implementation_identity(dependencies = (); source_sha256 = _loaded_source_identity())
+    if source_sha256 === nothing
+        @warn "Iduna source identity unavailable; affected cache reuse is disabled."
+        return nothing
+    end
+    common = (BioAlignments, BioSequences, MIToS, StatsBase, Statistics, Random,
+        CSV, DataFrames, CodecZlib, JSON, HTTP)
+    modules = sort!(unique([common..., dependencies...]); by = mod -> String(nameof(mod)))
+    dependency_identity = _julia_dependency_identity(modules)
+    if dependency_identity === nothing
+        @warn "Julia dependency identity unavailable; affected cache reuse is disabled."
+        return nothing
+    end
+    protein_alignment_sha256 = _protein_alignment_score_identity()
+    if protein_alignment_sha256 === nothing
+        @warn "Protein alignment model identity unavailable; affected cache reuse is disabled."
+        return nothing
+    end
+    return (;
+        contract = 2, source_sha256, protein_alignment_sha256, julia = string(VERSION),
+        platform = Sys.MACHINE, cpu = Sys.CPU_NAME, cpu_threads = Sys.CPU_THREADS,
+        julia_threads = Threads.nthreads(),
+        thread_environment = Dict(name => get(ENV, name, nothing)
+        for name in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "HMMER_NCPU")),
+        dependencies = dependency_identity.packages)
+end
+
+function _executable_identity(path::AbstractString)
+    try
+        isfile(path) || return nothing
+        resolved = realpath(path)
+        return (; path = resolved, sha256 = _file_sha256(resolved))
+    catch err
+        err isa InterruptException && rethrow()
+        return nothing
+    end
+end
+
+function _jll_tool_identity(mod::Module, names)
+    try
+        executables = Dict(String(name) =>
+                               _executable_identity(first(getproperty(mod, name)()))
+        for name in names)
+        any(isnothing, values(executables)) && return nothing
+        version = Base.pkgversion(mod)
+        version === nothing && return nothing
+        isdir(mod.artifact_dir) &&
+        occursin(r"^[0-9a-f]{40}$", basename(mod.artifact_dir)) ||
+            return nothing
+        return (; package = String(nameof(mod)), version = string(version),
+            artifact_tree = basename(mod.artifact_dir), executables)
+    catch err
+        err isa InterruptException && rethrow()
+        @warn "External tool identity unavailable; affected cache reuse is disabled." package=String(nameof(mod)) reason=sprint(
+            showerror, err)
+        return nothing
+    end
+end

@@ -25,6 +25,7 @@ import JSON
         kwargs = Iduna._parse_app_args([
             "P20963",
             "--mmseqs-db", "db",
+            "--mmseqs-db-manifest", "snapshot.json",
             "--workdir", "work",
             "--output-dir", "out",
             "--overwrite",
@@ -36,6 +37,7 @@ import JSON
             "--transcript-query-retries", "3"
         ])
         @test kwargs[:workdir] == "work"
+        @test kwargs[:mmseqs_db_manifest] == "snapshot.json"
         @test kwargs[:output_dir] == "out"
         @test kwargs[:overwrite] === true
         @test kwargs[:orthology] == "1:n"

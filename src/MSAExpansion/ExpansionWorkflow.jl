@@ -8,7 +8,9 @@ function _expansion_context(target::ResolvedTarget,
         match_mode::Integer,
         match_ratio::Union{Nothing, Real},
         hmmbuild_symfrac::Real,
-        centroids::Bool)
+        centroids::Bool,
+        mmseqs_db_manifest::Union{Nothing, AbstractString} = nothing,
+        mmseqs_threads::Union{Nothing, Integer} = Threads.nthreads())
     seed_workdir = seed.workdir === nothing ? workdir : seed.workdir
     seed_stockholm = _resolve_artifact_path(seed.stockholm_path, seed_workdir)
     seed_fasta = seed.fasta_path === nothing ? nothing :
@@ -17,7 +19,8 @@ function _expansion_context(target::ResolvedTarget,
         target.transcript_id, format_pid_dir(seed.pid))
     outputs = _expansion_output_paths(run_dir, target.transcript_id; centroids)
     identity = _expansion_identity(target, seed, seed_stockholm, seed_fasta, mmseqs_db;
-        match_mode, match_ratio, hmmbuild_symfrac, centroids)
+        match_mode, match_ratio, hmmbuild_symfrac, centroids,
+        mmseqs_db_manifest, mmseqs_threads)
     return (;
         seed_stockholm,
         seed_fasta,

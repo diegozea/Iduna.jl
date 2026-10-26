@@ -249,3 +249,127 @@ expansion parameters, or centroid request change, Iduna treats the cached
 expansion as stale, warns, and rebuilds that PID directory. Validation
 directories use the same manifest format and are reused when the seed,
 expansion, target, and UniProt comparison inputs are unchanged.
+
+
+## Implementation and tool provenance
+
+Reuse records the Iduna source fingerprint, Julia version, selected and loaded Julia
+dependency versions and source trees, and relevant external tool identities. Scientific
+stages include the hard dependency closure, rather than only direct package versions.
+Path-developed packages hash their `Project.toml` and all files under `src` and `ext`,
+including scientific data such as substitution matrices. Generated Julia coverage
+files (`*.jl.cov` and `*.jl.<pid>.cov`) are excluded.
+File symlinks hash their target contents. Untraversed directory symlinks make the
+source identity unknown and disable affected reuse.
+The effective protein alignment score model is also fingerprinted: all loaded amino-acid
+substitution scores and both gap penalties. Different loaded model values cannot share
+validation results even when their on-disk package files match. These scores
+come from the model actually used by Iduna, which may differ from an edited matrix file.
+Registered package and JLL artifact trees are assumed immutable. Unknown package,
+source, alignment model or executable identity disables the affected reuse, while
+computation remains available. Restart Julia after source or dependency changes; hot
+reload and concurrent source editing during a run are outside this contract.
+After editing dependency data, also refresh the dependency and Iduna precompile caches
+to load those edits. A restart alone can retain earlier compiled data when a dependency
+does not register its data files for precompilation. Disk fingerprints do not certify
+other unregistered data serialized by dependencies; those precompile caches must be
+kept consistent with their files.
+
+ThorAxe provenance includes its actual Python interpreter, installed ThorAxe source
+and distribution dependencies, CLI scripts, ProGraphMSA, and HHsuite where used.
+The Python probe retains the CLI's interpreter invocation path and records its
+environment prefixes, including a virtual environment reached through a symlink.
+Different interpreter paths in the two CLI shebangs disable affected reuse.
+Directory symlinks inside the ThorAxe source tree also disable affected reuse,
+because their scientific files cannot be certified by a partial source traversal.
+The effective `PATH` must contain only absolute entries for tool-based reuse:
+relative or empty entries can select a different executable after transcript-query
+changes directory. These unsupported layouts still permit computation, but each
+affected operation recomputes its outputs. Ordinary file symlinks and virtual
+environment interpreter aliases remain supported.
+Python dependency versions and locations identify installed trees; their contents
+and the Python installation must remain immutable for those recorded versions.
+In-place edits to dependency code are not detected by version metadata.
+A copied input bundle is identified by its contents and does not require local Python
+provenance merely to reuse that bundle. MSA selection also binds reference sequence
+contents and species-list file contents. Generated sampling seeds retain their recorded
+value; other missing metadata is not treated as a match. CPU, Julia thread count,
+relevant thread environment variables, and explicit MMseqs thread settings participate
+in reuse. An unspecified MMseqs thread count cannot authorize expansion reuse.
+
+Generic EPLI callbacks require an explicit `aligner_cache_id` for persistent alignment
+reuse, including built-in callbacks. The caller must identify the callback implementation,
+external tool build and relevant external state. Without an ID each call realigns.
+See [EPLI](epli.md) for the callback contract; the EPLI formula is unchanged.
+
+Legacy completion records and candidate caches require recomputation, including those
+whose producer fingerprints predate these interpreter and source-data checks. Iduna does not
+rename archives or delete all caches as a migration, but rerunning a stale stage replaces
+its package-owned outputs. Copy results you need to retain before rerunning. Loading
+recorded paths from untouched archives does not certify their historical scores.
+
+## Immutable MMseqs database snapshots
+
+Expansion reuse requires `mmseqs_db_manifest="/path/to/snapshot.json"` in Julia or
+`--mmseqs-db-manifest /path/to/snapshot.json` in the app. The manifest is a JSON object
+with `schema_version: 1`, `immutable: true`, a nonempty `snapshot_id`, and `components`
+mapping every database component filename to its lowercase SHA-256 checksum.
+Components include the representative, `_seq`, `_aln`, `_h` and `_seq_h` families,
+their data, `.index` and `.dbtype` files, and any other files belonging to that prefix.
+Split data starts at `.0`. The manifest itself is excluded from its inventory.
+
+Prepare the manifest once, after database creation has finished, and keep the database
+immutable for as long as its results may be reused. Iduna checks the declaration and
+current file inventory and binds the complete manifest to the expansion identity. It
+does **not** rehash a large database on every call. An unchanged manifest is not proof
+that someone has left the underlying bytes unchanged: that is the operator's explicit
+immutability obligation. After changing any component, prepare a new manifest before
+reuse. With no valid manifest, expansion computes again instead of reusing saved results.
+
+The inventory consists of files named exactly like the database prefix or beginning
+with that basename followed by `.` or `_`. Keep unrelated logs elsewhere. If components
+are symlinks, both links and targets must remain immutable. The following standalone
+Python example streams each file once; change its three configuration values first.
+It uses exclusive creation to avoid replacing an existing snapshot declaration.
+
+```python
+import hashlib
+import json
+from pathlib import Path
+
+prefix = Path("/data/mmseqs/uniref_release/uniref").absolute()
+manifest = Path("/data/manifests/uniref_release.json").absolute()
+snapshot_id = "uniref-release-build-1"
+
+components = {}
+for path in sorted(prefix.parent.iterdir()):
+    matches = (path.name == prefix.name
+               or path.name.startswith(prefix.name + ".")
+               or path.name.startswith(prefix.name + "_"))
+    if not matches or not path.is_file() or path == manifest:
+        continue
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    components[path.name] = digest.hexdigest()
+
+assert components, "No database components found"
+manifest.parent.mkdir(parents=True, exist_ok=True)
+# Exclusive creation avoids replacing an existing snapshot declaration.
+with manifest.open("x") as stream:
+    json.dump({"schema_version": 1, "immutable": True,
+               "snapshot_id": snapshot_id, "components": components},
+              stream, indent=2, sort_keys=True)
+    stream.write("\n")
+```
+
+Pass the manifest with its database prefix:
+
+```julia
+iduna("P28482";
+    workdir = "/path/to/work",
+    mmseqs_db = "/data/mmseqs/uniref_release/uniref",
+    mmseqs_db_manifest = "/data/manifests/uniref_release.json",
+    mmseqs_threads = 4)
+```
