@@ -13,6 +13,7 @@ MUSCLE_jll = "0d2b832c-22e5-5080-b34f-49cc6141c4c5"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 TestItemRunner = "f8b46487-2199-4994-9208-9a1283c18c0a"
 TestItems = "1c621080-faea-4a02-84b6-bbd5e436b8fe"
+URIs = "5c2747f8-b7ea-4ff2-ba2e-563bfd36b1d4"
 kalign_jll = "86ae5844-b998-5f56-950b-e2311b0a7e21"
 
 [compat]
@@ -29,4 +30,5 @@ MIToS = "3.7"
 MUSCLE_jll = "5"
 TestItemRunner = "1"
 TestItems = "1"
+URIs = "1"
 kalign_jll = "3"

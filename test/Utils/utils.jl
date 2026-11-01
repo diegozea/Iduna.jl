@@ -1,3 +1,5 @@
+import URIs
+
 @testset "Utils" begin
     @test Iduna.Utils.id_kind("P20963") === :uniprot
     @test Iduna.Utils.id_kind("A0A0C4DGY3") === :uniprot
@@ -43,9 +45,9 @@
     @test Iduna.Utils.decode_body(plain) == "plain body"
     @test Iduna.Utils._body_bytes("plain body") == Vector{UInt8}(codeunits("plain body"))
     gzip_body = UInt8[
-    31, 139, 8, 0, 0, 0, 0, 0, 0, 3, 75, 175, 202, 44, 40, 72, 77, 81, 72,
-    202, 79, 169, 4, 0, 196, 225, 85, 59, 12, 0, 0, 0
-]
+        31, 139, 8, 0, 0, 0, 0, 0, 0, 3, 75, 175, 202, 44, 40, 72, 77, 81, 72,
+        202, 79, 169, 4, 0, 196, 225, 85, 59, 12, 0, 0, 0
+    ]
     gzipped = Iduna.Utils.HTTP.Response(
         200, ["Content-Encoding" => "gzip"]; body = gzip_body)
     @test Iduna.Utils.decode_body(gzipped) == "gzipped body"
@@ -54,7 +56,9 @@
         response(status::Integer,
             body::AbstractString = "") = Iduna.Utils.HTTP.Response(status; body)
 
-        @test_throws ArgumentError Iduna.Utils._http_get_request("not a url")
+        # HTTP delegates URI parsing; both dependency error types reject this input.
+        @test_throws Union{ArgumentError, URIs.ParseError} Iduna.Utils._http_get_request(
+            "not a url")
 
         attempts = Ref(0)
         transient_then_success = (url; headers, retry,
