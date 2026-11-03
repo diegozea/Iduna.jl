@@ -6,12 +6,17 @@ using MIToS.MSA: AnnotatedSequence
         write(input, ">ref\nACDE\n>other\nACDF\n")
         for value in (NaN, Inf, -Inf)
             score_fn = (reference, sample; kwargs...) -> (; raw_score = value)
-            constant_normalization = (score; kwargs...) -> 90.0
+            normalization_calls = Ref(0)
+            constant_normalization = (score; kwargs...) -> begin
+                normalization_calls[] += 1
+                return 90.0
+            end
             workdir = joinpath(tmp, "raw_$(value)")
             @test_throws ArgumentError Iduna.EPLI.epli_score(input, workdir,
                 copy_aligner; score_fn, normalization_fn = constant_normalization,
                 sample_count = 1, sample_seed = 1, progress_enabled = false)
             @test !isfile(joinpath(workdir, "summary.csv"))
+            @test normalization_calls[] == 0
 
             reference_score = (reference, sample; label, kwargs...) -> (;
                 raw_score = label == "reference_self" ? value : 10.0)
@@ -48,6 +53,32 @@ using MIToS.MSA: AnnotatedSequence
         @test result.epli == floatmax(Float64)
         @test isfile(joinpath(workdir, "scores.csv"))
         @test isfile(joinpath(workdir, "summary.csv"))
+    end
+end
+
+@testset "Optional score metadata at callback boundaries" begin
+    mktempdir() do tmp
+        input = joinpath(tmp, "input.fasta")
+        write(input, ">ref\nACDE\n>other\nACDF\n")
+        score = (; raw_score = Float32(-2), hhalign_score = NaN,
+            probability = missing, e_value = Inf, custom_metadata = :preserved)
+        score_fn = (reference, sample; kwargs...) -> score
+        normalization_fn = (value; kwargs...) -> begin
+            @test value.custom_metadata === :preserved
+            return (; normalized_score = 150, normalization_score = missing)
+        end
+        result = Iduna.EPLI.epli_score(input, joinpath(tmp, "run"), copy_aligner;
+            score_fn, normalization_fn, sample_count = 1, sample_seed = 1,
+            progress_enabled = false)
+        row = only(result.rows)
+        @test row.raw_score === -2.0
+        @test row.normalized_score === 150.0
+        @test ismissing(row.normalization_score)
+        @test ismissing(row.matched_positions)
+        @test ismissing(row.comparable_positions)
+        @test isnan(row.hhalign_score)
+        @test ismissing(row.probability)
+        @test row.e_value === Inf
     end
 end
 

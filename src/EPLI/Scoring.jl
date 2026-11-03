@@ -3,7 +3,7 @@ _function_label(fn) = string(fn)
 # Sample Scoring
 # --------------
 
-function _score_field(score, name::Symbol)
+function _optional_score_field(score, name::Symbol)
     name in keys(score) || return missing
     return getfield(score, name)
 end
@@ -22,7 +22,8 @@ function _score_sample(spec,
     score = score_fn(reference_msa_fasta, sample_msa_fasta;
         logs_dir = logs_dir === nothing ? nothing : joinpath(logs_dir, "hhalign"),
         label = spec.sample_label)
-    raw_score = _finite_score(score.raw_score, "Raw score for $(spec.sample_label)")
+    raw_score = Float64(score.raw_score)
+    _validate_finite_score(raw_score, "Raw score for $(spec.sample_label)")
     normalized = _normalization_result(normalization_fn(score; reference_score))
     n_reference = spec.n_sequences_reference
     n_sample = spec.n_sequences_sample === nothing ?
@@ -39,11 +40,11 @@ function _score_sample(spec,
         n_sequences_sample = n_sample,
         reference_msa_fasta,
         sample_msa_fasta,
-        matched_positions = _score_field(score, :matched_positions),
-        comparable_positions = _score_field(score, :comparable_positions),
-        hhalign_score = _score_field(score, :hhalign_score),
-        probability = _score_field(score, :probability),
-        e_value = _score_field(score, :e_value))
+        matched_positions = _optional_score_field(score, :matched_positions),
+        comparable_positions = _optional_score_field(score, :comparable_positions),
+        hhalign_score = _optional_score_field(score, :hhalign_score),
+        probability = _optional_score_field(score, :probability),
+        e_value = _optional_score_field(score, :e_value))
 end
 
 function _reference_self_score(reference_msa_fasta::AbstractString,
@@ -54,7 +55,7 @@ function _reference_self_score(reference_msa_fasta::AbstractString,
     score = score_fn(reference_msa_fasta, reference_msa_fasta;
         logs_dir = logs_dir === nothing ? nothing : joinpath(logs_dir, "hhalign"),
         label = "reference_self")
-    _finite_score(score.raw_score, "Reference self score")
+    _validate_finite_score(Float64(score.raw_score), "Reference self score")
     return score
 end
 
@@ -132,7 +133,8 @@ function _score_alignment_samples(reference_msa_fasta::AbstractString,
         progress_enabled)
     score_rows = [row for row in rows if row !== nothing]
     isempty(score_rows) && error("No sample scores were computed.")
-    epli = _finite_score(median([row.epli_component for row in score_rows]), "EPLI")
+    epli = median([row.epli_component for row in score_rows])
+    _validate_finite_score(epli, "EPLI")
     if scores_path !== nothing
         mkpath(dirname(scores_path))
         CSV.write(scores_path, DataFrame(score_rows))

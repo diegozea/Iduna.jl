@@ -36,6 +36,9 @@ end
         (; raw_score = 15.0); reference_score = (; raw_score = 10.0)).normalized_score ==
           150.0
     @test Iduna.EPLI.no_normalization((; raw_score = -2.0)).normalized_score == -2.0
+    @test Iduna.EPLI.no_normalization((; raw_score = 0.0)).normalized_score == 0.0
+    @test Iduna.EPLI.comparable_positions_normalization(
+        (; matched_positions = 3, comparable_positions = 4)).normalized_score == 75.0
     @test ismissing(Iduna.EPLI._normalization_result(3.0).normalization_score)
     @test ismissing(Iduna.EPLI._normalization_result(
         (; normalized_score = 3.0, normalization_score = missing)).normalization_score)

@@ -2,6 +2,8 @@
 # --------------
 
 function _validate_candidate_scores(df::DataFrame)
+    # Validate only the eligible or selected rows supplied by the caller.
+    # Missing means no score was computed; it is tolerated when sampling is disabled.
     :epli in propertynames(df) || return nothing
     for row in eachrow(df)
         value = row.epli

@@ -18,6 +18,12 @@
         @test_throws ArgumentError Iduna.ThorAxeMSA._selected_candidate_seeds(summary)
 
         write(summary,
+            header *
+            "10,1,true,true,90,pid10.sto,pid10.fa\n" *
+            "20,2,true,false,-Inf,pid20.sto,pid20.fa\n")
+        @test_throws ArgumentError Iduna.ThorAxeMSA.select_best_seed(summary)
+
+        write(summary,
             "pid,pid_order,selected,epli,stockholm_path,fasta_path\n" *
             "10,1,true,NaN,pid10.sto,pid10.fa\n")
         @test_throws ArgumentError Iduna.ThorAxeMSA._selected_candidate_seeds(summary)
