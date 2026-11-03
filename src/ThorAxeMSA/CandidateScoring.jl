@@ -85,67 +85,6 @@ function _candidate_summary_row(target::ResolvedTarget,
     )
 end
 
-function _score_pid_candidate(target::ResolvedTarget,
-        input_dir::AbstractString,
-        workdir::AbstractString,
-        pid::Real,
-        pid_order::Integer,
-        specieslist::Union{Nothing, AbstractString};
-        sample_count::Integer,
-        sample_fraction::Real,
-        sample_seed::UInt64,
-        metadata,
-        overwrite::Bool = false,
-        thoraxe_fn::Function = ThorAxe.thoraxe,
-        score_fn = EPLI.hhsuite_identity_score,
-        normalization_fn = EPLI.comparable_positions_normalization)
-    @debug "Scoring ThorAxe PID candidate." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id pid pid_order sample_count
-    candidate = merge(
-        _generate_pid_candidate(target, input_dir, workdir, pid, specieslist;
-            overwrite, thoraxe_fn),
-        (; workdir))
-    validation = _candidate_msa0_validation(target, candidate.msa, pid, workdir)
-    if !validation.eligible
-        @info "Skipping ineligible ThorAxe PID candidate." pid issue=validation.issue
-        return _candidate_summary_row(
-            target, candidate, pid, pid_order, validation;
-            sample_count, sample_fraction, sample_seed, metadata)
-    end
-
-    if sample_count == 0
-        @info "Keeping ThorAxe PID candidate without sample scoring." pid
-        return _candidate_summary_row(
-            target, candidate, pid, pid_order, validation;
-            sample_count, sample_fraction, sample_seed, metadata)
-    end
-
-    _ensure_pid_candidate_samples(workdir, pid, candidate.msa, candidate.species;
-        sample_count,
-        sample_fraction,
-        sample_seed,
-        overwrite,
-        gene_id = target.ensembl_gene_id,
-        transcript_id = target.transcript_id)
-
-    scored = _score_pid_samples(
-        target, input_dir, workdir, candidate, pid, pid_order;
-        sample_count,
-        overwrite,
-        thoraxe_fn,
-        score_fn,
-        normalization_fn)
-    return _candidate_summary_row(
-        target, candidate, pid, pid_order, validation;
-        epli = scored.epli,
-        n_samples = length(scored.rows),
-        no_comparable_samples = scored.no_comparable_samples,
-        samples_without_identity_counts = scored.samples_without_identity_counts,
-        sample_count,
-        sample_fraction,
-        sample_seed,
-        metadata)
-end
-
 function _summarize_candidate_scores(rows::AbstractVector{<:NamedTuple},
         path::AbstractString)
     df = DataFrame(rows)

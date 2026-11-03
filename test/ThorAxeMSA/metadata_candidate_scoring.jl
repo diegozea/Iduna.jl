@@ -1,3 +1,13 @@
+function score_test_pid_candidates(target, input_dir, workdir, pids, metadata;
+        overwrite = false, kwargs...)
+    return Iduna.ThorAxeMSA._score_pid_candidates(
+        target, input_dir, workdir, pids, metadata.effective_specieslist, metadata;
+        pid_sample_count = metadata.pid_sample_count,
+        pid_sample_fraction = metadata.pid_sample_fraction,
+        sample_seed = metadata.pid_sample_seed,
+        overwrite, kwargs...)
+end
+
 mktempdir() do tmp
     fasta = joinpath(tmp, "candidate.fasta")
     write(fasta, ">ENSG\nA-C\n>ORTHO1\nABC\n")
@@ -132,12 +142,8 @@ mktempdir() do tmp
         orthology = "1:1",
         specieslist_filter = false,
         biomart_datasets_filter = false)
-    zero_sample_row = Iduna.ThorAxeMSA._score_pid_candidate(
-        scoring_target, scoring_input, tmp, zero_sample_pid, 1, nothing;
-        sample_count = 0,
-        sample_fraction = 1.0,
-        sample_seed = UInt64(11),
-        metadata = zero_sample_metadata)
+    zero_sample_row = only(score_test_pid_candidates(
+        scoring_target, scoring_input, tmp, [zero_sample_pid], zero_sample_metadata))
     @test zero_sample_row.pid == zero_sample_pid
     @test zero_sample_row.eligible
     @test zero_sample_row.selection_mode == "all_candidates"
@@ -154,11 +160,11 @@ mktempdir() do tmp
         ensembl_gene_id = "ENSG",
         transcript_id = "ENST",
         uniprot_sequence_path = invalid_uniprot)
-    invalid_pid = 52.5
+    cached_invalid_pid = 52.5
     write_fake_thoraxe_dir(
-        Iduna.ThorAxeMSA._pid_sample_thoraxe_dir(tmp, invalid_pid, 0))
-    invalid_metadata = Iduna.ThorAxeMSA._candidate_run_metadata(
-        scoring_input, invalid_target, [invalid_pid];
+        Iduna.ThorAxeMSA._pid_sample_thoraxe_dir(tmp, cached_invalid_pid, 0))
+    cached_invalid_metadata = Iduna.ThorAxeMSA._candidate_run_metadata(
+        scoring_input, invalid_target, [cached_invalid_pid];
         sample_count = 0,
         sample_fraction = 1.0,
         sample_seed = UInt64(13),
@@ -168,20 +174,21 @@ mktempdir() do tmp
         orthology = "1:1",
         specieslist_filter = false,
         biomart_datasets_filter = false)
-    invalid_row = @test_logs (:info, r"Skipping ineligible ThorAxe PID candidate") match_mode=:any Iduna.ThorAxeMSA._score_pid_candidate(
-        invalid_target, scoring_input, tmp, invalid_pid, 1, nothing;
-        sample_count = 0,
-        sample_fraction = 1.0,
-        sample_seed = UInt64(13),
-        metadata = invalid_metadata)
-    @test invalid_row.pid == invalid_pid
-    @test !invalid_row.eligible
-    @test invalid_row.msa0_status == "invalid_msa0"
-    @test occursin("indels", invalid_row.msa0_issue)
+    cached_invalid_row = @test_logs (
+        :info, r"Skipping ineligible ThorAxe PID candidate") match_mode=:any begin
+        only(score_test_pid_candidates(
+            invalid_target, scoring_input, tmp, [cached_invalid_pid], cached_invalid_metadata;
+            thoraxe_fn = (
+                args...; kwargs...) -> error("Cached candidate must not rerun ThorAxe.")))
+    end
+    @test cached_invalid_row.pid == cached_invalid_pid
+    @test !cached_invalid_row.eligible
+    @test cached_invalid_row.msa0_status == "invalid_msa0"
+    @test occursin("indels", cached_invalid_row.msa0_issue)
 
-    invalid_two_step_pid = 52.75
-    invalid_two_step_metadata = Iduna.ThorAxeMSA._candidate_run_metadata(
-        scoring_input, invalid_target, [invalid_two_step_pid];
+    generated_invalid_pid = 52.75
+    generated_invalid_metadata = Iduna.ThorAxeMSA._candidate_run_metadata(
+        scoring_input, invalid_target, [generated_invalid_pid];
         sample_count = 0,
         sample_fraction = 1.0,
         sample_seed = UInt64(14),
@@ -191,28 +198,26 @@ mktempdir() do tmp
         orthology = "1:1",
         specieslist_filter = false,
         biomart_datasets_filter = false)
-    invalid_two_step_calls = Ref(0)
-    invalid_two_step_thoraxe = (input_dir, run_root; identity, specieslist,
+    generated_invalid_calls = Ref(0)
+    generated_invalid_thoraxe = (input_dir, run_root; identity, specieslist,
         phylosofs, runner) -> begin
-        invalid_two_step_calls[] += 1
+        generated_invalid_calls[] += 1
         write_fake_thoraxe_dir(joinpath(run_root, "thoraxe"))
         nothing
     end
-    invalid_two_step_rows = @test_logs (
-        :info, r"Skipping ineligible ThorAxe PID candidate") match_mode=:any Iduna.ThorAxeMSA._score_pid_candidates(
-        invalid_target, scoring_input, tmp, [invalid_two_step_pid], nothing,
-        invalid_two_step_metadata;
-        pid_sample_count = 0,
-        pid_sample_fraction = 1.0,
-        sample_seed = UInt64(14),
-        overwrite = true,
-        thoraxe_fn = invalid_two_step_thoraxe)
-    invalid_two_step_row = only(invalid_two_step_rows)
-    @test invalid_two_step_calls[] == 1
-    @test invalid_two_step_row.pid == invalid_two_step_pid
-    @test !invalid_two_step_row.eligible
-    @test invalid_two_step_row.msa0_status == "invalid_msa0"
-    @test occursin("indels", invalid_two_step_row.msa0_issue)
+    generated_invalid_rows = @test_logs (
+        :info, r"Skipping ineligible ThorAxe PID candidate") match_mode=:any begin
+        score_test_pid_candidates(
+            invalid_target, scoring_input, tmp, [generated_invalid_pid], generated_invalid_metadata;
+            overwrite = true,
+            thoraxe_fn = generated_invalid_thoraxe)
+    end
+    generated_invalid_row = only(generated_invalid_rows)
+    @test generated_invalid_calls[] == 1
+    @test generated_invalid_row.pid == generated_invalid_pid
+    @test !generated_invalid_row.eligible
+    @test generated_invalid_row.msa0_status == "invalid_msa0"
+    @test occursin("indels", generated_invalid_row.msa0_issue)
 
     sampled_pid = 53.0
     sampled_calls = Ref(0)
@@ -247,14 +252,10 @@ mktempdir() do tmp
     sampled_row = Test.collect_test_logs() do
         open(sampled_progress_stderr, "w") do stderr_io
             redirect_stderr(stderr_io) do
-                Iduna.ThorAxeMSA._score_pid_candidate(
-                    scoring_target, scoring_input, tmp, sampled_pid, 1, nothing;
-                    sample_count = 1,
-                    sample_fraction = 1.0,
-                    sample_seed = UInt64(12),
-                    metadata = sampled_metadata,
+                only(score_test_pid_candidates(
+                    scoring_target, scoring_input, tmp, [sampled_pid], sampled_metadata;
                     thoraxe_fn = sampled_thoraxe,
-                    score_fn = sampled_score)
+                    score_fn = sampled_score))
             end
         end
     end
@@ -357,14 +358,10 @@ mktempdir() do tmp
         orthology = "1:1",
         specieslist_filter = false,
         biomart_datasets_filter = false)
-    parallel_row = Iduna.ThorAxeMSA._score_pid_candidate(
-        scoring_target, scoring_input, tmp, parallel_pid, 1, nothing;
-        sample_count = 4,
-        sample_fraction = 1.0,
-        sample_seed = UInt64(16),
-        metadata = parallel_metadata,
+    parallel_row = only(score_test_pid_candidates(
+        scoring_target, scoring_input, tmp, [parallel_pid], parallel_metadata;
         thoraxe_fn = parallel_thoraxe,
-        score_fn = parallel_score)
+        score_fn = parallel_score))
     @test count(==(:full), parallel_call_kinds) == 1
     @test count(==(:sample), parallel_call_kinds) == 4
     @test sort(parallel_score_labels) == ["species_subset_001",
@@ -400,12 +397,8 @@ mktempdir() do tmp
         biomart_datasets_filter = false)
     common_logs,
     common_rows = Test.collect_test_logs() do
-        Iduna.ThorAxeMSA._score_pid_candidates(
-            scoring_target, scoring_input, tmp, common_pids, nothing,
-            common_metadata;
-            pid_sample_count = 1,
-            pid_sample_fraction = 1.0,
-            sample_seed = UInt64(15),
+        score_test_pid_candidates(
+            scoring_target, scoring_input, tmp, common_pids, common_metadata;
             overwrite = true,
             thoraxe_fn = common_thoraxe,
             score_fn = sampled_score)
@@ -431,19 +424,17 @@ mktempdir() do tmp
         @test read(species_file, String) == read(common_species_file, String)
     end
 
-    # Evidence diagnostics must reach candidate summaries through both scoring paths.
-    unknown_row = Iduna.ThorAxeMSA._score_pid_candidate(
-        scoring_target, scoring_input, tmp, sampled_pid, 1, nothing;
-        sample_count = 1, sample_fraction = 1.0, sample_seed = UInt64(12),
-        metadata = sampled_metadata, thoraxe_fn = sampled_thoraxe,
+    # Candidate summaries distinguish unavailable counts from observed zero comparisons.
+    unknown_row = only(score_test_pid_candidates(
+        scoring_target, scoring_input, tmp, [sampled_pid], sampled_metadata;
+        thoraxe_fn = sampled_thoraxe,
         score_fn = (args...; kwargs...) -> Iduna.EPLI.RawScore(-2),
-        normalization_fn = Iduna.EPLI.no_normalization)
+        normalization_fn = Iduna.EPLI.no_normalization))
     @test unknown_row.epli == -2
     @test unknown_row.no_comparable_samples == 0
     @test unknown_row.samples_without_identity_counts == 1
-    zero_rows = Iduna.ThorAxeMSA._score_pid_candidates(
-        scoring_target, scoring_input, tmp, common_pids, nothing, common_metadata;
-        pid_sample_count = 1, pid_sample_fraction = 1.0, sample_seed = UInt64(15),
+    zero_rows = score_test_pid_candidates(
+        scoring_target, scoring_input, tmp, common_pids, common_metadata;
         overwrite = false, thoraxe_fn = common_thoraxe,
         score_fn = (
             args...; kwargs...) -> Iduna.EPLI.IdentityScore(Iduna.EPLI.IdentityCounts(0, 0)),
@@ -456,16 +447,14 @@ mktempdir() do tmp
     @test sum(row.no_comparable_samples for row in evidence_rows) == 2
     @test sum(row.samples_without_identity_counts for row in evidence_rows) == 1
 
-    scored_rows = Iduna.ThorAxeMSA._score_pid_candidates(
-        scoring_target, scoring_input, tmp, [62.0, 63.0], nothing,
-        zero_sample_metadata;
-        pid_sample_count = 0,
-        pid_sample_fraction = 1.0,
-        sample_seed = UInt64(13),
-        overwrite = false,
+    unscored_pids = [62.0, 63.0]
+    unscored_metadata = merge(zero_sample_metadata,
+        (; pid_thresholds_key = Iduna.ThorAxeMSA._pid_thresholds_key(unscored_pids)))
+    unscored_rows = score_test_pid_candidates(
+        scoring_target, scoring_input, tmp, unscored_pids, unscored_metadata;
         thoraxe_fn = sampled_thoraxe)
-    @test [row.pid for row in scored_rows] == [62.0, 63.0]
-    @test all(row -> row.selection_mode == "all_candidates", scored_rows)
+    @test [row.pid for row in unscored_rows] == unscored_pids
+    @test all(row -> row.selection_mode == "all_candidates", unscored_rows)
 
     stale_paths = Iduna.ThorAxeMSA._pid_sample_paths(tmp, 80.0, 0)
     mkpath(dirname(stale_paths.fasta_path))
