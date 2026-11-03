@@ -88,7 +88,7 @@ end
             result = Iduna.EPLI.epli_score(input, joinpath(tmp, string(raw)), copy_aligner;
                 score_fn, normalization_fn = Iduna.EPLI.self_reference_normalization,
                 sample_count = 2, sample_seed = 1, progress_enabled = false)
-            @test result.epli == expected
+            @test result.epli.value == expected
             @test all(row.normalized_score == expected for row in result.rows)
             @test isfile(result.scores_path)
             @test isfile(result.summary_path)

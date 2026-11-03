@@ -305,6 +305,7 @@ function _row_seed(row, summary_path::AbstractString; allow_uncomputed::Bool = f
     return SeedSelection(;
         pid = Float64(row.pid),
         epli,
+        epli_reason = epli === nothing ? :sampling_disabled : nothing,
         stockholm_path = String(row.stockholm_path),
         fasta_path = row.fasta_path === missing ? nothing : String(row.fasta_path),
         s_exon_blocks_tsv = s_exon_blocks_path(String(row.stockholm_path)),

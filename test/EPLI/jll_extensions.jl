@@ -396,7 +396,7 @@
                 aligner_args = `--thread 1`,
                 progress_enabled = false)
 
-            @test isfinite(result.epli)
+            @test isfinite(result.epli.value)
             @test isfile(result.scores_path)
             @test isfile(result.summary_path)
             @test result.aligner_args == string(`--thread 1`)
@@ -437,7 +437,7 @@
                 aligner_args = `-t 1`,
                 progress_enabled = false)
 
-            @test isfinite(result.epli)
+            @test isfinite(result.epli.value)
             @test isfile(result.scores_path)
             @test isfile(result.summary_path)
             @test result.aligner_args == string(`-t 1`)
@@ -478,7 +478,7 @@
                 aligner_args = `-n 1`,
                 progress_enabled = false)
 
-            @test isfinite(result.epli)
+            @test isfinite(result.epli.value)
             @test isfile(result.scores_path)
             @test isfile(result.summary_path)
             @test result.aligner_args == string(`-n 1`)
@@ -519,7 +519,7 @@
                 aligner_args = `-threads 1`,
                 progress_enabled = false)
 
-            @test isfinite(result.epli)
+            @test isfinite(result.epli.value)
             @test isfile(result.scores_path)
             @test isfile(result.summary_path)
             @test result.aligner_args == string(`-threads 1`)
