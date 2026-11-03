@@ -218,7 +218,7 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
             stage_hashes = [stage.identity_hash
                             for stage in current_stages
                             if stage.identity_hash !== nothing &&
-                stage.stage_key != "result"])
+                               stage.stage_key != "result"])
         Utils._write_stage_state(Utils._pipeline_stage_dir(root, "result");
             stage = "result",
             stage_key = "result",
