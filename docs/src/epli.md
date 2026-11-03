@@ -230,6 +230,9 @@ finite when converted to `Float64`. Invalid scores raise `ArgumentError`
 (wrapped in a task failure during parallel scoring) rather than removing samples
 from the median. Finite negative scores and ratios above 100 are allowed; self
 normalization still rejects a zero reference score.
+Built-in percentage normalization uses higher precision near the `Float64` limits
+to avoid intermediate overflow and premature underflow. Results that are too small
+to represent round to zero; results that overflow `Float64` still raise an error.
 Seed selection also rejects non-finite scores in eligible or cached selected
 candidates. When PID sampling is explicitly disabled, `missing` means that no EPLI
 score was computed; it is tolerated for retaining candidates, not used as a numeric

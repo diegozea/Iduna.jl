@@ -4,6 +4,21 @@ function _validate_finite_score(value::Float64, label::AbstractString)
     return nothing
 end
 
+function _percentage_ratio(numerator::Float64, denominator::Float64)
+    scaled = 100 * numerator
+    value = scaled / denominator
+    if isfinite(scaled) && floatmin(Float64) <= abs(value) < floatmax(Float64) / 2
+        return value
+    end
+    # Avoid intermediate overflow and double rounding near the Float64 limits.
+    # Julia 1.12 scopes these settings to the current task, including parallel scoring.
+    return setprecision(BigFloat, 256) do
+        setrounding(BigFloat, RoundNearest) do
+            Float64(100 * BigFloat(numerator) / BigFloat(denominator), RoundNearest)
+        end
+    end
+end
+
 """
     comparable_positions_normalization(score; reference_score=nothing)
 
@@ -15,7 +30,7 @@ function comparable_positions_normalization(score; reference_score = nothing)
     _validate_finite_score(matched, "Matched positions")
     comparable == 0 && return (; normalized_score = 0.0, normalization_score = 0.0)
     return _normalization_result((;
-        normalized_score = 100 * matched / comparable,
+        normalized_score = _percentage_ratio(matched, Float64(comparable)),
         normalization_score = Float64(comparable)))
 end
 
@@ -34,7 +49,7 @@ function self_reference_normalization(score; reference_score = nothing)
     denominator == 0.0 &&
         error("Cannot use self-reference normalization when the reference self score is zero.")
     return _normalization_result((;
-        normalized_score = 100 * raw_score / denominator,
+        normalized_score = _percentage_ratio(raw_score, denominator),
         normalization_score = denominator))
 end
 
