@@ -223,28 +223,61 @@ result = epli_score(
 This computes each sample's raw HHalign profile score and normalizes it by the
 raw score from aligning the full reference MSA against itself.
 
-Custom score functions must return a finite `raw_score`. Normalization functions
-must return a finite score, or a named tuple with a finite `normalized_score` and
-an optional finite or `missing` `normalization_score`. These values must remain
-finite when converted to `Float64`. Invalid scores raise `ArgumentError`
-(wrapped in a task failure during parallel scoring) rather than removing samples
-from the median. Finite negative scores and ratios above 100 are allowed; self
-normalization still rejects a zero reference score.
-Built-in percentage normalization uses higher precision near the `Float64` limits
-to avoid intermediate overflow and premature underflow. Results that are too small
-to represent round to zero; results that overflow `Float64` still raise an error.
-The final median also preserves representable subnormal scores when averaging its
-two central values.
-Seed selection also rejects non-finite scores in eligible or cached selected
-candidates. When PID sampling is explicitly disabled, `missing` means that no EPLI
-score was computed; it is tolerated for retaining candidates, not used as a numeric
-score or included in ranking.
-Validation happens when callback results enter scoring and when eligible or selected
-CSV rows enter seed selection, before ranking. Each public normalization function
-also checks the inputs it uses. Computed normalization results and the final median
-are checked before output is written, since finite inputs can still overflow.
-Optional diagnostic fields are copied without finite-value checks; they may be
-absent or `missing` and are not used to rank candidates.
+### Score values and callback contracts
+
+The built-in score functions return immutable domain values: `IdentityScore`
+contains `IdentityCounts`, while `RawScore` holds a finite profile or custom score.
+`IdentityCounts` requires integer counts with `0 ≤ matched ≤ comparable`. Its raw
+identity score is derived from the matched count. Use `raw_score(score)` to read
+raw values. Optional tool information lives in `score.diagnostics`; unavailable
+or non-finite diagnostics do not invalidate an unrelated scientific score.
+
+All normalizers return `NormalizationResult`. Its constructor converts to Float64
+and rejects non-finite components and non-finite supplied denominators. Negative
+raw scores and normalized ratios above 100 remain valid. Self-reference normalization
+requires a nonzero reference score; no normalization uses a missing denominator.
+
+Custom score callbacks should return `RawScore` or `IdentityScore`. Named tuples
+with `raw_score` are accepted at the input boundary and converted to `RawScore`;
+complete, nonmissing identity counts are validated there as well. Normalization
+callbacks receive this validated object, not the original tuple. Access additional
+callback fields through `score.diagnostics`. A normalization callback may return
+`NormalizationResult`, a real number, or a named tuple with `normalized_score` and
+an optional `normalization_score`; the latter two are converted at the boundary.
+Callable objects are supported. Extend `requires_reference_score` for a normalizer
+that needs a reference self score, or set `compute_reference_self_score` explicitly.
+
+The final median is represented by `ComputedEPLI`. Seed results expose this state
+as `seed.score`; `seed.epli` remains a numeric convenience property. An uncomputed
+score has `UncomputedEPLI` with a reason, and `require_epli` throws for that state.
+CSV and JSON results preserve `epli_state` and `epli_reason`. Eligible candidates in
+sampled selection must have computed, finite EPLI before ranking or cache reuse.
+When sampling is disabled, candidates carry `UncomputedEPLI(:sampling_disabled)`.
+Older JSON results with an unavailable score retain `:not_recorded`; they are not
+converted into zero or treated as valid numeric scores.
+
+### Zero comparable positions
+
+The explicit convention `(matched=0, comparable=0)` gives zero, and the result
+records `no_comparable_positions=true`. This differs from comparing positions and
+finding no matches. The zero component still enters the median and normal seed
+ranking: ties use MSA size, then PID order. It is not silently removed from the
+sample set. Per-sample CSVs retain both counts and this diagnostic; summaries report
+`no_comparable_samples`. Inspect these diagnostics before interpreting a zero EPLI
+as measured zero identity. Disabling sampling produces an uncomputed state instead.
+
+HHsuite output must contain complete, recognizable query/comparison/target blocks.
+Empty, unrecognized, or truncated output raises an error rather than becoming a
+zero-comparison result. A successfully parsed block without any reference positions
+can still produce valid `(0,0)` counts. Optional HHsuite diagnostics remain separate.
+
+Finite constructors do not guarantee that arithmetic is numerically accurate.
+Percentage normalization uses higher precision near the Float64 limits to avoid
+intermediate overflow and premature underflow. The median also preserves
+representable subnormal results when averaging its two central values. Truly
+unrepresentable tiny results round to signed zero; true overflow raises an error.
+The normalization and median formulas are unchanged, and invalid computed results
+raise errors rather than dropping samples.
 
 Iduna uses EPLI internally to choose the best seed generated by ThorAxe. That
 adapter uses the same scoring layer, but its sampling step is different: ThorAxe

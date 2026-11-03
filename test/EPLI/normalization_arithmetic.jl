@@ -30,10 +30,11 @@
     for reference in (0.0, -0.0)
         @test_throws ErrorException normalize(1.0, reference)
     end
+    # Numerical extremes belong to generic ratios, not impossible identity counts.
+    @test Iduna.EPLI._percentage_ratio(1e308, 100.0) == 1e308
+    @test Iduna.EPLI._percentage_ratio(tiny, 100.0) == tiny
     @test Iduna.EPLI.comparable_positions_normalization(
-        (; matched_positions = 1e308, comparable_positions = 100)).normalized_score == 1e308
-    @test Iduna.EPLI.comparable_positions_normalization(
-        (; matched_positions = tiny, comparable_positions = 100)).normalized_score == tiny
+        Iduna.EPLI.IdentityCounts(typemax(Int), typemax(Int))).normalized_score == 100.0
 
     # An exact rational oracle checks combinations across the Float64 exponent range.
     values = (tiny, 3 * tiny, floatmin(Float64), 1e-300, 0.125, 3.0, 1e300, largest)

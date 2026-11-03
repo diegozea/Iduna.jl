@@ -1,9 +1,3 @@
-function _validate_finite_score(value::Float64, label::AbstractString)
-    # isfinite returns false for NaN, Inf, and -Inf.
-    isfinite(value) || throw(ArgumentError("$(label) must be finite; got $(value)."))
-    return nothing
-end
-
 function _percentage_ratio(numerator::Float64, denominator::Float64)
     scaled = 100 * numerator
     value = scaled / denominator
@@ -22,67 +16,54 @@ end
 """
     comparable_positions_normalization(score; reference_score=nothing)
 
-Normalize an HHsuite identity score as `100 * matched_positions / comparable_positions`.
+Normalize validated identity counts as `100 * matched_positions / comparable_positions`.
+The explicit `(0, 0)` convention returns zero and records `no_comparable_positions=true`.
 """
 function comparable_positions_normalization(score; reference_score = nothing)
-    comparable = Int(score.comparable_positions)
-    matched = Float64(score.matched_positions)
-    _validate_finite_score(matched, "Matched positions")
-    comparable == 0 && return (; normalized_score = 0.0, normalization_score = 0.0)
-    return _normalization_result((;
-        normalized_score = _percentage_ratio(matched, Float64(comparable)),
-        normalization_score = Float64(comparable)))
+    counts = _normalization_counts(score)
+    comparable = counts.comparable_positions
+    comparable == 0 && return NormalizationResult(0.0, 0.0; no_comparable_positions = true)
+    return NormalizationResult(
+        _percentage_ratio(Float64(counts.matched_positions), Float64(comparable)),
+        comparable)
+end
+
+_normalization_counts(counts::IdentityCounts) = counts
+_normalization_counts(score::AbstractScore) = _require_identity_counts(score)
+function _normalization_counts(score::NamedTuple)
+    IdentityCounts(score.matched_positions, score.comparable_positions)
 end
 
 """
     self_reference_normalization(score; reference_score)
 
-Normalize a score by the raw score obtained from aligning the reference MSA to itself.
+Normalize a raw score by the score from aligning the reference MSA to itself.
+Both raw values must be finite; the reference score must also be nonzero.
 """
 function self_reference_normalization(score; reference_score = nothing)
     reference_score === nothing &&
         error("self_reference_normalization requires a reference self score.")
-    raw_score = Float64(score.raw_score)
-    denominator = Float64(reference_score.raw_score)
-    _validate_finite_score(raw_score, "Raw score")
-    _validate_finite_score(denominator, "Reference self score")
+    numerator = raw_score(_score_result(score))
+    denominator = raw_score(_score_result(reference_score))
     denominator == 0.0 &&
         error("Cannot use self-reference normalization when the reference self score is zero.")
-    return _normalization_result((;
-        normalized_score = _percentage_ratio(raw_score, denominator),
-        normalization_score = denominator))
+    return NormalizationResult(_percentage_ratio(numerator, denominator), denominator)
 end
 
 """
     no_normalization(score; reference_score=nothing)
 
-Use `score.raw_score` directly as the EPLI component.
+Use the finite raw score directly as the EPLI component, without a denominator.
 """
 function no_normalization(score; reference_score = nothing)
-    raw_score = Float64(score.raw_score)
-    _validate_finite_score(raw_score, "Raw score")
-    return (;
-        normalized_score = raw_score,
-        normalization_score = missing)
+    return NormalizationResult(raw_score(_score_result(score)))
 end
 
-function _normalization_result(value)
-    if value isa Real
-        normalized_score = Float64(value)
-        normalization_score = missing
-    elseif value isa NamedTuple
-        :normalized_score in keys(value) ||
-            error("Normalization functions that return a named tuple must include `normalized_score`.")
-        normalization_score = :normalization_score in keys(value) ?
-                              value.normalization_score : missing
-        normalized_score = Float64(value.normalized_score)
-        normalization_score = ismissing(normalization_score) ? missing :
-                              Float64(normalization_score)
-    else
-        error("Normalization function must return a real number or a named tuple.")
-    end
-    _validate_finite_score(normalized_score, "Normalized score")
-    ismissing(normalization_score) ||
-        _validate_finite_score(normalization_score, "Normalization score")
-    return (; normalized_score, normalization_score)
-end
+"""
+    requires_reference_score(normalization_fn)
+
+Whether a normalizer needs a reference self score. Custom callable normalizers
+can extend this method; callers may also set `compute_reference_self_score` explicitly.
+"""
+requires_reference_score(::Any) = false
+requires_reference_score(::typeof(self_reference_normalization)) = true

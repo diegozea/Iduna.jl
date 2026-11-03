@@ -7,6 +7,8 @@ const _CANDIDATE_SUMMARY_STRING_TYPES = Dict(
     :orthology => String,
     :transcript_query_fingerprint => String,
     :selection_mode => String,
+    :epli_state => String,
+    :epli_reason => String,
     :sampling_strategy => String,
     :msa0_status => String,
     :msa0_issue => String,
@@ -282,7 +284,7 @@ function _candidate_summary_matches(df::DataFrame, metadata)
             Int(row.pid_sample_count) == metadata.pid_sample_count,
             Float64(row.pid_sample_fraction) == metadata.pid_sample_fraction,
             metadata.requested_pid_sample_seed === nothing ||
-            UInt64(row.pid_sample_seed) == metadata.pid_sample_seed,
+                UInt64(row.pid_sample_seed) == metadata.pid_sample_seed,
             string(row.sampling_strategy) == String(metadata.sampling_strategy),
             _metadata_value_matches(row.effective_specieslist,
                 metadata.effective_specieslist),
@@ -297,9 +299,8 @@ function _candidate_summary_matches(df::DataFrame, metadata)
     end
 end
 
-function _row_seed(row, summary_path::AbstractString)
-    epli = :epli in propertynames(row) && !ismissing(row.epli) ?
-           Float64(row.epli) : missing
+function _row_seed(row, summary_path::AbstractString; allow_uncomputed::Bool = false)
+    epli = _candidate_score(row; allow_uncomputed)
     workdir = abspath(_candidate_summary_workdir(summary_path))
     return SeedSelection(;
         pid = Float64(row.pid),

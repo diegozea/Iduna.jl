@@ -5,7 +5,7 @@ function _hhsuite_query_indices(seq::AbstractString, start::Integer, stop::Integ
     indices = Int[]
     current = Int(start)
     for residue in seq
-        if residue == '-'
+        if residue in ('-', '.')
             push!(indices, 0)
         else
             push!(indices, current)
@@ -24,7 +24,7 @@ function _parse_hhsuite_query_segment(line::AbstractString)
     seq = m.captures[2]
     stop = parse(Int, m.captures[3])
     return (;
-        cols = findfirst(seq, line),
+        cols = m.offsets[2]:(m.offsets[2] + ncodeunits(seq) - 1),
         indices = _hhsuite_query_indices(seq, start, stop))
 end
 
@@ -37,38 +37,67 @@ function _append_hhsuite_code_line!(positions, codes, line::AbstractString, cols
     return nothing
 end
 
+function _hhsuite_alignment_row(lines, prefix)
+    idx = findfirst(
+        line -> startswith(line, prefix) &&
+                occursin(r"^\S+\s+\S+\s+\d+\s+\S+\s+\d+", line), lines)
+    idx === nothing &&
+        throw(ArgumentError("HHsuite alignment has no recognized $(prefix)row."))
+    parsed = _parse_hhsuite_query_segment(lines[idx])
+    return idx, parsed
+end
+
+function _hhsuite_block_codes!(positions, codes, lines)
+    _query_idx, query = _hhsuite_alignment_row(lines, "Q ")
+    query_end = findlast(line -> startswith(line, "Q "), lines)
+    _target_idx, target = _hhsuite_alignment_row(lines, "T ")
+    query_end + 1 < findfirst(line -> startswith(line, "T "), lines) ||
+        throw(ArgumentError("HHsuite alignment has no comparison row."))
+    length(query.indices) == length(target.indices) ||
+        throw(ArgumentError("HHsuite query and target alignment widths differ."))
+    code_line = lines[query_end + 1]
+    startswith(code_line, " ") && lastindex(code_line) >= last(query.cols) ||
+        throw(ArgumentError("HHsuite comparison row is malformed or truncated."))
+    symbols = code_line[query.cols]
+    all(c -> c in " |+.-=", symbols) ||
+        throw(ArgumentError("HHsuite comparison row contains unrecognized symbols."))
+    _append_hhsuite_code_line!(positions, codes, code_line, query.cols, query.indices)
+    return nothing
+end
+
+function _append_hhsuite_block!(positions, codes, lines)
+    any(line -> startswith(line, "Q ") || startswith(line, "T "), lines) || return false
+    _hhsuite_block_codes!(positions, codes, lines)
+    return true
+end
+
 function _get_codes(output::AbstractString)
-    in_alignment = false
-    query_line = true
-    cols = 1:0
-    indices = Int[]
+    lines = split(output, '\n')
+    start = findfirst(line -> startswith(line, "Probab="), lines)
+    start === nothing && throw(ArgumentError("HHsuite output has no recognized alignment."))
     positions = Int[]
     codes = Char[]
-    for line in split(output, '\n')
-        if startswith(line, "Probab=")
-            in_alignment = true
-            continue
-        end
-        in_alignment || continue
-        isempty(line) && continue
-        # HHalign prints one query row followed by rows of symbols for each block.
-        if query_line
-            parsed = _parse_hhsuite_query_segment(line)
-            if parsed !== nothing
-                cols = parsed.cols
-                indices = parsed.indices
-            end
-            query_line = false
-        elseif startswith(line, "Confidence")
-            query_line = true
+    block = SubString{String}[]
+    recognized = false
+    # HHsuite 3.3 PrintHHR separates blocks with empty lines; Confidence is optional.
+    # Preserve all-space comparison rows: only truly empty lines end a block.
+    for line in @view(lines[(start + 1):end])
+        if isempty(line) || startswith(line, "Confidence")
+            recognized |= _append_hhsuite_block!(positions, codes, block)
+            empty!(block)
         else
-            _append_hhsuite_code_line!(positions, codes, line, cols, indices)
+            push!(block, line)
         end
     end
+    recognized |= _append_hhsuite_block!(positions, codes, block)
+    recognized || throw(ArgumentError("HHsuite output has no complete alignment block."))
     return positions, codes
 end
 
 function _identity_counts_from_codes(positions::Vector{Int}, codes::Vector{Char})
+    length(positions) == length(codes) ||
+        throw(ArgumentError("HHsuite positions and comparison symbols have different lengths."))
+    all(>=(0), positions) || throw(ArgumentError("HHsuite positions cannot be negative."))
     seen = Dict{Int, Bool}()
     for (pos, code) in zip(positions, codes)
         pos == 0 && continue
@@ -76,9 +105,7 @@ function _identity_counts_from_codes(positions::Vector{Int}, codes::Vector{Char}
         seen[pos] = get(seen, pos, false) || code == '|'
     end
     matched = count(identity, values(seen))
-    return (;
-        matched_positions = matched,
-        comparable_positions = length(seen))
+    return IdentityCounts(matched, length(seen))
 end
 
 function _parse_hhalign_float(line::AbstractString, key::AbstractString)
@@ -150,7 +177,7 @@ Compare two MSA FASTA files with HHsuite and return identity-count fields for EP
 
 # Returns
 
-A named tuple with `raw_score`, `matched_positions`, and `comparable_positions`.
+An `IdentityScore` with validated counts and separate tool diagnostics.
 """
 function hhsuite_identity_score(reference_msa_fasta::AbstractString,
         sample_msa_fasta::AbstractString;
@@ -161,12 +188,8 @@ function hhsuite_identity_score(reference_msa_fasta::AbstractString,
     positions, codes = _get_codes(output)
     counts = _identity_counts_from_codes(positions, codes)
     summary = _hhalign_summary(output)
-    return merge(summary,
-        (;
-            score_name = "hhsuite_identity_score",
-            raw_score = Float64(counts.matched_positions),
-            matched_positions = counts.matched_positions,
-            comparable_positions = counts.comparable_positions))
+    return IdentityScore(counts; diagnostics = merge(summary, (;
+        score_name = "hhsuite_identity_score")))
 end
 
 """
@@ -184,7 +207,7 @@ function hhsuite_profile_score(reference_msa_fasta::AbstractString,
     summary = _hhalign_summary(output)
     ismissing(summary.hhalign_score) &&
         error("Could not parse HHalign profile score.")
-    return merge(summary, (;
-        score_name = "hhsuite_profile_score",
-        raw_score = Float64(summary.hhalign_score)))
+    return RawScore(summary.hhalign_score;
+        diagnostics = merge(summary, (;
+            score_name = "hhsuite_profile_score")))
 end

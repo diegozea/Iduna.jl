@@ -70,10 +70,7 @@ end
 
 function _identity_from_codes(positions::Vector{Int}, codes::Vector{Char})
     counts = EPLI._identity_counts_from_codes(positions, codes)
-    score = (;
-        matched_positions = counts.matched_positions,
-        comparable_positions = counts.comparable_positions)
-    return EPLI.comparable_positions_normalization(score).normalized_score
+    return EPLI.comparable_positions_normalization(counts).normalized_score
 end
 
 """

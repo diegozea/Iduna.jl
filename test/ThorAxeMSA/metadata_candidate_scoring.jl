@@ -468,7 +468,7 @@ mktempdir() do tmp
 
     positions,
     codes = Iduna.ThorAxeMSA._get_codes(
-        "Probab=99\nquery 1 A-C 2\n        | |\nConfidence\n")
+        "Probab=99\nQ query 1 A-C 2\n          | |\nT query 1 ABC 3\nConfidence\n")
     @test positions == [1, 0, 2]
     @test codes == ['|', ' ', '|']
     @test Iduna.ThorAxeMSA._identity_from_codes(positions, codes) == 100.0

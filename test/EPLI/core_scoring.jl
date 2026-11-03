@@ -64,7 +64,7 @@ end
             probability = missing, e_value = Inf, custom_metadata = :preserved)
         score_fn = (reference, sample; kwargs...) -> score
         normalization_fn = (value; kwargs...) -> begin
-            @test value.custom_metadata === :preserved
+            @test value.diagnostics.custom_metadata === :preserved
             return (; normalized_score = 150, normalization_score = missing)
         end
         result = Iduna.EPLI.epli_score(input, joinpath(tmp, "run"), copy_aligner;
