@@ -109,8 +109,9 @@ end
 
 function _score_median(components::AbstractVector{Float64})
     value = median(components)
-    if iseven(length(components)) && abs(value) < floatmin(Float64)
-        # The two central values may underflow when halved separately by median.
+    if iseven(length(components)) &&
+       any(x -> 0 < abs(x) < 2 * floatmin(Float64), components)
+        # Halving tiny inputs can lose precision even when their median is normal.
         return setprecision(BigFloat, 256) do
             setrounding(BigFloat, RoundNearest) do
                 Float64(median(BigFloat.(components)), RoundNearest)

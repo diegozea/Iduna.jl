@@ -54,7 +54,8 @@
     tasks = [Threads.@spawn setprecision(BigFloat, bits) do
                  setrounding(BigFloat, RoundUp) do
                      before = (precision(BigFloat), rounding(BigFloat))
-                     results = [normalize(1e308, 1e308), normalize(tiny, 100.0)]
+                     results = [normalize(1e308, 1e308), normalize(tiny, 100.0),
+                         Iduna.EPLI._score_median(fill(nextfloat(floatmin(Float64)), 2))]
                      return (; before, after = (precision(BigFloat), rounding(BigFloat)),
                          results)
                  end
@@ -62,11 +63,11 @@
     for task in tasks
         result = fetch(task)
         @test result.before == result.after
-        @test result.results == [100.0, tiny]
+        @test result.results == [100.0, tiny, nextfloat(floatmin(Float64))]
     end
 end
 
-@testset "Subnormal medians" begin
+@testset "Medians near the Float64 underflow boundary" begin
     tiny = nextfloat(0.0)
     @test Iduna.EPLI._score_median([tiny, tiny]) == tiny
     @test Iduna.EPLI._score_median([tiny, 2 * tiny]) == 2 * tiny
@@ -76,6 +77,17 @@ end
     @test Iduna.EPLI._score_median([tiny, tiny, tiny]) == tiny
     @test Iduna.EPLI._score_median([floatmax(Float64), floatmax(Float64)]) ==
           floatmax(Float64)
+
+    smallest_normal = floatmin(Float64)
+    for (a, b) in ((nextfloat(smallest_normal), nextfloat(smallest_normal)),
+            (3 * tiny, 2 * smallest_normal - 2 * tiny), (5 * tiny, 8 * smallest_normal)),
+        sign in (-1, 1)
+
+        # A normal result can still be wrong if a central input lost bits when halved.
+        exact = sign * (Rational{BigInt}(a) + Rational{BigInt}(b)) / 2
+        expected = Float64(BigFloat(exact, RoundNearest; precision = 256), RoundNearest)
+        @test Iduna.EPLI._score_median([sign * a, sign * b]) == expected
+    end
 end
 
 @testset "Extreme normalization through scoring callbacks" begin
