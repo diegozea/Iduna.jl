@@ -38,8 +38,9 @@ end
 
 _epli_value(score::ComputedEPLI) = score.value
 _epli_value(::UncomputedEPLI) = missing
-_epli_state(::ComputedEPLI) = "computed"
-_epli_state(::UncomputedEPLI) = "not_computed"
+function _epli_state(score::Union{ComputedEPLI, UncomputedEPLI})
+    score isa ComputedEPLI ? "computed" : "not_computed"
+end
 _epli_reason(::ComputedEPLI) = nothing
 _epli_reason(score::UncomputedEPLI) = String(score.reason)
 
