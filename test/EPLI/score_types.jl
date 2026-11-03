@@ -37,6 +37,14 @@ Iduna.EPLI.requires_reference_score(::TypedTestNormalizer) = true
     @test !E.comparable_positions_normalization(E.IdentityCounts(0, 4)).no_comparable_positions
     @test_throws ArgumentError E.NormalizationResult(1, 0; no_comparable_positions = true)
     @test_throws ArgumentError E.NormalizationResult(0; no_comparable_positions = true)
+    @test_throws ArgumentError E.NormalizationResult(0, 1; no_comparable_positions = true)
+    for value in (0.0, -0.0), denominator in (0.0, -0.0)
+
+        result = E.NormalizationResult(value, denominator; no_comparable_positions = true)
+        @test result.normalized_score === value
+        @test result.normalization_score === denominator
+        @test result.no_comparable_positions
+    end
     @test E._normalization_result(zero) === zero
     @test E._normalization_result((; normalized_score = 0, normalization_score = 0,
         no_comparable_positions = true)).no_comparable_positions
@@ -63,11 +71,17 @@ end
 @testset "Recognized HHsuite evidence" begin
     E = Iduna.EPLI
     block = "Probab=99\nQ query 1 A-C 2\n          | |\nT query 1 ABC 3\nConfidence\n"
-    @test E._parse_hhsuite_query_segment("Q A 1 A 1").cols == 7:7
+    @test E._parse_hhsuite_sequence_row("Q A 1 A 1").cols == 7:7
     positions, codes = E._get_codes(block)
     @test E._identity_counts_from_codes(positions, codes) == E.IdentityCounts(2, 2)
     @test E._get_codes(replace(block, "Confidence\n" => "")) == (positions, codes)
-    @test E._hhsuite_query_indices("A.~", 1, 2) == [1, 0, 2]
+    @test E._hhsuite_residue_indices("A.~", 1, 2) == [1, 0, 2]
+    @test E._hhsuite_residue_indices("--.", 1, 0) == [0, 0, 0]
+    @test_throws ArgumentError E._hhsuite_residue_indices("A", 0, 0)
+    @test_throws ArgumentError E._hhsuite_residue_indices("A", -1, -1)
+    @test_throws ArgumentError E._hhsuite_residue_indices("AA", 1, 1)
+    annotated = replace(block, "Q query" => "Q ss_pred   HHH\nQ query")
+    @test E._get_codes(annotated) == (positions, codes)
     # Use the first displayed query sequence for position counts, as before; the
     # comparison row is after the consensus row, whose insert columns may differ.
     consensus = "Probab=99\nQ query 1 Aac 3\nQ Conse 1 A.. 1\n          |  \nT query 1 ABC 3\nConfidence\n"
@@ -89,7 +103,12 @@ end
         replace(block, "          | |\n" => ""),
         replace(block, "ABC 3" => "AB 2"), replace(block, "          | |" => " |"),
         replace(block, "| |" => "???"), block * "Q query 3 AA 4\n",
-        replace(block, "Confidence\n" => "") * block)
+        replace(block, "Confidence\n" => "") * block,
+        replace(block, "Q query 1 A-C 2" => "Q query 0 A-C 1"),
+        replace(block, "T query 1 ABC 3" => "T query 0 ABC 2"),
+        replace(block, "Q query 1 A-C 2" => "Q query -1 A-C 0"),
+        replace(block, "Q query 1 A-C 2" => "Q ss_pred   HHH"),
+        replace(block, "T query 1 ABC 3" => "T ss_pred   HHH"))
         @test_throws ArgumentError E._get_codes(malformed)
     end
     @test_throws ArgumentError E._identity_counts_from_codes([1], Char[])
@@ -111,7 +130,6 @@ end
         @test relative.epli === epli
         @test relative.epli_reason === reason
         summary = Iduna.Utils._seed_summary(seed)
-        @test !hasproperty(summary, :epli_state)
         data = Iduna.Utils.JSON.parse(Iduna.Utils.JSON.json(summary))
         loaded = Iduna._load_result_seed_record(data, pwd())
         @test loaded.epli === epli
@@ -127,50 +145,63 @@ end
     unavailable = Iduna._load_result_seed_record(legacy, pwd())
     @test unavailable.epli === nothing
     @test unavailable.epli_reason === :not_recorded
-    @test Iduna._load_epli(Dict("epli" => 150)).value == 150
-    @test Iduna._load_epli(Dict("epli" => nothing, "epli_state" => "not_computed")) ===
-          nothing
-    for data in (Dict("epli" => nothing, "epli_state" => "computed"),
-        Dict("epli" => 2, "epli_state" => "not_computed"),
-        Dict("epli" => NaN), Dict("epli" => 2, "epli_state" => "unknown"),
+    @test Iduna._load_result_seed_record(merge(legacy, Dict("epli" => 150)), pwd()).epli.value ==
+          150
+    for data in (Dict("epli" => NaN), Dict("epli" => Inf),
         Dict("epli" => 2, "epli_reason" => "sampling_disabled"),
         Dict("epli" => nothing, "epli_reason" => "unknown"))
         @test_throws ArgumentError Iduna._load_result_seed_record(merge(legacy, data), pwd())
     end
 end
 
-@testset "Sampled selection requires computed evidence" begin
+@testset "Sampled selection requires scores" begin
     T = Iduna.ThorAxeMSA
     mktempdir() do tmp
         path = joinpath(tmp, "candidates.csv")
-        header = "pid,pid_order,eligible,selected,epli,stockholm_path,fasta_path,selection_mode,pid_sample_count,epli_state,epli_reason\n"
-        valid = "10,1,true,true,75,s10.sto,s10.fa,sampled_selection,2,computed,\n"
+        header = "pid,pid_order,eligible,selected,epli,stockholm_path,fasta_path,selection_mode,pid_sample_count,epli_reason\n"
+        valid = "10,1,true,true,75,s10.sto,s10.fa,sampled_selection,2,\n"
         for bad in (
-            "20,2,true,false,,s20.sto,s20.fa,sampled_selection,2,not_computed,sampling_disabled\n",
-            "20,2,true,false,,s20.sto,s20.fa,all_candidates,2,not_computed,sampling_disabled\n",
-            "20,2,true,false,1,s20.sto,s20.fa,unknown,2,computed,\n",
-            "20,2,true,false,1,s20.sto,s20.fa,sampled_selection,-1,computed,\n",
-            "20,2,true,false,1,s20.sto,s20.fa,sampled_selection,2,not_computed,\n",
-            "20,2,true,false,1,s20.sto,s20.fa,sampled_selection,2,computed,sampling_disabled\n",
-            "20,2,true,false,,s20.sto,s20.fa,all_candidates,0,not_computed,ineligible\n")
+            "20,2,true,false,,s20.sto,s20.fa,sampled_selection,2,sampling_disabled\n",
+            "20,2,true,false,,s20.sto,s20.fa,all_candidates,2,sampling_disabled\n",
+            "20,2,true,false,1,s20.sto,s20.fa,unknown,2,\n",
+            "20,2,true,false,1,s20.sto,s20.fa,sampled_selection,-1,\n",
+            "20,2,true,false,invalid,s20.sto,s20.fa,sampled_selection,2,\n",
+            "20,2,true,false,1,s20.sto,s20.fa,sampled_selection,2,sampling_disabled\n",
+            "20,2,true,false,,s20.sto,s20.fa,all_candidates,0,ineligible\n")
             write(path, header * valid * bad)
             @test_throws ArgumentError T.select_best_seed(path)
             @test_throws ArgumentError T._selected_candidate_seeds(path)
         end
-        write(path, header *
-                    "10,1,true,true,,s10.sto,s10.fa,all_candidates,0,not_computed,sampling_disabled\n")
-        @test only(T._selected_candidate_seeds(path)).epli_reason == :sampling_disabled
-        @test_throws ArgumentError T.select_best_seed(path)
+        # Absence reasons are optional when sampling metadata establishes absence.
+        for reason in ("sampling_disabled", "")
+            write(path, header *
+                        "10,1,true,true,,s10.sto,s10.fa,all_candidates,0,$reason\n")
+            absent = only(T._selected_candidate_seeds(path))
+            @test absent.epli === nothing
+            @test absent.epli_reason === :sampling_disabled
+            @test_throws ArgumentError T.select_best_seed(path)
+        end
         write(path, header * replace(valid, "true,true" => "false,true"))
         @test_throws ArgumentError T._selected_candidate_seeds(path)
+        write(path, header * replace(valid, "true,true" => "true,false"))
+        @test isempty(T._selected_candidate_seeds(path))
+
+        # Filtering and ordering must keep each parsed score attached to its PID.
         write(path,
-            "pid,pid_order,eligible,selected,epli,stockholm_path,fasta_path,selection_mode,pid_sample_count,epli_reason\n" *
-            "10,1,true,true,,s10.sto,s10.fa,all_candidates,0,sampling_disabled\n")
-        absent = only(T._selected_candidate_seeds(path))
-        @test absent.epli === nothing
-        @test absent.epli_reason === :sampling_disabled
-        @test_throws ArgumentError T.select_best_seed(path)
-        write(path, replace(read(path, String), "all_candidates,0" => "sampled_selection,2"))
+            header *
+            "30,3,true,false,-2,s30.sto,s30.fa,sampled_selection,2,\n" * valid *
+            "20,2,false,false,NaN,s20.sto,s20.fa,sampled_selection,2,\n" *
+            "40,4,true,true,150,s40.sto,s40.fa,sampled_selection,2,\n")
+        best = T.select_best_seed(path)
+        @test (best.pid, best.epli.value) == (40, 150)
+        @test [(s.pid, s.epli.value) for s in T._selected_candidate_seeds(path)] ==
+              [(10, 75), (40, 150)]
+        @test [(s.pid, s.epli.value) for s in T._eligible_candidate_seeds(path)] ==
+              [(10, 75), (30, -2), (40, 150)]
+        # Without eligibility metadata, every candidate must be valid before cache reuse.
+        write(path,
+            "pid,selected,epli,stockholm_path,fasta_path\n" *
+            "10,true,75,s10.sto,s10.fa\n20,false,NaN,s20.sto,s20.fa\n")
         @test_throws ArgumentError T._selected_candidate_seeds(path)
         # Zero remains eligible; ties still use MSA size and then PID order.
         write(path,
@@ -179,6 +210,7 @@ end
         @test T.select_best_seed(path).pid == 20
         @test T._sampling_disabled((; pid_sample_count = 0))
         @test !T._sampling_disabled((; selection_mode = "sampled_selection"))
+        @test T._sampling_disabled((; selection_mode = "all_candidates"))
     end
 end
 

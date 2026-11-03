@@ -1,7 +1,9 @@
 # HHsuite Alignment Parsing
 # -------------------------
 
-function _hhsuite_query_indices(seq::AbstractString, start::Integer, stop::Integer)
+function _hhsuite_residue_indices(seq::AbstractString, start::Integer, stop::Integer)
+    start >= 1 ||
+        throw(ArgumentError("HHsuite residue positions must start at 1 or later."))
     indices = Int[]
     current = Int(start)
     for residue in seq
@@ -12,12 +14,13 @@ function _hhsuite_query_indices(seq::AbstractString, start::Integer, stop::Integ
             current += 1
         end
     end
-    current - 1 == stop || error("Could not parse HHsuite alignment positions.")
+    current - 1 == stop ||
+        throw(ArgumentError("HHsuite residue positions disagree with the aligned sequence."))
     return indices
 end
 
-function _parse_hhsuite_query_segment(line::AbstractString)
-    m = match(r"\S+\s+(\d+)\s+(\S+)\s+(\d+)", line)
+function _parse_hhsuite_sequence_row(line::AbstractString)
+    m = match(r"^[QT]\s+\S+\s+(-?\d+)\s+(\S+)\s+(-?\d+)(?:\s|$)", line)
     m === nothing && return nothing
 
     start = parse(Int, m.captures[1])
@@ -25,49 +28,43 @@ function _parse_hhsuite_query_segment(line::AbstractString)
     stop = parse(Int, m.captures[3])
     return (;
         cols = m.offsets[2]:(m.offsets[2] + ncodeunits(seq) - 1),
-        indices = _hhsuite_query_indices(seq, start, stop))
+        indices = _hhsuite_residue_indices(seq, start, stop))
 end
 
-function _append_hhsuite_code_line!(positions, codes, line::AbstractString, cols, indices)
-    occursin(r"^\s", line) || return nothing
-    isempty(indices) && return nothing
-    (cols === nothing || isempty(cols)) && return nothing
-    append!(positions, indices)
-    append!(codes, collect(line[cols]))
-    return nothing
-end
-
-function _hhsuite_alignment_row(lines, prefix)
-    idx = findfirst(
-        line -> startswith(line, prefix) &&
-                occursin(r"^\S+\s+\S+\s+\d+\s+\S+\s+\d+", line), lines)
-    idx === nothing &&
-        throw(ArgumentError("HHsuite alignment has no recognized $(prefix)row."))
-    parsed = _parse_hhsuite_query_segment(lines[idx])
-    return idx, parsed
-end
-
-function _hhsuite_block_codes!(positions, codes, lines)
-    _query_idx, query = _hhsuite_alignment_row(lines, "Q ")
-    query_end = findlast(line -> startswith(line, "Q "), lines)
-    _target_idx, target = _hhsuite_alignment_row(lines, "T ")
-    query_end + 1 < findfirst(line -> startswith(line, "T "), lines) ||
-        throw(ArgumentError("HHsuite alignment has no comparison row."))
-    length(query.indices) == length(target.indices) ||
-        throw(ArgumentError("HHsuite query and target alignment widths differ."))
-    code_line = lines[query_end + 1]
-    startswith(code_line, " ") && lastindex(code_line) >= last(query.cols) ||
-        throw(ArgumentError("HHsuite comparison row is malformed or truncated."))
-    symbols = code_line[query.cols]
-    all(c -> c in " |+.-=", symbols) ||
-        throw(ArgumentError("HHsuite comparison row contains unrecognized symbols."))
-    _append_hhsuite_code_line!(positions, codes, code_line, query.cols, query.indices)
-    return nothing
+function _first_hhsuite_sequence(lines, row_indices, label)
+    for index in row_indices
+        parsed = _parse_hhsuite_sequence_row(lines[index])
+        parsed === nothing || return parsed
+    end
+    throw(ArgumentError("HHsuite alignment has no recognized $(label) sequence row."))
 end
 
 function _append_hhsuite_block!(positions, codes, lines)
-    any(line -> startswith(line, "Q ") || startswith(line, "T "), lines) || return false
-    _hhsuite_block_codes!(positions, codes, lines)
+    query_rows = findall(line -> startswith(line, "Q "), lines)
+    target_rows = findall(line -> startswith(line, "T "), lines)
+    if isempty(query_rows) && isempty(target_rows)
+        return false
+    end
+    query = _first_hhsuite_sequence(lines, query_rows, "query")
+    target = _first_hhsuite_sequence(lines, target_rows, "target")
+
+    # Count positions from the first displayed query sequence, but read comparison
+    # symbols after the last query row (which can be the consensus).
+    comparison_index = last(query_rows) + 1
+    comparison_index < first(target_rows) ||
+        throw(ArgumentError("HHsuite alignment has no comparison row."))
+    length(query.indices) == length(target.indices) ||
+        throw(ArgumentError("HHsuite query and target alignment widths differ."))
+    comparison_line = lines[comparison_index]
+    if !startswith(comparison_line, " ") || lastindex(comparison_line) < last(query.cols)
+        throw(ArgumentError("HHsuite comparison row is malformed or truncated."))
+    end
+    symbols = comparison_line[query.cols]
+    all(c -> c in " |+.-=", symbols) ||
+        throw(ArgumentError("HHsuite comparison row contains unrecognized symbols."))
+
+    append!(positions, query.indices)
+    append!(codes, symbols)
     return true
 end
 

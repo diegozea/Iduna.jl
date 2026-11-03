@@ -258,7 +258,8 @@ CSV stores absent scores as `missing`, and JSON uses `null`. No separate state f
 is needed. Eligible candidates in sampled selection must have scores before ranking
 or cache reuse. Disabled sampling permits absent scores. Older JSON results with an
 unavailable score retain `:not_recorded`, which does not assert that the score was
-never computed. Absence is never converted into zero.
+never computed. Absence reasons are optional; supplied reasons must agree with the
+score and sampling metadata. Absence is never converted into zero.
 
 ### Zero comparable positions
 
@@ -272,7 +273,8 @@ as measured zero identity. Disabling sampling leaves the score absent instead.
 
 HHsuite output must contain complete, recognizable query/comparison/target blocks.
 Empty, unrecognized, or truncated output raises an error rather than becoming a
-zero-comparison result. A successfully parsed block without any reference positions
+zero-comparison result. Residue coordinates start at one; zero is reserved for gaps
+in the parsed position vector. A successfully parsed block without any reference positions
 can still produce valid `(0,0)` counts. Optional HHsuite diagnostics remain separate.
 
 Finite constructors do not guarantee that arithmetic is numerically accurate.

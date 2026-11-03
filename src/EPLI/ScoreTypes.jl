@@ -88,8 +88,9 @@ struct NormalizationResult
         scale = ismissing(denominator) ? missing :
                 _finite_score(denominator, "Normalization score")
         if no_comparable_positions
-            isequal(scale, 0.0) && iszero(normalized) ||
+            if ismissing(scale) || !iszero(scale) || !iszero(normalized)
                 throw(ArgumentError("No comparable positions requires a zero component and denominator."))
+            end
         end
         return new(normalized, scale, no_comparable_positions)
     end

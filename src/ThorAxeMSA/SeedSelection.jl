@@ -7,43 +7,46 @@ function _validate_candidate_sample_count(count)
     return nothing
 end
 
-function _sampling_disabled(row; allow_uncomputed::Bool = false)
+function _sampling_disabled(row; default::Bool = false)
     mode = get(row, :selection_mode, missing)
     count = get(row, :pid_sample_count, missing)
+    if !ismissing(mode) && !(mode in ("all_candidates", "sampled_selection"))
+        throw(ArgumentError("Unknown candidate selection mode: $(mode)."))
+    end
+    if ismissing(count)
+        return ismissing(mode) ? default : mode == "all_candidates"
+    end
+
+    _validate_candidate_sample_count(count)
+    disabled = iszero(count)
     if !ismissing(mode)
-        mode in ("all_candidates", "sampled_selection") ||
-            throw(ArgumentError("Unknown candidate selection mode: $(mode)."))
-    end
-    if !ismissing(count)
-        _validate_candidate_sample_count(count)
-        ismissing(mode) || (mode == "all_candidates") == iszero(count) ||
+        mode_disables_sampling = mode == "all_candidates"
+        if mode_disables_sampling != disabled
             throw(ArgumentError("Candidate sampling mode and sample count disagree."))
-        return iszero(count)
+        end
     end
-    return ismissing(mode) ? allow_uncomputed : mode == "all_candidates"
+    return disabled
 end
 
-function _candidate_score(row; allow_uncomputed::Bool = false)
-    disabled = _sampling_disabled(row; allow_uncomputed)
+function _candidate_score(row; allow_absent::Bool = false)
+    disabled = _sampling_disabled(row; default = allow_absent)
     value = get(row, :epli, missing)
-    state = get(row, :epli_state, ismissing(value) ? "not_computed" : "computed")
+    reason = get(row, :epli_reason, missing)
     if ismissing(value)
-        isequal(state, "not_computed") && disabled ||
-            throw(ArgumentError("PID $(row.pid) requires a computed EPLI score."))
-        reason = get(row, :epli_reason, "sampling_disabled")
-        isequal(reason, "sampling_disabled") ||
+        disabled || throw(ArgumentError("PID $(row.pid) requires an EPLI score."))
+        if !ismissing(reason) && reason != "sampling_disabled"
             throw(ArgumentError("Eligible unscored candidates require sampling_disabled."))
+        end
         return nothing
     end
-    isequal(state, "computed") && value isa Real ||
-        throw(ArgumentError("PID $(row.pid) has an invalid EPLI value or score state."))
-    ismissing(get(row, :epli_reason, missing)) ||
-        throw(ArgumentError("Computed EPLI cannot have an uncomputed reason."))
+    value isa Real || throw(ArgumentError("PID $(row.pid) has an invalid EPLI value."))
+    ismissing(reason) ||
+        throw(ArgumentError("An available EPLI cannot have an absence reason."))
     return EPLIScore(value)
 end
 
-function _validate_candidate_scores(df::DataFrame; allow_uncomputed::Bool = false)
-    return [_candidate_score(row; allow_uncomputed) for row in eachrow(df)]
+function _parse_candidate_scores(df::DataFrame; allow_absent::Bool = false)
+    return [_candidate_score(row; allow_absent) for row in eachrow(df)]
 end
 
 """
@@ -66,7 +69,7 @@ function select_best_seed(summary_path::AbstractString)
         df = df[[!ismissing(value) && _truthy(value) for value in df.eligible], :]
     end
     :epli in propertynames(df) || error("Candidate summary has no epli column.")
-    scores = _validate_candidate_scores(df)
+    scores = _parse_candidate_scores(df)
     foreach(require_epli, scores)
     isempty(df) && error("No eligible PID candidates are available for seed selection.")
     df.__row_order = 1:nrow(df)
@@ -77,9 +80,9 @@ function select_best_seed(summary_path::AbstractString)
         df.__n_sequences_msa0 = zeros(Int, nrow(df))
         :__n_sequences_msa0
     end
-    sort!(df, [:epli, nseq_col, order_col]; rev = [true, true, false])
-    row = first(eachrow(df))
-    return _row_seed(row, summary_path)
+    order = sortperm(df, [:epli, nseq_col, order_col]; rev = [true, true, false])
+    best = first(order)
+    return _row_seed(df[best, :], summary_path, scores[best])
 end
 
 function _candidate_summary_workdir(summary_path::AbstractString)
@@ -120,18 +123,22 @@ end
 function _selected_candidate_seeds(summary_path::AbstractString)
     df = _candidate_summary_dataframe(summary_path)
     :selected in propertynames(df) || return [select_best_seed(summary_path)]
-    if :eligible in propertynames(df)
-        _validate_candidate_scores(df[[!ismissing(value) && _truthy(value)
-                                       for value in df.eligible], :])
+    eligible = if :eligible in propertynames(df)
+        [!ismissing(value) && _truthy(value) for value in df.eligible]
+    else
+        trues(nrow(df))
     end
-    selected = df[[!ismissing(value) && _truthy(value) for value in df.selected], :]
-    isempty(selected) && return SeedSelection[]
-    if :eligible in propertynames(selected)
-        all(value -> !ismissing(value) && _truthy(value), selected.eligible) ||
-            throw(ArgumentError("Selected candidates must be eligible."))
+    selected = [!ismissing(value) && _truthy(value) for value in df.selected]
+    if any(selected .& .!eligible)
+        throw(ArgumentError("Selected candidates must be eligible."))
     end
-    _validate_candidate_scores(selected)
-    return [_row_seed(row, summary_path) for row in eachrow(selected)]
+
+    # Validate every eligible row before reusing any cached selection.
+    candidates = df[eligible, :]
+    scores = _parse_candidate_scores(candidates)
+    selected_indices = findall(selected[eligible])
+    return [_row_seed(candidates[index, :], summary_path, scores[index])
+            for index in selected_indices]
 end
 
 function _eligible_candidate_seeds(summary_path::AbstractString)
@@ -139,10 +146,10 @@ function _eligible_candidate_seeds(summary_path::AbstractString)
     :eligible in propertynames(df) || error("Candidate summary has no eligible column.")
     eligible = df[[!ismissing(value) && _truthy(value) for value in df.eligible], :]
     isempty(eligible) && error("No eligible PID candidates are available.")
-    _validate_candidate_scores(eligible; allow_uncomputed = true)
-    sort!(eligible, [:pid_order])
-    return [_row_seed(row, summary_path; allow_uncomputed = true)
-            for row in eachrow(eligible)]
+    # This path selects all eligible candidates when sampling is disabled.
+    scores = _parse_candidate_scores(eligible; allow_absent = true)
+    order = sortperm(eligible, :pid_order)
+    return [_row_seed(eligible[index, :], summary_path, scores[index]) for index in order]
 end
 
 function _normalize_pid_sample_seed(seed::Integer)::UInt64
