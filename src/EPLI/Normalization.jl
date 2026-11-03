@@ -65,5 +65,6 @@ end
 Whether a normalizer needs a reference self score. Custom callable normalizers
 can extend this method; callers may also set `compute_reference_self_score` explicitly.
 """
-requires_reference_score(::Any) = false
-requires_reference_score(::typeof(self_reference_normalization)) = true
+function requires_reference_score(normalization_fn)
+    normalization_fn === self_reference_normalization
+end
