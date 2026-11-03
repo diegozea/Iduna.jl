@@ -15,7 +15,7 @@ export IDMapping,
        ExpansionResult,
        IdunaResult,
        ResolvedTarget,
-       SeedSelection,
+       ComputedEPLI, UncomputedEPLI, require_epli, SeedSelection,
        ThorAxeMSAResult,
        ValidationResult,
        iduna,
@@ -30,7 +30,8 @@ include("ThorAxeMSA/ThorAxeMSA.jl")
 include("MSAExpansion/MSAExpansion.jl")
 include("ResultsValidation/ResultsValidation.jl")
 
-using .Utils: ExpansionResult, IdunaResult, ResolvedTarget, SeedSelection, ThorAxeMSAResult,
+using .Utils: ComputedEPLI, UncomputedEPLI, require_epli, ExpansionResult, IdunaResult,
+              ResolvedTarget, SeedSelection, ThorAxeMSAResult,
               ValidationResult
 
 include("API.jl")

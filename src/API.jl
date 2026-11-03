@@ -218,7 +218,7 @@ function iduna(; id::Union{Nothing, AbstractString} = nothing,
             stage_hashes = [stage.identity_hash
                             for stage in current_stages
                             if stage.identity_hash !== nothing &&
-                               stage.stage_key != "result"])
+                stage.stage_key != "result"])
         Utils._write_stage_state(Utils._pipeline_stage_dir(root, "result");
             stage = "result",
             stage_key = "result",
@@ -784,11 +784,26 @@ function _load_result_target(summary, workdir::AbstractString)
     end
 end
 
+function _load_epli_state(data)
+    value = _missing_or_float_result(get(data, "epli", nothing))
+    state = get(data, "epli_state", ismissing(value) ? "not_computed" : "computed")
+    if state == "computed"
+        ismissing(value) &&
+            throw(ArgumentError("Computed EPLI is missing from the result."))
+        get(data, "epli_reason", nothing) === nothing ||
+            throw(ArgumentError("Computed EPLI cannot have an uncomputed reason."))
+        return Utils.ComputedEPLI(value)
+    end
+    state == "not_computed" && ismissing(value) ||
+        throw(ArgumentError("Result EPLI state and value disagree."))
+    return Utils.UncomputedEPLI(Symbol(get(data, "epli_reason", "not_recorded")))
+end
+
 function _load_result_seed_record(data, workdir::AbstractString)
     data isa AbstractDict || error("ThorAxe seed record is not an object.")
     return Utils.SeedSelection(;
         pid = Float64(data["pid"]),
-        epli = _missing_or_float_result(get(data, "epli", nothing)),
+        epli = _load_epli_state(data),
         stockholm_path = String(data["stockholm_path"]),
         fasta_path = get(data, "fasta_path", nothing) === nothing ? nothing :
                      String(data["fasta_path"]),
@@ -914,8 +929,7 @@ function _load_result_expansions(summary, target::Utils.ResolvedTarget,
     expansions = Union{Missing, Utils.ExpansionResult}[_load_result_expansion_at_index(
                                                            expansion_data, target,
                                                            seed, workdir, index)
-                                                       for (index, seed) in
-                                                           pairs(thoraxe.seeds)]
+                                                       for (index, seed) in pairs(thoraxe.seeds)]
     _warn_extra_expansion_summaries(expansion_data, thoraxe.seeds, workdir)
     return expansions
 end

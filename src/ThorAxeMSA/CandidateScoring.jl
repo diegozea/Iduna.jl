@@ -38,7 +38,15 @@ function _candidate_summary_row(target::ResolvedTarget,
         sample_seed::UInt64,
         metadata,
         epli = missing,
-        n_samples::Integer = 0)
+        n_samples::Integer = 0,
+        no_comparable_samples::Integer = 0)
+    score = if ismissing(epli)
+        validation.eligible && sample_count != 0 &&
+            throw(ArgumentError("An eligible sampled candidate requires computed EPLI."))
+        UncomputedEPLI(validation.eligible ? :sampling_disabled : :ineligible)
+    else
+        ComputedEPLI(epli)
+    end
     return (;
         gene_id = target.ensembl_gene_id,
         transcript_id = target.transcript_id,
@@ -49,6 +57,9 @@ function _candidate_summary_row(target::ResolvedTarget,
         msa0_status = String(validation.status),
         msa0_issue = validation.issue,
         epli,
+        epli_state = _epli_state(score),
+        epli_reason = _candidate_summary_optional(_epli_reason(score)),
+        no_comparable_samples = Int(no_comparable_samples),
         n_samples = Int(n_samples),
         n_sequences_msa0 = nsequences(candidate.msa),
         pid_sample_count = Int(sample_count),
@@ -84,8 +95,8 @@ function _score_pid_candidate(target::ResolvedTarget,
         metadata,
         overwrite::Bool = false,
         thoraxe_fn::Function = ThorAxe.thoraxe,
-        score_fn::Function = EPLI.hhsuite_identity_score,
-        normalization_fn::Function = EPLI.comparable_positions_normalization)
+        score_fn = EPLI.hhsuite_identity_score,
+        normalization_fn = EPLI.comparable_positions_normalization)
     @debug "Scoring ThorAxe PID candidate." gene_id=target.ensembl_gene_id transcript_id=target.transcript_id pid pid_order sample_count
     candidate = merge(
         _generate_pid_candidate(target, input_dir, workdir, pid, specieslist;
@@ -125,6 +136,7 @@ function _score_pid_candidate(target::ResolvedTarget,
         target, candidate, pid, pid_order, validation;
         epli = scored.epli,
         n_samples = length(scored.rows),
+        no_comparable_samples = scored.no_comparable_samples,
         sample_count,
         sample_fraction,
         sample_seed,

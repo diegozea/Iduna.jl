@@ -58,8 +58,10 @@ A ThorAxe percent identity (PID) seed selected for later steps.
 # Fields
 
 - `pid::Float64`: Percent identity threshold used to build this seed.
-- `epli::Union{Missing, Float64}`: Estimated Profile-Level Identities score used
-  during seed selection. `missing` means the score was unavailable.
+- `score`: a validated `ComputedEPLI` or an explicit `UncomputedEPLI` state.
+- `epli`: numeric convenience property; returns the computed value or `missing`.
+  The constructor accepts a score state or a finite real value via `epli`. A legacy
+  `missing` becomes `UncomputedEPLI(:not_recorded)` and cannot be ranked.
 - `stockholm_path::String`: Path to the selected seed MSA in Stockholm format.
 - `fasta_path::Union{Nothing, String} = nothing`: Path to the selected seed MSA
   in FASTA format. `nothing` means no FASTA copy is available.
@@ -71,16 +73,31 @@ A ThorAxe percent identity (PID) seed selected for later steps.
 - `workdir::Union{Nothing, String} = nothing`: Work directory used for paths
   stored in this result. `nothing` means paths are not tied to a work directory.
 """
-Base.@kwdef struct SeedSelection
+struct SeedSelection
     pid::Float64
-    epli::Union{Missing, Float64}
+    score::Union{ComputedEPLI, UncomputedEPLI}
     stockholm_path::String
-    fasta_path::Union{Nothing, String} = nothing
-    s_exon_blocks_tsv::Union{Nothing, String} = nothing
+    fasta_path::Union{Nothing, String}
+    s_exon_blocks_tsv::Union{Nothing, String}
     summary_path::String
-    used_fallback_dir::Bool = false
-    workdir::Union{Nothing, String} = nothing
+    used_fallback_dir::Bool
+    workdir::Union{Nothing, String}
+    function SeedSelection(; pid::Real, epli, stockholm_path::AbstractString,
+            fasta_path::Union{Nothing, AbstractString} = nothing,
+            s_exon_blocks_tsv::Union{Nothing, AbstractString} = nothing,
+            summary_path::AbstractString, used_fallback_dir::Bool = false,
+            workdir::Union{Nothing, AbstractString} = nothing)
+        return new(_finite_score(pid, "PID"), _epli_score(epli), stockholm_path,
+            fasta_path, s_exon_blocks_tsv, summary_path, used_fallback_dir, workdir)
+    end
 end
+
+function Base.getproperty(seed::SeedSelection, name::Symbol)
+    name === :epli && return _epli_value(getfield(seed, :score))
+    return getfield(seed, name)
+end
+
+Base.propertynames(::SeedSelection) = (fieldnames(SeedSelection)..., :epli)
 
 """
     ThorAxeMSAResult

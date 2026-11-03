@@ -71,6 +71,8 @@ function _seed_summary(seed::SeedSelection)
     return (;
         pid = seed.pid,
         epli = seed.epli === missing ? nothing : seed.epli,
+        epli_state = _epli_state(seed.score),
+        epli_reason = _epli_reason(seed.score),
         stockholm_path = seed.stockholm_path,
         fasta_path = seed.fasta_path,
         s_exon_blocks_tsv = seed.s_exon_blocks_tsv,

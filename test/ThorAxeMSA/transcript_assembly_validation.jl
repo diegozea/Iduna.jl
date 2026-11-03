@@ -32,11 +32,12 @@
             "pid,pid_order,eligible,selected,stockholm_path,fasta_path\n" *
             "10,1,true,true,pid10.sto,pid10.fa\n")
         @test ismissing(only(Iduna.ThorAxeMSA._eligible_candidate_seeds(summary)).epli)
-        @test ismissing(only(Iduna.ThorAxeMSA._selected_candidate_seeds(summary)).epli)
+        @test_throws ArgumentError Iduna.ThorAxeMSA._selected_candidate_seeds(summary)
 
-        write(summary, header *
-                       "10,1,true,true,,pid10.sto,pid10.fa\n" *
-                       "20,2,true,true,,pid20.sto,pid20.fa\n")
+        write(summary,
+            chomp(header) * ",selection_mode,pid_sample_count\n" *
+            "10,1,true,true,,pid10.sto,pid10.fa,all_candidates,0\n" *
+            "20,2,true,true,,pid20.sto,pid20.fa,all_candidates,0\n")
         @test all(ismissing(seed.epli)
         for seed in Iduna.ThorAxeMSA._eligible_candidate_seeds(summary))
         @test all(ismissing(seed.epli)

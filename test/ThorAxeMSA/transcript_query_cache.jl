@@ -213,12 +213,14 @@ mktempdir() do tmp
     no_species_rows = [
         Iduna.ThorAxeMSA._candidate_summary_row(
             metadata_target, candidate, 10.0, 1, validation;
+            epli = 70.0, n_samples = 2,
             sample_count = no_species_metadata.pid_sample_count,
             sample_fraction = no_species_metadata.pid_sample_fraction,
             sample_seed = no_species_metadata.pid_sample_seed,
             metadata = no_species_metadata),
         Iduna.ThorAxeMSA._candidate_summary_row(
             metadata_target, candidate, 80.0, 2, validation;
+            epli = 70.0, n_samples = 2,
             sample_count = no_species_metadata.pid_sample_count,
             sample_fraction = no_species_metadata.pid_sample_fraction,
             sample_seed = no_species_metadata.pid_sample_seed,
@@ -281,6 +283,7 @@ mktempdir() do tmp
         Iduna.ThorAxeMSA._candidate_summary_row(
             metadata_target, candidate, 30.0, 2,
             (; eligible = true, status = "warning", issue = "one substitution");
+            epli = 70.0, n_samples = 2,
             sample_count = metadata.pid_sample_count,
             sample_fraction = metadata.pid_sample_fraction,
             sample_seed = metadata.pid_sample_seed,

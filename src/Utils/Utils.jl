@@ -20,7 +20,7 @@ using MIToS.MSA: AbstractMultipleSequenceAlignment, getannotcolumn, getannotfile
 using Printf: @sprintf
 using StatsBase: sample
 
-export DEFAULT_PID_THRESHOLDS,
+export ComputedEPLI, UncomputedEPLI, require_epli, DEFAULT_PID_THRESHOLDS,
        ExpansionResult,
        IdunaResult,
        ResolvedTarget,
@@ -57,6 +57,7 @@ export DEFAULT_PID_THRESHOLDS,
        set_s_exon_annotations!,
        write_s_exon_blocks_tsv
 
+include("ScoreValues.jl")
 include("Types.jl")
 include("Constants.jl")
 include("TerminalSampling.jl")
