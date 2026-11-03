@@ -14,7 +14,7 @@ Iduna.EPLI.requires_reference_score(::TypedTestNormalizer) = true
         @test_throws ArgumentError E.RawScore(invalid)
         @test_throws ArgumentError E.NormalizationResult(invalid)
         @test_throws ArgumentError E.NormalizationResult(1, invalid)
-        @test_throws ArgumentError Iduna.ComputedEPLI(invalid)
+        @test_throws ArgumentError Iduna.EPLIScore(invalid)
         @test_throws ArgumentError Iduna.SeedSelection(pid = 10, epli = invalid,
             stockholm_path = "seed.sto", summary_path = "summary.csv")
     end
@@ -96,37 +96,46 @@ end
     @test_throws ArgumentError E._identity_counts_from_codes([-1], ['|'])
 end
 
-@testset "Explicit EPLI state and serialization" begin
-    computed = Iduna.ComputedEPLI(-2)
-    @test Iduna.require_epli(computed) === -2.0
-    @test_throws ArgumentError Iduna.UncomputedEPLI(:unknown)
-    for state in (computed, Iduna.UncomputedEPLI(:sampling_disabled),
-        Iduna.UncomputedEPLI(:not_recorded), Iduna.UncomputedEPLI(:ineligible))
-        seed = Iduna.SeedSelection(pid = 10, epli = state,
-            stockholm_path = "seed.sto", summary_path = "summary.csv")
-        @test seed.score === state
-        @test :epli in propertynames(seed)
-        @test Iduna.Utils._relative_seed_paths(seed, pwd()).score === state
+@testset "Optional EPLI and absence metadata" begin
+    score = Iduna.EPLIScore(-2)
+    @test Iduna.require_epli(score) === -2.0
+    @test_throws ArgumentError Iduna.require_epli(nothing)
+    seed_kwargs = (; pid = 10, stockholm_path = "seed.sto", summary_path = "summary.csv")
+    for (epli, reason) in ((score, nothing), (nothing, nothing),
+        (nothing, :sampling_disabled), (nothing, :not_recorded), (nothing, :ineligible))
+        seed = Iduna.SeedSelection(; seed_kwargs..., epli, epli_reason = reason)
+        @test seed.epli === epli
+        @test seed.epli_reason === reason
+        @test !hasproperty(seed, :score)
+        relative = Iduna.Utils._relative_seed_paths(seed, pwd())
+        @test relative.epli === epli
+        @test relative.epli_reason === reason
         summary = Iduna.Utils._seed_summary(seed)
+        @test !hasproperty(summary, :epli_state)
         data = Iduna.Utils.JSON.parse(Iduna.Utils.JSON.json(summary))
         loaded = Iduna._load_result_seed_record(data, pwd())
-        @test loaded.score === state
-        if state isa Iduna.UncomputedEPLI
-            @test ismissing(seed.epli)
-            @test_throws ArgumentError Iduna.require_epli(state)
-        else
-            @test seed.epli == -2
-        end
+        @test loaded.epli === epli
+        @test loaded.epli_reason === reason
     end
-    @test Iduna._load_epli_state(Dict("epli" => nothing)).reason == :not_recorded
-    @test Iduna._load_epli_state(Dict("epli" => 150)).value == 150
-    @test Iduna.SeedSelection(pid = 10, epli = missing,
-        stockholm_path = "s", summary_path = "c").score.reason == :not_recorded
+    @test Iduna.SeedSelection(; seed_kwargs..., epli = missing).epli === nothing
+    @test Iduna.SeedSelection(; seed_kwargs..., epli = 150).epli.value === 150.0
+    @test_throws ArgumentError Iduna.SeedSelection(; seed_kwargs...,
+        epli = nothing, epli_reason = :unknown)
+    @test_throws ArgumentError Iduna.SeedSelection(; seed_kwargs...,
+        epli = score, epli_reason = :sampling_disabled)
+    legacy = Dict("pid" => 10, "stockholm_path" => "seed.sto", "summary_path" => "s.csv")
+    unavailable = Iduna._load_result_seed_record(legacy, pwd())
+    @test unavailable.epli === nothing
+    @test unavailable.epli_reason === :not_recorded
+    @test Iduna._load_epli(Dict("epli" => 150)).value == 150
+    @test Iduna._load_epli(Dict("epli" => nothing, "epli_state" => "not_computed")) ===
+          nothing
     for data in (Dict("epli" => nothing, "epli_state" => "computed"),
         Dict("epli" => 2, "epli_state" => "not_computed"),
         Dict("epli" => NaN), Dict("epli" => 2, "epli_state" => "unknown"),
-        Dict("epli" => 2, "epli_reason" => "sampling_disabled"))
-        @test_throws ArgumentError Iduna._load_epli_state(data)
+        Dict("epli" => 2, "epli_reason" => "sampling_disabled"),
+        Dict("epli" => nothing, "epli_reason" => "unknown"))
+        @test_throws ArgumentError Iduna._load_result_seed_record(merge(legacy, data), pwd())
     end
 end
 
@@ -150,9 +159,18 @@ end
         end
         write(path, header *
                     "10,1,true,true,,s10.sto,s10.fa,all_candidates,0,not_computed,sampling_disabled\n")
-        @test only(T._selected_candidate_seeds(path)).score.reason == :sampling_disabled
+        @test only(T._selected_candidate_seeds(path)).epli_reason == :sampling_disabled
         @test_throws ArgumentError T.select_best_seed(path)
         write(path, header * replace(valid, "true,true" => "false,true"))
+        @test_throws ArgumentError T._selected_candidate_seeds(path)
+        write(path,
+            "pid,pid_order,eligible,selected,epli,stockholm_path,fasta_path,selection_mode,pid_sample_count,epli_reason\n" *
+            "10,1,true,true,,s10.sto,s10.fa,all_candidates,0,sampling_disabled\n")
+        absent = only(T._selected_candidate_seeds(path))
+        @test absent.epli === nothing
+        @test absent.epli_reason === :sampling_disabled
+        @test_throws ArgumentError T.select_best_seed(path)
+        write(path, replace(read(path, String), "all_candidates,0" => "sampled_selection,2"))
         @test_throws ArgumentError T._selected_candidate_seeds(path)
         # Zero remains eligible; ties still use MSA size and then PID order.
         write(path,
@@ -172,14 +190,14 @@ end
         result = E.epli_score(input, joinpath(tmp, "typed"), copy_aligner;
             score_fn = TypedTestScore(), normalization_fn = TypedTestNormalizer(),
             sample_count = 2, progress_enabled = false)
-        @test result.score isa Iduna.ComputedEPLI
-        @test result.epli == -20
+        @test result.epli isa Iduna.EPLIScore
+        @test result.epli.value == -20
         @test E.raw_score(result.reference_score) == 10
         @test result.no_comparable_samples == 0
         result = E.epli_score(input, joinpath(tmp, "zero"), copy_aligner;
             score_fn = (args...; kwargs...) -> E.IdentityScore(E.IdentityCounts(0, 0)),
             sample_count = 2, progress_enabled = false)
-        @test result.epli === 0.0
+        @test result.epli.value === 0.0
         @test result.no_comparable_samples == 2
         @test all(row -> row.no_comparable_positions, E.CSV.File(result.scores_path))
         @test only(E.CSV.File(result.summary_path)).no_comparable_samples == 2

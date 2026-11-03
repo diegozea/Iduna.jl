@@ -136,15 +136,13 @@ function _score_alignment_samples(reference_msa_fasta::AbstractString,
         progress_enabled)
     score_rows = [row for row in rows if row !== nothing]
     isempty(score_rows) && error("No sample scores were computed.")
-    score = ComputedEPLI(median([row.epli_component for row in score_rows]))
-    epli = score.value
+    epli = EPLIScore(median([row.epli_component for row in score_rows]))
     if scores_path !== nothing
         mkpath(dirname(scores_path))
         CSV.write(scores_path, DataFrame(score_rows))
     end
     return (;
         rows = score_rows,
-        score,
         no_comparable_samples = count(row -> row.no_comparable_positions, score_rows),
         epli,
         reference_score,
@@ -261,7 +259,7 @@ function epli_score(
         progress_output,
         progress_enabled)
     summary = (;
-        epli = scored.epli,
+        epli = scored.epli.value,
         n_samples = length(scored.rows),
         no_comparable_samples = scored.no_comparable_samples,
         sample_count = Int(sample_count),
@@ -280,6 +278,6 @@ function epli_score(
             workdir = String(workdir),
             summary_path,
             rows = scored.rows,
-            score = scored.score,
+            epli = scored.epli,
             reference_score = scored.reference_score))
 end

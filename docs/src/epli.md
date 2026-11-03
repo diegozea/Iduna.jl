@@ -247,14 +247,18 @@ an optional `normalization_score`; the latter two are converted at the boundary.
 Callable objects are supported. Extend `requires_reference_score` for a normalizer
 that needs a reference self score, or set `compute_reference_self_score` explicitly.
 
-The final median is represented by `ComputedEPLI`. Seed results expose this state
-as `seed.score`; `seed.epli` remains a numeric convenience property. An uncomputed
-score has `UncomputedEPLI` with a reason, and `require_epli` throws for that state.
-CSV and JSON results preserve `epli_state` and `epli_reason`. Eligible candidates in
-sampled selection must have computed, finite EPLI before ranking or cache reuse.
-When sampling is disabled, candidates carry `UncomputedEPLI(:sampling_disabled)`.
-Older JSON results with an unavailable score retain `:not_recorded`; they are not
-converted into zero or treated as valid numeric scores.
+The final median is an `EPLIScore`, whose constructor requires a finite Float64
+value. Both `result.epli` and an available `seed.epli` expose that value as `.value`.
+A seed without a score has `seed.epli === nothing`. Its optional `epli_reason`
+metadata explains absence: sampling disabled, ineligible, or not recorded.
+`require_epli` returns the number and throws if the score is absent. Scoring itself
+returns a validated score or throws; an error never becomes `nothing`.
+
+CSV stores absent scores as `missing`, and JSON uses `null`. No separate state flag
+is needed. Eligible candidates in sampled selection must have scores before ranking
+or cache reuse. Disabled sampling permits absent scores. Older JSON results with an
+unavailable score retain `:not_recorded`, which does not assert that the score was
+never computed. Absence is never converted into zero.
 
 ### Zero comparable positions
 
@@ -264,7 +268,7 @@ finding no matches. The zero component still enters the median and normal seed
 ranking: ties use MSA size, then PID order. It is not silently removed from the
 sample set. Per-sample CSVs retain both counts and this diagnostic; summaries report
 `no_comparable_samples`. Inspect these diagnostics before interpreting a zero EPLI
-as measured zero identity. Disabling sampling produces an uncomputed state instead.
+as measured zero identity. Disabling sampling leaves the score absent instead.
 
 HHsuite output must contain complete, recognizable query/comparison/target blocks.
 Empty, unrecognized, or truncated output raises an error rather than becoming a

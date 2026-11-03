@@ -40,12 +40,13 @@ function _candidate_summary_row(target::ResolvedTarget,
         epli = missing,
         n_samples::Integer = 0,
         no_comparable_samples::Integer = 0)
-    score = if ismissing(epli)
+    score = _optional_epli(epli)
+    reason = if score === nothing
         validation.eligible && sample_count != 0 &&
-            throw(ArgumentError("An eligible sampled candidate requires computed EPLI."))
-        UncomputedEPLI(validation.eligible ? :sampling_disabled : :ineligible)
+            throw(ArgumentError("An eligible sampled candidate requires an EPLI score."))
+        validation.eligible ? "sampling_disabled" : "ineligible"
     else
-        ComputedEPLI(epli)
+        missing
     end
     return (;
         gene_id = target.ensembl_gene_id,
@@ -56,9 +57,8 @@ function _candidate_summary_row(target::ResolvedTarget,
         selected = false,
         msa0_status = String(validation.status),
         msa0_issue = validation.issue,
-        epli,
-        epli_state = _epli_state(score),
-        epli_reason = _candidate_summary_optional(_epli_reason(score)),
+        epli = score === nothing ? missing : score.value,
+        epli_reason = reason,
         no_comparable_samples = Int(no_comparable_samples),
         n_samples = Int(n_samples),
         n_sequences_msa0 = nsequences(candidate.msa),

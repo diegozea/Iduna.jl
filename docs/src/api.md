@@ -24,8 +24,7 @@ load_expanded_msa
 ```@docs
 ResolvedTarget
 SeedSelection
-ComputedEPLI
-UncomputedEPLI
+EPLIScore
 require_epli
 ThorAxeMSAResult
 ExpansionResult

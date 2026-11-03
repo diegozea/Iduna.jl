@@ -33,13 +33,13 @@ function _candidate_score(row; allow_uncomputed::Bool = false)
         reason = get(row, :epli_reason, "sampling_disabled")
         isequal(reason, "sampling_disabled") ||
             throw(ArgumentError("Eligible unscored candidates require sampling_disabled."))
-        return UncomputedEPLI(:sampling_disabled)
+        return nothing
     end
     isequal(state, "computed") && value isa Real ||
         throw(ArgumentError("PID $(row.pid) has an invalid EPLI value or score state."))
     ismissing(get(row, :epli_reason, missing)) ||
         throw(ArgumentError("Computed EPLI cannot have an uncomputed reason."))
-    return ComputedEPLI(value)
+    return EPLIScore(value)
 end
 
 function _validate_candidate_scores(df::DataFrame; allow_uncomputed::Bool = false)

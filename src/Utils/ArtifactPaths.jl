@@ -35,7 +35,8 @@ end
 function _relative_seed_paths(seed::SeedSelection, workdir::AbstractString)
     return SeedSelection(;
         pid = seed.pid,
-        epli = seed.score,
+        epli = seed.epli,
+        epli_reason = seed.epli_reason,
         stockholm_path = _relative_artifact_path(seed.stockholm_path, workdir),
         fasta_path = _relative_artifact_path(seed.fasta_path, workdir),
         s_exon_blocks_tsv = _relative_artifact_path(seed.s_exon_blocks_tsv, workdir),

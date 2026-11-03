@@ -18,7 +18,7 @@ using MIToS.MSA: AbstractMultipleSequenceAlignment, AbstractSequence,
                  read_file, sequence_id, sequencenames, stringsequence, write_file
 using Statistics: median
 
-using ..Utils: ComputedEPLI, _finite_score, _file_sha256, _sample_indices, _sample_rng,
+using ..Utils: EPLIScore, _finite_score, _file_sha256, _sample_indices, _sample_rng,
                _terminal_progress_enabled,
                write_fasta, write_json
 

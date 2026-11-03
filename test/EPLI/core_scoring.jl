@@ -50,7 +50,7 @@ using MIToS.MSA: AnnotatedSequence
         result = Iduna.EPLI.epli_score(input, workdir, copy_aligner;
             score_fn, normalization_fn = Iduna.EPLI.no_normalization,
             sample_count = 2, sample_seed = 1, progress_enabled = false)
-        @test result.epli == floatmax(Float64)
+        @test result.epli.value == floatmax(Float64)
         @test isfile(joinpath(workdir, "scores.csv"))
         @test isfile(joinpath(workdir, "summary.csv"))
     end
@@ -119,7 +119,7 @@ mktempdir() do tmp
         aligner_args = `--example-arg`,
         progress_enabled = false)
 
-    @test result.epli == 31.0
+    @test result.epli.value == 31.0
     @test result.n_samples == 3
     @test result.sample_seed == UInt64(7)
     @test result.input_source == "fasta"
@@ -154,7 +154,7 @@ mktempdir() do tmp
               read(joinpath(tmp, "repeat", "samples", "$(label)_sequences.fasta"),
             String)
     end
-    @test repeat_result.epli == result.epli
+    @test repeat_result.epli.value == result.epli.value
 end
 
 mktempdir() do tmp
@@ -181,7 +181,7 @@ mktempdir() do tmp
         reference_sequence = "seq2",
         progress_enabled = false)
 
-    @test result.epli == 2.0
+    @test result.epli.value == 2.0
     @test result.input_source == "mitos_sequences"
     @test ismissing(result.input_fasta)
     full_input = read(joinpath(workdir, "input", "full_sequences.fasta"),
@@ -266,7 +266,7 @@ mktempdir() do tmp
         sample_seed = 13,
         progress_enabled = false)
 
-    @test result.epli == 5.0
+    @test result.epli.value == 5.0
     full_input = read(joinpath(workdir, "input", "full_sequences.fasta"), String)
     sample_input = read(
         joinpath(workdir, "samples",
@@ -317,7 +317,7 @@ mktempdir() do tmp
         reference_sequence = "seq2",
         progress_enabled = false)
 
-    @test msa_result.epli == fasta_result.epli
+    @test msa_result.epli.value == fasta_result.epli.value
     @test msa_result.input_source == "mitos_msa"
     @test ismissing(msa_result.input_fasta)
     full_input = read(joinpath(tmp, "msa", "input", "full_sequences.fasta"),
@@ -365,7 +365,7 @@ mktempdir() do tmp
         sample_seed = 11,
         reference_sequence = "seq2",
         progress_enabled = false)
-    @test result.epli == 7.0
+    @test result.epli.value == 7.0
     sample_fasta = joinpath(tmp, "named", "samples",
         "sequence_subset_001_sequences.fasta")
     @test startswith(read(sample_fasta, String), ">seq2\n")
@@ -421,7 +421,7 @@ mktempdir() do tmp
         sample_fraction = 1.0,
         sample_seed = 3,
         progress_enabled = false)
-    @test cached.epli == 1.0
+    @test cached.epli.value == 1.0
     @test calls == ["full", "sequence_subset_001"]
 
     Iduna.EPLI.epli_score(input, workdir, cached_aligner;
@@ -512,7 +512,7 @@ mktempdir() do tmp
 
     @test labels[1] == "reference_self"
     @test sort(labels[2:end]) == ["sequence_subset_001", "sequence_subset_002"]
-    @test result.epli == 50.0
+    @test result.epli.value == 50.0
     scores = Iduna.EPLI.DataFrame(Iduna.EPLI.CSV.File(result.scores_path))
     @test scores.normalization_score == fill(20.0, 2)
 end
