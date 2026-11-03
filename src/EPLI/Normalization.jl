@@ -17,12 +17,13 @@ end
     comparable_positions_normalization(score; reference_score=nothing)
 
 Normalize validated identity counts as `100 * matched_positions / comparable_positions`.
-The explicit `(0, 0)` convention returns zero and records `no_comparable_positions=true`.
+The explicit `(0, 0)` convention returns zero. Per-sample records retain the counts
+and whether any positions were compared, independently of the chosen normalizer.
 """
 function comparable_positions_normalization(score; reference_score = nothing)
     counts = _normalization_counts(score)
     comparable = counts.comparable_positions
-    comparable == 0 && return NormalizationResult(0.0, 0.0; no_comparable_positions = true)
+    comparable == 0 && return NormalizationResult(0.0, 0.0)
     return NormalizationResult(
         _percentage_ratio(Float64(counts.matched_positions), Float64(comparable)),
         comparable)

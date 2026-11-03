@@ -70,7 +70,8 @@ function select_best_seed(summary_path::AbstractString)
     end
     :epli in propertynames(df) || error("Candidate summary has no epli column.")
     scores = _parse_candidate_scores(df)
-    df.epli = require_epli.(scores)
+    # Both signs of zero are equal for ranking. Preserve the original score in the seed.
+    df.epli = [iszero(value) ? 0.0 : value for value in require_epli.(scores)]
     isempty(df) && error("No eligible PID candidates are available for seed selection.")
     df.__row_order = 1:nrow(df)
     order_col = :pid_order in propertynames(df) ? :pid_order : :__row_order

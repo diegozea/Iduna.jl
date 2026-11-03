@@ -142,6 +142,8 @@ mktempdir() do tmp
     @test zero_sample_row.eligible
     @test zero_sample_row.selection_mode == "all_candidates"
     @test zero_sample_row.n_samples == 0
+    @test zero_sample_row.no_comparable_samples == 0
+    @test zero_sample_row.samples_without_identity_counts == 0
 
     invalid_uniprot = joinpath(tmp, "invalid_uniprot.fasta")
     write(invalid_uniprot, ">P0\nA\n")
@@ -428,6 +430,31 @@ mktempdir() do tmp
         @test islink(species_file)
         @test read(species_file, String) == read(common_species_file, String)
     end
+
+    # Evidence diagnostics must reach candidate summaries through both scoring paths.
+    unknown_row = Iduna.ThorAxeMSA._score_pid_candidate(
+        scoring_target, scoring_input, tmp, sampled_pid, 1, nothing;
+        sample_count = 1, sample_fraction = 1.0, sample_seed = UInt64(12),
+        metadata = sampled_metadata, thoraxe_fn = sampled_thoraxe,
+        score_fn = (args...; kwargs...) -> Iduna.EPLI.RawScore(-2),
+        normalization_fn = Iduna.EPLI.no_normalization)
+    @test unknown_row.epli == -2
+    @test unknown_row.no_comparable_samples == 0
+    @test unknown_row.samples_without_identity_counts == 1
+    zero_rows = Iduna.ThorAxeMSA._score_pid_candidates(
+        scoring_target, scoring_input, tmp, common_pids, nothing, common_metadata;
+        pid_sample_count = 1, pid_sample_fraction = 1.0, sample_seed = UInt64(15),
+        overwrite = false, thoraxe_fn = common_thoraxe,
+        score_fn = (
+            args...; kwargs...) -> Iduna.EPLI.IdentityScore(Iduna.EPLI.IdentityCounts(0, 0)),
+        normalization_fn = Iduna.EPLI.no_normalization)
+    @test all(row -> row.no_comparable_samples == 1, zero_rows)
+    @test all(row -> row.samples_without_identity_counts == 0, zero_rows)
+    evidence_summary = joinpath(tmp, "evidence_summary.csv")
+    Iduna.ThorAxeMSA._summarize_candidate_scores([unknown_row; zero_rows], evidence_summary)
+    evidence_rows = collect(Iduna.ThorAxeMSA.CSV.File(evidence_summary))
+    @test sum(row.no_comparable_samples for row in evidence_rows) == 2
+    @test sum(row.samples_without_identity_counts for row in evidence_rows) == 1
 
     scored_rows = Iduna.ThorAxeMSA._score_pid_candidates(
         scoring_target, scoring_input, tmp, [62.0, 63.0], nothing,

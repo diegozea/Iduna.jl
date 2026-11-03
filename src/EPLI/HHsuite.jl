@@ -31,12 +31,26 @@ function _parse_hhsuite_sequence_row(line::AbstractString)
         indices = _hhsuite_residue_indices(seq, start, stop))
 end
 
-function _first_hhsuite_sequence(lines, row_indices, label)
+function _validated_hhsuite_sequence(lines, row_indices, label)
+    first_sequence = nothing
     for index in row_indices
-        parsed = _parse_hhsuite_sequence_row(lines[index])
-        parsed === nothing || return parsed
+        line = lines[index]
+        # Secondary-structure annotations have no residue coordinates. A malformed
+        # sequence row must not be skipped in favour of another sequence or consensus.
+        occursin(r"^[QT]\s+(?:ss_pred|ss_conf|ss_dssp|sa_dssp)\S*\s+\S+\s*$", line) &&
+            continue
+        parsed = _parse_hhsuite_sequence_row(line)
+        parsed === nothing &&
+            throw(ArgumentError("Malformed HHsuite $(label) sequence row: $(line)"))
+        if first_sequence === nothing
+            first_sequence = parsed
+        elseif length(parsed.indices) != length(first_sequence.indices)
+            throw(ArgumentError("HHsuite $(label) sequence rows have different alignment widths."))
+        end
     end
-    throw(ArgumentError("HHsuite alignment has no recognized $(label) sequence row."))
+    first_sequence === nothing &&
+        throw(ArgumentError("HHsuite alignment has no recognized $(label) sequence row."))
+    return first_sequence
 end
 
 function _append_hhsuite_block!(positions, codes, lines)
@@ -45,8 +59,8 @@ function _append_hhsuite_block!(positions, codes, lines)
     if isempty(query_rows) && isempty(target_rows)
         return false
     end
-    query = _first_hhsuite_sequence(lines, query_rows, "query")
-    target = _first_hhsuite_sequence(lines, target_rows, "target")
+    query = _validated_hhsuite_sequence(lines, query_rows, "query")
+    target = _validated_hhsuite_sequence(lines, target_rows, "target")
 
     # Count positions from the first displayed query sequence, but read comparison
     # symbols after the last query row (which can be the consensus).

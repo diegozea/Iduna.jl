@@ -236,6 +236,8 @@ All normalizers return `NormalizationResult`. Its constructor converts to Float6
 and rejects non-finite components and non-finite supplied denominators. Negative
 raw scores and normalized ratios above 100 remain valid. Self-reference normalization
 requires a nonzero reference score; no normalization uses a missing denominator.
+Normalization results contain numerical values only. Whether positions were compared
+is determined from the original score's validated identity counts.
 
 Custom score callbacks should return `RawScore` or `IdentityScore`. Named tuples
 with `raw_score` are accepted at the input boundary and converted to `RawScore`;
@@ -263,19 +265,35 @@ score and sampling metadata. Absence is never converted into zero.
 
 ### Zero comparable positions
 
-The explicit convention `(matched=0, comparable=0)` gives zero, and the result
-records `no_comparable_positions=true`. This differs from comparing positions and
-finding no matches. The zero component still enters the median and normal seed
-ranking: ties use MSA size, then PID order. It is not silently removed from the
-sample set. Per-sample CSVs retain both counts and this diagnostic; summaries report
-`no_comparable_samples`. Inspect these diagnostics before interpreting a zero EPLI
-as measured zero identity. Disabling sampling leaves the score absent instead.
+Comparable-position normalization uses the explicit convention
+`(matched=0, comparable=0) → 0`. This differs from comparing positions and finding
+no matches. The zero component still enters the median and normal seed ranking:
+ties use MSA size, then PID order. Positive and negative zero are tied; the selected
+seed retains its original score. Zero components are not removed from the sample set.
+
+Per-sample CSVs retain the identity counts and `no_comparable_positions`. This
+diagnostic describes the evidence, independently of the normalizer or resulting score:
+
+| Identity counts | `no_comparable_positions` | Interpretation |
+| --- | --- | --- |
+| `(0, 0)` | `true` | No reference positions were compared. |
+| `(0, 4)` | `false` | Four positions were compared, with no matches. |
+| Unavailable | `missing` | The score did not supply validated identity counts. |
+
+Summaries report confirmed zero-comparison samples in `no_comparable_samples`, and
+samples with unavailable counts in `samples_without_identity_counts`. These fields
+also appear in ThorAxe candidate summaries. A zero count in the former does not
+establish that every sample had comparable positions; check the latter too.
+Disabling sampling leaves the score absent and both sample counts at zero.
 
 HHsuite output must contain complete, recognizable query/comparison/target blocks.
 Empty, unrecognized, or truncated output raises an error rather than becoming a
 zero-comparison result. Residue coordinates start at one; zero is reserved for gaps
 in the parsed position vector. A successfully parsed block without any reference positions
-can still produce valid `(0,0)` counts. Optional HHsuite diagnostics remain separate.
+can still produce valid `(0,0)` counts. All displayed sequence rows are validated;
+only recognized secondary-structure annotation rows are skipped. A malformed first
+query cannot be replaced by a consensus row. Position counts continue to use the first
+displayed query sequence. Optional HHsuite diagnostics remain separate.
 
 Finite constructors do not guarantee that arithmetic is numerically accurate.
 Percentage normalization uses higher precision near the Float64 limits to avoid
