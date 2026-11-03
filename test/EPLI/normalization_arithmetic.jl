@@ -34,7 +34,8 @@
     @test Iduna.EPLI._percentage_ratio(1e308, 100.0) == 1e308
     @test Iduna.EPLI._percentage_ratio(tiny, 100.0) == tiny
     @test Iduna.EPLI.comparable_positions_normalization(
-        Iduna.EPLI.IdentityScore(Iduna.EPLI.IdentityCounts(typemax(Int), typemax(Int)))).normalized_score == 100.0
+        Iduna.EPLI.IdentityScore(Iduna.EPLI.IdentityCounts(typemax(Int), typemax(Int)))).normalized_score ==
+          100.0
 
     # An exact rational oracle checks combinations across the Float64 exponent range.
     values = (tiny, 3 * tiny, floatmin(Float64), 1e-300, 0.125, 3.0, 1e300, largest)
@@ -82,8 +83,10 @@ end
         input = write_epli_test_input(tmp)
         for (raw, reference, expected) in ((1e308, 1e308, 100.0), (
             nextfloat(0.0), 100.0, nextfloat(0.0)))
-            score_fn = (reference_msa, sample_msa; label, kwargs...) ->
-                Iduna.EPLI.RawScore(label == "reference_self" ? reference : raw)
+            score_fn = (reference_msa, sample_msa; label, kwargs...) -> begin
+                value = label == "reference_self" ? reference : raw
+                return Iduna.EPLI.RawScore(value)
+            end
             result = Iduna.EPLI.epli_score(input, joinpath(tmp, string(raw)), copy_aligner;
                 score_fn, normalization_fn = Iduna.EPLI.self_reference_normalization,
                 sample_count = 2, sample_seed = 1, progress_enabled = false)
