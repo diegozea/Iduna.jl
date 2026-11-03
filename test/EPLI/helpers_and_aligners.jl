@@ -11,43 +11,21 @@
         @test !Iduna.Utils._terminal_progress_enabled(IOBuffer())
     end
 
-    score = (; raw_score = 12.5)
+    score = Iduna.EPLI.RawScore(12.5)
     normalized = Iduna.EPLI.no_normalization(score)
     @test normalized.normalized_score == 12.5
     @test ismissing(normalized.normalization_score)
 end
 
-@testset "Finite normalization scores" begin
-    for value in (NaN, Inf, -Inf, big"1e1000")
-        @test_throws ArgumentError Iduna.EPLI._normalization_result(value)
-        @test_throws ArgumentError Iduna.EPLI._normalization_result(
-            (; normalized_score = value))
-        @test_throws ArgumentError Iduna.EPLI._normalization_result(
-            (; normalized_score = 90.0, normalization_score = value))
-        @test_throws ArgumentError Iduna.EPLI.no_normalization((; raw_score = value))
-        @test_throws ArgumentError Iduna.EPLI.self_reference_normalization(
-            (; raw_score = 10.0); reference_score = (; raw_score = value))
-        @test_throws ArgumentError Iduna.EPLI.self_reference_normalization(
-            (; raw_score = value); reference_score = (; raw_score = 10.0))
-        @test_throws ArgumentError Iduna.EPLI.comparable_positions_normalization(
-            (; matched_positions = value, comparable_positions = 10))
+@testset "Self-reference normalization errors" begin
+    score = Iduna.EPLI.RawScore(10)
+    @test_throws ErrorException Iduna.EPLI.self_reference_normalization(score)
+    for zero in (0.0, -0.0)
+        @test_throws ErrorException Iduna.EPLI.self_reference_normalization(
+            score; reference_score = Iduna.EPLI.RawScore(zero))
     end
-    @test Iduna.EPLI.self_reference_normalization(
-        (; raw_score = 15.0); reference_score = (; raw_score = 10.0)).normalized_score ==
-          150.0
-    @test Iduna.EPLI.no_normalization((; raw_score = -2.0)).normalized_score == -2.0
-    @test Iduna.EPLI.no_normalization((; raw_score = 0.0)).normalized_score == 0.0
-    @test Iduna.EPLI.comparable_positions_normalization(
-        (; matched_positions = 3, comparable_positions = 4)).normalized_score == 75.0
-    @test ismissing(Iduna.EPLI._normalization_result(3.0).normalization_score)
-    @test ismissing(Iduna.EPLI._normalization_result(
-        (; normalized_score = 3.0, normalization_score = missing)).normalization_score)
-    @test Iduna.EPLI.comparable_positions_normalization(
-        (; matched_positions = 0, comparable_positions = 0)).normalized_score == 0.0
-    @test_throws ErrorException Iduna.EPLI.self_reference_normalization(
-        (; raw_score = 10.0); reference_score = (; raw_score = 0.0))
     @test_throws ArgumentError Iduna.EPLI.self_reference_normalization(
-        (; raw_score = floatmax(Float64)); reference_score = (; raw_score = 1.0))
+        Iduna.EPLI.RawScore(floatmax(Float64)); reference_score = Iduna.EPLI.RawScore(1))
 end
 
 mktempdir() do tmp

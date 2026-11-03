@@ -1,71 +1,109 @@
 using MIToS.MSA: AnnotatedSequence
 
-@testset "Non-finite sample and reference scores" begin
+@testset "Typed callback contract" begin
+    E = Iduna.EPLI
     mktempdir() do tmp
-        input = joinpath(tmp, "input.fasta")
-        write(input, ">ref\nACDE\n>other\nACDF\n")
-        for value in (NaN, Inf, -Inf)
-            score_fn = (reference, sample; kwargs...) -> (; raw_score = value)
-            normalization_calls = Ref(0)
-            constant_normalization = (score; kwargs...) -> begin
-                normalization_calls[] += 1
-                return 90.0
-            end
-            workdir = joinpath(tmp, "raw_$(value)")
-            @test_throws ArgumentError Iduna.EPLI.epli_score(input, workdir,
-                copy_aligner; score_fn, normalization_fn = constant_normalization,
-                sample_count = 1, sample_seed = 1, progress_enabled = false)
-            @test !isfile(joinpath(workdir, "summary.csv"))
-            @test normalization_calls[] == 0
-
-            reference_score = (reference, sample; label, kwargs...) -> (;
-                raw_score = label == "reference_self" ? value : 10.0)
-            @test_throws ArgumentError Iduna.EPLI.epli_score(input,
-                joinpath(tmp, "reference_$(value)"), copy_aligner;
-                score_fn = reference_score,
-                normalization_fn = constant_normalization,
-                compute_reference_self_score = true, sample_count = 1,
-                sample_seed = 1, progress_enabled = false)
-
-            finite_score = (reference, sample; kwargs...) -> (; raw_score = 10.0)
-            normalization = (score; kwargs...) -> value
-            @test_throws ArgumentError Iduna.EPLI.epli_score(input,
-                joinpath(tmp, "normalized_$(value)"), copy_aligner;
-                score_fn = finite_score, normalization_fn = normalization,
-                sample_count = 1, sample_seed = 1, progress_enabled = false)
+        input = write_epli_test_input(tmp)
+        valid_score = constant_score_callback(10)
+        function tuple_reference_score(args...; label, kwargs...)
+            label == "reference_self" && return (; raw_score = 10)
+            return E.RawScore(10)
         end
+        cases = (
+            ("score_tuple", (; score_fn = (args...; kwargs...) -> (; raw_score = 10))),
+            ("reference_tuple",
+                (; score_fn = tuple_reference_score,
+                    compute_reference_self_score = true)),
+            ("normalization_scalar",
+                (; score_fn = valid_score,
+                    normalization_fn = (score; kwargs...) -> 10.0)),
+            ("normalization_tuple",
+                (; score_fn = valid_score,
+                    normalization_fn = (score; kwargs...) -> (; normalized_score = 10.0)))
+        )
+        for (label, callbacks) in cases
+            workdir = joinpath(tmp, label)
+            @test_throws TypeError E.epli_score(input, workdir, copy_aligner;
+                callbacks..., sample_count = 1, sample_seed = 1, progress_enabled = false)
+            @test !isfile(joinpath(workdir, "scores.csv"))
+            @test !isfile(joinpath(workdir, "summary.csv"))
+        end
+    end
+end
 
-        mixed_score = (reference, sample; label, kwargs...) -> (;
-            raw_score = endswith(label, "001") ? NaN : 90.0)
+@testset "Scoring failures do not produce results" begin
+    E = Iduna.EPLI
+    mktempdir() do tmp
+        input = write_epli_test_input(tmp)
+        normalization_calls = Ref(0)
+        observed_normalization = (score; kwargs...) -> begin
+            normalization_calls[] += 1
+            return E.NormalizationResult(90)
+        end
+        function invalid_reference_score(args...; label, kwargs...)
+            value = label == "reference_self" ? NaN : 10
+            return E.RawScore(value)
+        end
+        invalid_normalization = (score; kwargs...) -> E.NormalizationResult(NaN)
+        # The constructor tests cover NaN and both infinities. Here each boundary
+        # must stop the pipeline before aggregation or output, using NaN as a probe.
+        cases = (
+            ("sample",
+                (; score_fn = constant_score_callback(NaN),
+                    normalization_fn = observed_normalization)),
+            ("reference",
+                (; score_fn = invalid_reference_score,
+                    normalization_fn = observed_normalization,
+                    compute_reference_self_score = true)),
+            ("normalization",
+                (; score_fn = constant_score_callback(10),
+                    normalization_fn = invalid_normalization))
+        )
+        for (label, callbacks) in cases
+            workdir = joinpath(tmp, label)
+            @test_throws ArgumentError E.epli_score(input, workdir, copy_aligner;
+                callbacks..., sample_count = 1, sample_seed = 1, progress_enabled = false)
+            @test !isfile(joinpath(workdir, "scores.csv"))
+            @test !isfile(joinpath(workdir, "summary.csv"))
+        end
+        @test normalization_calls[] == 0
+
+        mixed_score = (args...; label, kwargs...) -> begin
+            value = endswith(label, "001") ? NaN : 90
+            return E.RawScore(value)
+        end
         failed_workdir = joinpath(tmp, "mixed_samples")
         error_type = Threads.threadpoolsize() > 1 ? CompositeException : ArgumentError
-        @test_throws error_type Iduna.EPLI.epli_score(input, failed_workdir, copy_aligner;
-            score_fn = mixed_score, normalization_fn = Iduna.EPLI.no_normalization,
+        @test_throws error_type E.epli_score(input, failed_workdir, copy_aligner;
+            score_fn = mixed_score, normalization_fn = E.no_normalization,
             sample_count = 2, sample_seed = 1, progress_enabled = false)
         @test !isfile(joinpath(failed_workdir, "scores.csv"))
         @test !isfile(joinpath(failed_workdir, "summary.csv"))
 
-        score_fn = (reference, sample; kwargs...) -> (; raw_score = floatmax(Float64))
-        workdir = joinpath(tmp, "extreme_finite")
-        result = Iduna.EPLI.epli_score(input, workdir, copy_aligner;
-            score_fn, normalization_fn = Iduna.EPLI.no_normalization,
+        result = E.epli_score(
+            input, joinpath(tmp, "extreme_finite"), copy_aligner;
+            score_fn = constant_score_callback(floatmax(Float64)),
+            normalization_fn = E.no_normalization,
             sample_count = 2, sample_seed = 1, progress_enabled = false)
         @test result.epli.value == floatmax(Float64)
-        @test isfile(joinpath(workdir, "scores.csv"))
-        @test isfile(joinpath(workdir, "summary.csv"))
+        @test isfile(result.scores_path)
+        @test isfile(result.summary_path)
     end
 end
 
 @testset "Optional score metadata at callback boundaries" begin
     mktempdir() do tmp
-        input = joinpath(tmp, "input.fasta")
-        write(input, ">ref\nACDE\n>other\nACDF\n")
-        score = (; raw_score = Float32(-2), hhalign_score = NaN,
-            probability = missing, e_value = Inf, custom_metadata = :preserved)
+        input = write_epli_test_input(tmp)
+        score = Iduna.EPLI.RawScore(Float32(-2);
+            diagnostics = (;
+                hhalign_score = NaN, probability = missing, e_value = Inf,
+                matched_positions = 12, comparable_positions = 0,
+                custom_metadata = :preserved))
         score_fn = (reference, sample; kwargs...) -> score
         normalization_fn = (value; kwargs...) -> begin
             @test value.diagnostics.custom_metadata === :preserved
-            return (; normalized_score = 150, normalization_score = missing)
+            @test value.diagnostics.matched_positions == 12
+            return Iduna.EPLI.NormalizationResult(150)
         end
         result = Iduna.EPLI.epli_score(input, joinpath(tmp, "run"), copy_aligner;
             score_fn, normalization_fn, sample_count = 1, sample_seed = 1,
@@ -100,15 +138,10 @@ mktempdir() do tmp
         end
         n_sample = Iduna.EPLI.nsequences(
             Iduna.EPLI.read_file(sample_msa, Iduna.EPLI.FASTA))
-        return (;
-            raw_score = 10.0 * n_sample,
-            matched_positions = 10 * n_sample,
-            comparable_positions = 100)
+        return Iduna.EPLI.IdentityScore(Iduna.EPLI.IdentityCounts(10 * n_sample, 100))
     end
-    normalization_fn = (score;
-        reference_score = nothing) -> (;
-        normalized_score = score.raw_score + 1,
-        normalization_score = -1.0)
+    normalization_fn = (score; reference_score = nothing) -> Iduna.EPLI.NormalizationResult(
+        Iduna.EPLI.raw_score(score) + 1, -1)
 
     result = Iduna.EPLI.epli_score(input, joinpath(tmp, "run"), copy_aligner;
         score_fn,
@@ -164,13 +197,8 @@ mktempdir() do tmp
         AnnotatedSequence("seq3", "AAAT")
     ]
     workdir = joinpath(tmp, "mitos_sequences")
-    score_fn = (reference_msa, sample_msa; logs_dir = nothing,
-        label = "sample") -> begin
-        n_sample = Iduna.EPLI.nsequences(
-            Iduna.EPLI.read_file(sample_msa, Iduna.EPLI.FASTA))
-        return (; raw_score = Float64(n_sample))
-    end
-    normalization_fn = (score; reference_score = nothing) -> score.raw_score
+    score_fn = sample_size_score
+    normalization_fn = Iduna.EPLI.no_normalization
 
     result = Iduna.EPLI.epli_score(sequences, workdir, padded_aligner;
         score_fn,
@@ -229,9 +257,8 @@ mktempdir() do tmp
         return copy_aligner(input_fasta, output_fasta;
             logs_dir, run_label, aligner_args)
     end
-    score_fn = (reference_msa, sample_msa; logs_dir = nothing,
-        label = "sample") -> (; raw_score = 1.0)
-    normalization_fn = (score; reference_score = nothing) -> score.raw_score
+    score_fn = constant_score_callback(1.0)
+    normalization_fn = Iduna.EPLI.no_normalization
 
     result = Iduna.EPLI.epli_score(input, joinpath(tmp, "strict"),
         strict_aligner;
@@ -254,9 +281,8 @@ mktempdir() do tmp
         ">ref\nAA--AA\n" *
         ">seq2\nA\n" *
         ">seq3\nA.A\n")
-    score_fn = (reference_msa, sample_msa; logs_dir = nothing,
-        label = "sample") -> (; raw_score = 5.0)
-    normalization_fn = (score; reference_score = nothing) -> score.raw_score
+    score_fn = constant_score_callback(5.0)
+    normalization_fn = Iduna.EPLI.no_normalization
 
     result = Iduna.EPLI.epli_score(input, workdir, padded_aligner;
         score_fn,
@@ -290,13 +316,8 @@ mktempdir() do tmp
         ">seq2\nAAA\n" *
         ">seq3\nAAAA\n")
     msa = Iduna.EPLI.read_file(aligned_input, Iduna.EPLI.FASTA)
-    score_fn = (reference_msa, sample_msa; logs_dir = nothing,
-        label = "sample") -> begin
-        n_sample = Iduna.EPLI.nsequences(
-            Iduna.EPLI.read_file(sample_msa, Iduna.EPLI.FASTA))
-        return (; raw_score = Float64(n_sample))
-    end
-    normalization_fn = (score; reference_score = nothing) -> score.raw_score
+    score_fn = sample_size_score
+    normalization_fn = Iduna.EPLI.no_normalization
 
     msa_result = Iduna.EPLI.epli_score(msa, joinpath(tmp, "msa"),
         padded_aligner;
@@ -346,9 +367,8 @@ mktempdir() do tmp
         ">ref\nAAAA\n" *
         ">seq2\nAAAT\n" *
         ">seq3\nAATT\n")
-    score_fn = (reference_msa, sample_msa; logs_dir = nothing,
-        label = "sample") -> (; raw_score = 7.0)
-    scalar_normalization = (score; reference_score = nothing) -> score.raw_score
+    score_fn = constant_score_callback(7.0)
+    normalization_fn = Iduna.EPLI.no_normalization
     namedtuple_aligner = (input_fasta, output_fasta; logs_dir = nothing,
         run_label = "run", aligner_args = Cmd(String[])) -> begin
         mkpath(dirname(output_fasta))
@@ -359,7 +379,7 @@ mktempdir() do tmp
     result = Iduna.EPLI.epli_score(input, joinpath(tmp, "named"),
         namedtuple_aligner;
         score_fn,
-        normalization_fn = scalar_normalization,
+        normalization_fn,
         sample_count = 1,
         sample_fraction = 1.0,
         sample_seed = 11,
@@ -387,8 +407,6 @@ mktempdir() do tmp
         sample_seed = 11,
         reference_sequence = "missing",
         progress_enabled = false)
-    @test_throws ErrorException Iduna.EPLI._normalization_result((value = 1.0,))
-    @test_throws ErrorException Iduna.EPLI._normalization_result("bad")
 end
 
 mktempdir() do tmp
@@ -402,68 +420,33 @@ mktempdir() do tmp
         return copy_aligner(input_fasta, output_fasta;
             logs_dir, run_label, aligner_args)
     end
-    score_fn = (reference_msa, sample_msa; logs_dir = nothing,
-        label = "sample") -> (; raw_score = 1.0)
-    normalization_fn = (score; reference_score = nothing) -> score.raw_score
-    Iduna.EPLI.epli_score(input, workdir, cached_aligner;
-        score_fn,
-        normalization_fn,
-        sample_count = 1,
-        sample_fraction = 1.0,
-        sample_seed = 3,
-        progress_enabled = false)
+    score_fn = constant_score_callback(1.0)
+    normalization_fn = Iduna.EPLI.no_normalization
+    function run_cached(; aligner_fn = cached_aligner, sample_fraction = 1.0, kwargs...)
+        Iduna.EPLI.epli_score(input, workdir, aligner_fn;
+            score_fn, normalization_fn, sample_count = 1, sample_seed = 3,
+            sample_fraction, progress_enabled = false, kwargs...)
+    end
+    run_cached()
     @test calls == ["full", "sequence_subset_001"]
 
-    cached = Iduna.EPLI.epli_score(input, workdir, cached_aligner;
-        score_fn,
-        normalization_fn,
-        sample_count = 1,
-        sample_fraction = 1.0,
-        sample_seed = 3,
-        progress_enabled = false)
+    cached = run_cached()
     @test cached.epli.value == 1.0
     @test calls == ["full", "sequence_subset_001"]
 
-    Iduna.EPLI.epli_score(input, workdir, cached_aligner;
-        score_fn,
-        normalization_fn,
-        sample_count = 1,
-        sample_fraction = 0.5,
-        sample_seed = 3,
-        progress_enabled = false)
+    run_cached(sample_fraction = 0.5)
     @test calls == ["full", "sequence_subset_001", "sequence_subset_001"]
 
-    arg_result = Iduna.EPLI.epli_score(input, workdir, cached_aligner;
-        score_fn,
-        normalization_fn,
-        sample_count = 1,
-        sample_fraction = 0.5,
-        sample_seed = 3,
-        aligner_args = `--alpha`,
-        progress_enabled = false)
+    arg_result = run_cached(sample_fraction = 0.5, aligner_args = `--alpha`)
     @test arg_result.aligner_args == string(`--alpha`)
     @test calls == ["full", "sequence_subset_001", "sequence_subset_001",
         "full", "sequence_subset_001"]
 
-    Iduna.EPLI.epli_score(input, workdir, cached_aligner;
-        score_fn,
-        normalization_fn,
-        sample_count = 1,
-        sample_fraction = 0.5,
-        sample_seed = 3,
-        aligner_args = `--alpha`,
-        progress_enabled = false)
+    run_cached(sample_fraction = 0.5, aligner_args = `--alpha`)
     @test calls == ["full", "sequence_subset_001", "sequence_subset_001",
         "full", "sequence_subset_001"]
 
-    Iduna.EPLI.epli_score(input, workdir, cached_aligner;
-        score_fn,
-        normalization_fn,
-        sample_count = 1,
-        sample_fraction = 0.5,
-        sample_seed = 3,
-        aligner_args = `--beta`,
-        progress_enabled = false)
+    run_cached(sample_fraction = 0.5, aligner_args = `--beta`)
     @test calls == ["full", "sequence_subset_001", "sequence_subset_001",
         "full", "sequence_subset_001", "full", "sequence_subset_001"]
 
@@ -474,13 +457,7 @@ mktempdir() do tmp
         return copy_aligner(input_fasta, output_fasta;
             logs_dir, run_label, aligner_args)
     end
-    Iduna.EPLI.epli_score(input, workdir, changed_aligner;
-        score_fn,
-        normalization_fn,
-        sample_count = 1,
-        sample_fraction = 0.5,
-        sample_seed = 3,
-        progress_enabled = false)
+    run_cached(aligner_fn = changed_aligner, sample_fraction = 0.5)
     @test changed_calls == ["full", "sequence_subset_001"]
 
     bad_cache_output = joinpath(workdir, "samples", "bad_cache_msa.fasta")
@@ -499,7 +476,7 @@ mktempdir() do tmp
             push!(labels, String(label))
         end
         raw = label == "reference_self" ? 20.0 : 10.0
-        return (; raw_score = raw)
+        return Iduna.EPLI.RawScore(raw)
     end
 
     result = Iduna.EPLI.epli_score(input, joinpath(tmp, "self"), copy_aligner;

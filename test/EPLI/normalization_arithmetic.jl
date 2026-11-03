@@ -1,6 +1,6 @@
 @testset "Normalization at Float64 limits" begin
     normalize = (raw, reference) -> Iduna.EPLI.self_reference_normalization(
-        (; raw_score = raw); reference_score = (; raw_score = reference)).normalized_score
+        Iduna.EPLI.RawScore(raw); reference_score = Iduna.EPLI.RawScore(reference)).normalized_score
     tiny = nextfloat(0.0)
     largest = floatmax(Float64)
     for (raw, reference, expected) in (
@@ -34,7 +34,7 @@
     @test Iduna.EPLI._percentage_ratio(1e308, 100.0) == 1e308
     @test Iduna.EPLI._percentage_ratio(tiny, 100.0) == tiny
     @test Iduna.EPLI.comparable_positions_normalization(
-        Iduna.EPLI.IdentityCounts(typemax(Int), typemax(Int))).normalized_score == 100.0
+        Iduna.EPLI.IdentityScore(Iduna.EPLI.IdentityCounts(typemax(Int), typemax(Int)))).normalized_score == 100.0
 
     # An exact rational oracle checks combinations across the Float64 exponent range.
     values = (tiny, 3 * tiny, floatmin(Float64), 1e-300, 0.125, 3.0, 1e300, largest)
@@ -79,12 +79,11 @@ end
 
 @testset "Extreme normalization through scoring callbacks" begin
     mktempdir() do tmp
-        input = joinpath(tmp, "input.fasta")
-        write(input, ">ref\nACDE\n>other\nACDF\n")
+        input = write_epli_test_input(tmp)
         for (raw, reference, expected) in ((1e308, 1e308, 100.0), (
             nextfloat(0.0), 100.0, nextfloat(0.0)))
-            score_fn = (reference_msa, sample_msa; label, kwargs...) -> (;
-                raw_score = label == "reference_self" ? reference : raw)
+            score_fn = (reference_msa, sample_msa; label, kwargs...) ->
+                Iduna.EPLI.RawScore(label == "reference_self" ? reference : raw)
             result = Iduna.EPLI.epli_score(input, joinpath(tmp, string(raw)), copy_aligner;
                 score_fn, normalization_fn = Iduna.EPLI.self_reference_normalization,
                 sample_count = 2, sample_seed = 1, progress_enabled = false)

@@ -362,167 +362,40 @@
         end
 
         mktempdir() do tmp
-            input = joinpath(tmp, "sequences.fasta")
-            write(input,
-                ">ref\nAAAA\n" *
-                ">seq2\nAAAT\n" *
-                ">seq3\nAATT\n")
-            mafft_copy_aligner = (input_fasta, output_fasta;
-                logs_dir = nothing,
-                run_label = "run",
-                aligner_args = Cmd(String[])) -> begin
-                runner = command -> begin
-                    padded_aligner(input_fasta, output_fasta;
-                        logs_dir, run_label, aligner_args)
-                    return nothing
+            input = write_epli_test_input(tmp;
+                fasta = ">ref\nAAAA\n>seq2\nAAAT\n>seq3\nAATT\n")
+            aligners = (
+                ("mafft", Iduna.EPLI.mafft_aligner, `--thread 1`),
+                ("famsa", Iduna.EPLI.famsa_aligner, `-t 1`),
+                ("kalign", Iduna.EPLI.kalign_aligner, `-n 1`),
+                ("muscle", Iduna.EPLI.muscle_aligner, `-threads 1`)
+            )
+            for (name, wrapper, arguments) in aligners
+                @testset "$name EPLI integration" begin
+                    copy_wrapper = (input_fasta, output_fasta;
+                        logs_dir = nothing, run_label = "run",
+                        aligner_args = Cmd(String[])) -> begin
+                        runner = command -> begin
+                            padded_aligner(input_fasta, output_fasta;
+                                logs_dir, run_label, aligner_args)
+                            return nothing
+                        end
+                        return wrapper(input_fasta, output_fasta;
+                            logs_dir, run_label, aligner_args, runner,
+                            aligner = "/tmp/$name")
+                    end
+                    result = Iduna.EPLI.epli_score(input, joinpath(tmp, "$(name)_epli"),
+                        copy_wrapper;
+                        score_fn = constant_score_callback(3),
+                        normalization_fn = Iduna.EPLI.no_normalization,
+                        sample_count = 1, sample_fraction = 1.0, sample_seed = 5,
+                        aligner_args = arguments, progress_enabled = false)
+                    @test isfinite(result.epli.value)
+                    @test isfile(result.scores_path)
+                    @test isfile(result.summary_path)
+                    @test result.aligner_args == string(arguments)
                 end
-                return Iduna.EPLI.mafft_aligner(input_fasta, output_fasta;
-                    logs_dir,
-                    run_label,
-                    aligner_args,
-                    runner,
-                    aligner = "/tmp/mafft")
             end
-            score_fn = (reference_msa, sample_msa; logs_dir = nothing,
-                label = "sample") -> (; raw_score = 3.0)
-
-            result = Iduna.EPLI.epli_score(input, joinpath(tmp, "mafft_epli"),
-                mafft_copy_aligner;
-                score_fn,
-                normalization_fn = Iduna.EPLI.no_normalization,
-                sample_count = 1,
-                sample_fraction = 1.0,
-                sample_seed = 5,
-                aligner_args = `--thread 1`,
-                progress_enabled = false)
-
-            @test isfinite(result.epli.value)
-            @test isfile(result.scores_path)
-            @test isfile(result.summary_path)
-            @test result.aligner_args == string(`--thread 1`)
-        end
-
-        mktempdir() do tmp
-            input = joinpath(tmp, "sequences.fasta")
-            write(input,
-                ">ref\nAAAA\n" *
-                ">seq2\nAAAT\n" *
-                ">seq3\nAATT\n")
-            famsa_copy_aligner = (input_fasta, output_fasta;
-                logs_dir = nothing,
-                run_label = "run",
-                aligner_args = Cmd(String[])) -> begin
-                runner = command -> begin
-                    padded_aligner(input_fasta, output_fasta;
-                        logs_dir, run_label, aligner_args)
-                    return nothing
-                end
-                return Iduna.EPLI.famsa_aligner(input_fasta, output_fasta;
-                    logs_dir,
-                    run_label,
-                    aligner_args,
-                    runner,
-                    aligner = "/tmp/famsa")
-            end
-            score_fn = (reference_msa, sample_msa; logs_dir = nothing,
-                label = "sample") -> (; raw_score = 3.0)
-
-            result = Iduna.EPLI.epli_score(input, joinpath(tmp, "famsa_epli"),
-                famsa_copy_aligner;
-                score_fn,
-                normalization_fn = Iduna.EPLI.no_normalization,
-                sample_count = 1,
-                sample_fraction = 1.0,
-                sample_seed = 5,
-                aligner_args = `-t 1`,
-                progress_enabled = false)
-
-            @test isfinite(result.epli.value)
-            @test isfile(result.scores_path)
-            @test isfile(result.summary_path)
-            @test result.aligner_args == string(`-t 1`)
-        end
-
-        mktempdir() do tmp
-            input = joinpath(tmp, "sequences.fasta")
-            write(input,
-                ">ref\nAAAA\n" *
-                ">seq2\nAAAT\n" *
-                ">seq3\nAATT\n")
-            kalign_copy_aligner = (input_fasta, output_fasta;
-                logs_dir = nothing,
-                run_label = "run",
-                aligner_args = Cmd(String[])) -> begin
-                runner = command -> begin
-                    padded_aligner(input_fasta, output_fasta;
-                        logs_dir, run_label, aligner_args)
-                    return nothing
-                end
-                return Iduna.EPLI.kalign_aligner(input_fasta, output_fasta;
-                    logs_dir,
-                    run_label,
-                    aligner_args,
-                    runner,
-                    aligner = "/tmp/kalign")
-            end
-            score_fn = (reference_msa, sample_msa; logs_dir = nothing,
-                label = "sample") -> (; raw_score = 3.0)
-
-            result = Iduna.EPLI.epli_score(input, joinpath(tmp, "kalign_epli"),
-                kalign_copy_aligner;
-                score_fn,
-                normalization_fn = Iduna.EPLI.no_normalization,
-                sample_count = 1,
-                sample_fraction = 1.0,
-                sample_seed = 5,
-                aligner_args = `-n 1`,
-                progress_enabled = false)
-
-            @test isfinite(result.epli.value)
-            @test isfile(result.scores_path)
-            @test isfile(result.summary_path)
-            @test result.aligner_args == string(`-n 1`)
-        end
-
-        mktempdir() do tmp
-            input = joinpath(tmp, "sequences.fasta")
-            write(input,
-                ">ref\nAAAA\n" *
-                ">seq2\nAAAT\n" *
-                ">seq3\nAATT\n")
-            muscle_copy_aligner = (input_fasta, output_fasta;
-                logs_dir = nothing,
-                run_label = "run",
-                aligner_args = Cmd(String[])) -> begin
-                runner = command -> begin
-                    padded_aligner(input_fasta, output_fasta;
-                        logs_dir, run_label, aligner_args)
-                    return nothing
-                end
-                return Iduna.EPLI.muscle_aligner(input_fasta, output_fasta;
-                    logs_dir,
-                    run_label,
-                    aligner_args,
-                    runner,
-                    aligner = "/tmp/muscle")
-            end
-            score_fn = (reference_msa, sample_msa; logs_dir = nothing,
-                label = "sample") -> (; raw_score = 3.0)
-
-            result = Iduna.EPLI.epli_score(input, joinpath(tmp, "muscle_epli"),
-                muscle_copy_aligner;
-                score_fn,
-                normalization_fn = Iduna.EPLI.no_normalization,
-                sample_count = 1,
-                sample_fraction = 1.0,
-                sample_seed = 5,
-                aligner_args = `-threads 1`,
-                progress_enabled = false)
-
-            @test isfinite(result.epli.value)
-            @test isfile(result.scores_path)
-            @test isfile(result.summary_path)
-            @test result.aligner_args == string(`-threads 1`)
         end
     else
         @info "Skipping optional JLL aligner extension tests; MAFFT_jll, ClustalO_jll, FAMSA_jll, kalign_jll, and MUSCLE_jll are not available in this environment."

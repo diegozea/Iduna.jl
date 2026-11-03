@@ -1,3 +1,18 @@
+function write_epli_test_input(dir; fasta = ">ref\nACDE\n>other\nACDF\n",
+        filename = "sequences.fasta")
+    path = joinpath(dir, filename)
+    write(path, fasta)
+    return path
+end
+
+# Construct inside the callback so invalid values fail at the scoring boundary.
+constant_score_callback(value) = (args...; kwargs...) -> Iduna.EPLI.RawScore(value)
+
+function sample_size_score(reference_msa, sample_msa; kwargs...)
+    n_sample = Iduna.EPLI.nsequences(Iduna.EPLI.read_file(sample_msa, Iduna.EPLI.FASTA))
+    return Iduna.EPLI.RawScore(n_sample)
+end
+
 function copy_aligner(input_fasta, output_fasta; logs_dir = nothing,
         run_label = "run", aligner_args = Cmd(String[]))
     mkpath(dirname(output_fasta))

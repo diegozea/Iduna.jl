@@ -229,7 +229,7 @@ mktempdir() do tmp
         @test label == "species_subset_001"
         mkpath(logs_dir)
         write(joinpath(logs_dir, "$(label)_hhalign.out"), "fake\n")
-        (; raw_score = 88.0, matched_positions = 88, comparable_positions = 100)
+        Iduna.EPLI.IdentityScore(Iduna.EPLI.IdentityCounts(88, 100))
     end
     sampled_metadata = Iduna.ThorAxeMSA._candidate_run_metadata(
         scoring_input, scoring_target, [sampled_pid];
@@ -344,7 +344,7 @@ mktempdir() do tmp
         mkpath(logs_dir)
         write(joinpath(logs_dir, "$(label)_hhalign.out"), "fake\n")
         value = parse(Float64, last(split(String(label), '_')))
-        (; raw_score = value, matched_positions = value, comparable_positions = 100)
+        Iduna.EPLI.IdentityScore(Iduna.EPLI.IdentityCounts(value, 100))
     end
     parallel_metadata = Iduna.ThorAxeMSA._candidate_run_metadata(
         scoring_input, scoring_target, [parallel_pid];

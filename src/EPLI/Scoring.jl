@@ -20,11 +20,11 @@ function _score_sample(spec,
     sample_msa_fasta = build_sample_msa(spec; overwrite)
     isfile(sample_msa_fasta) ||
         error("Sample MSA FASTA is missing: $(sample_msa_fasta).")
-    score = _score_result(score_fn(reference_msa_fasta, sample_msa_fasta;
+    score = score_fn(reference_msa_fasta, sample_msa_fasta;
         logs_dir = logs_dir === nothing ? nothing : joinpath(logs_dir, "hhalign"),
-        label = spec.sample_label))
+        label = spec.sample_label)::ScoreResult
     raw = raw_score(score)
-    normalized = _normalization_result(normalization_fn(score; reference_score))
+    normalized = normalization_fn(score; reference_score)::NormalizationResult
     n_reference = spec.n_sequences_reference
     n_sample = spec.n_sequences_sample === nothing ?
                nsequences(read_file(sample_msa_fasta, FASTA)) :
@@ -43,11 +43,9 @@ function _score_sample(spec,
         n_sequences_sample = n_sample,
         reference_msa_fasta,
         sample_msa_fasta,
-        matched_positions = score.counts === nothing ?
-                            _optional_score_field(score, :matched_positions) :
+        matched_positions = score.counts === nothing ? missing :
                             score.counts.matched_positions,
-        comparable_positions = score.counts === nothing ?
-                               _optional_score_field(score, :comparable_positions) :
+        comparable_positions = score.counts === nothing ? missing :
                                score.counts.comparable_positions,
         hhalign_score = _optional_score_field(score, :hhalign_score),
         probability = _optional_score_field(score, :probability),
@@ -59,10 +57,9 @@ function _reference_self_score(reference_msa_fasta::AbstractString,
         score_fn,
         logs_dir::Union{Nothing, AbstractString})
     compute_reference_self_score || return nothing
-    score = _score_result(score_fn(reference_msa_fasta, reference_msa_fasta;
+    return score_fn(reference_msa_fasta, reference_msa_fasta;
         logs_dir = logs_dir === nothing ? nothing : joinpath(logs_dir, "hhalign"),
-        label = "reference_self"))
-    return score
+        label = "reference_self")::ScoreResult
 end
 
 function _score_sample_specs!(rows::AbstractVector,
@@ -196,14 +193,15 @@ Compute EPLI for an aligner over sequence-row subsamples.
 
 # Score Contract
 
-Score callbacks return `RawScore`, `IdentityScore`, or a named tuple adapted to
-`RawScore`. Normalizers receive the validated object; custom metadata is available
-as `score.diagnostics`. Their results are converted to `NormalizationResult`.
+Score callbacks return `ScoreResult`: either `RawScore` or `IdentityScore`.
+Normalizers receive that validated object and return `NormalizationResult`.
+Custom metadata is available as `score.diagnostics`. A reference self score,
+when requested, follows the same score contract. Other return types raise `TypeError`.
 Raw scores, normalized scores and the final EPLI must be finite Float64 values.
 An optional `normalization_score` must be finite or `missing`. Invalid scores
-raise `ArgumentError` (wrapped in a task failure during parallel scoring);
-samples are never silently discarded. Finite negative scores and normalization
-ratios above 100 remain valid.
+raise `ArgumentError` at construction. Parallel scoring reports callback failures
+as task failures. Samples are never silently discarded. Finite negative scores and
+normalization ratios above 100 remain valid.
 """
 function epli_score(
         input::Union{AbstractString, AbstractMultipleSequenceAlignment,
