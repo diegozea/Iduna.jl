@@ -241,8 +241,8 @@ is determined from the original score's validated identity counts.
 
 Callbacks follow one typed contract:
 
-- A score callback returns `ScoreResult`, which means either `IdentityScore` or
-  `RawScore`. This also applies to a requested reference self score.
+- A score callback returns [`ScoreResult`](@ref Iduna.EPLI.ScoreResult): either
+  `IdentityScore` or `RawScore`. This also applies to a requested reference self score.
 - A normalization callback receives that score and returns `NormalizationResult`.
   Its `reference_score` keyword is either a `ScoreResult` or `nothing`.
 
@@ -335,13 +335,6 @@ samples species lists instead of sequences for ThorAxe PID selection.
 Iduna.EPLI.epli_score
 Iduna.EPLI.hhsuite_identity_score
 Iduna.EPLI.hhsuite_profile_score
-Iduna.EPLI.ScoreResult
-Iduna.EPLI.IdentityCounts
-Iduna.EPLI.IdentityScore
-Iduna.EPLI.RawScore
-Iduna.EPLI.NormalizationResult
-Iduna.EPLI.raw_score
-Iduna.EPLI.requires_reference_score
 Iduna.EPLI.comparable_positions_normalization
 Iduna.EPLI.self_reference_normalization
 Iduna.EPLI.no_normalization
