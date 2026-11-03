@@ -239,14 +239,37 @@ requires a nonzero reference score; no normalization uses a missing denominator.
 Normalization results contain numerical values only. Whether positions were compared
 is determined from the original score's validated identity counts.
 
-Custom score callbacks should return `RawScore` or `IdentityScore`. Named tuples
-with `raw_score` are accepted at the input boundary and converted to `RawScore`;
-complete, nonmissing identity counts are validated there as well. Normalization
-callbacks receive this validated object, not the original tuple. Access additional
-callback fields through `score.diagnostics`. A normalization callback may return
-`NormalizationResult`, a real number, or a named tuple with `normalized_score` and
-an optional `normalization_score`; the latter two are converted at the boundary.
-Callable objects are supported. Extend `requires_reference_score` for a normalizer
+Callbacks follow one typed contract:
+
+- A score callback returns `ScoreResult`, which means either `IdentityScore` or
+  `RawScore`. This also applies to a requested reference self score.
+- A normalization callback receives that score and returns `NormalizationResult`.
+  Its `reference_score` keyword is either a `ScoreResult` or `nothing`.
+
+Named tuples and bare numbers are not callback results. Construct the appropriate
+type where the value is first calculated; invalid numerical values fail there.
+Returning the wrong type raises `TypeError` before the result can enter a median
+or output table. Access additional information through `score.diagnostics`.
+Scientific count columns come only from validated `IdentityCounts`, never from
+similarly named diagnostic fields.
+
+For example, a custom normalizer can return a raw profile score without scaling:
+
+```julia
+using Iduna.EPLI: ScoreResult, RawScore, NormalizationResult, raw_score
+
+function custom_normalization(score::ScoreResult; reference_score=nothing)
+    return NormalizationResult(raw_score(score))
+end
+
+score = RawScore(-2.0; diagnostics=(; probability=missing))
+component = custom_normalization(score)  # NormalizationResult(-2.0, missing)
+```
+
+A score callback returns such a `RawScore` after calculating the profile score,
+or `IdentityScore(IdentityCounts(matched, comparable))` for count-based scoring.
+Use the built-in `no_normalization` for the behavior illustrated above. Callable
+objects are also supported. Extend `requires_reference_score` for a normalizer
 that needs a reference self score, or set `compute_reference_self_score` explicitly.
 
 The final median is an `EPLIScore`, whose constructor requires a finite Float64
@@ -309,6 +332,13 @@ samples species lists instead of sequences for ThorAxe PID selection.
 Iduna.EPLI.epli_score
 Iduna.EPLI.hhsuite_identity_score
 Iduna.EPLI.hhsuite_profile_score
+Iduna.EPLI.ScoreResult
+Iduna.EPLI.IdentityCounts
+Iduna.EPLI.IdentityScore
+Iduna.EPLI.RawScore
+Iduna.EPLI.NormalizationResult
+Iduna.EPLI.raw_score
+Iduna.EPLI.requires_reference_score
 Iduna.EPLI.comparable_positions_normalization
 Iduna.EPLI.self_reference_normalization
 Iduna.EPLI.no_normalization

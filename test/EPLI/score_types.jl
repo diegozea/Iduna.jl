@@ -25,15 +25,14 @@ Iduna.EPLI.requires_reference_score(::TypedTestNormalizer) = true
     counts = E.IdentityCounts(3.0, 4)
     score = E.IdentityScore(counts; diagnostics = (; probability = missing))
     @test E.raw_score(score) === 3.0
-    @test E._score_result(score) === score
+    @test score isa E.ScoreResult
     @test E.comparable_positions_normalization(score).normalized_score == 75
-    @test E.comparable_positions_normalization(counts).normalized_score == 75
     @test_throws ArgumentError E.comparable_positions_normalization(E.RawScore(1))
-    zero = E.comparable_positions_normalization(E.IdentityCounts(0, 0))
+    zero = E.comparable_positions_normalization(E.IdentityScore(E.IdentityCounts(0, 0)))
     @test zero isa E.NormalizationResult
     @test zero.normalized_score === 0.0
     @test zero.normalization_score === 0.0
-    @test E.comparable_positions_normalization(E.IdentityCounts(0, 4)).normalization_score ==
+    @test E.comparable_positions_normalization(E.IdentityScore(E.IdentityCounts(0, 4))).normalization_score ==
           4
     for value in (0.0, -0.0), denominator in (0.0, -0.0)
 
@@ -41,8 +40,6 @@ Iduna.EPLI.requires_reference_score(::TypedTestNormalizer) = true
         @test result.normalized_score === value
         @test result.normalization_score === denominator
     end
-    @test E._normalization_result(zero) === zero
-    @test E._normalization_result((; normalized_score = 0, normalization_score = 0)) == zero
     @test E.raw_score(E.RawScore(-2)) === -2.0
     @test E.no_normalization(E.RawScore(-2)).normalized_score === -2.0
     @test E.self_reference_normalization(E.RawScore(15);
@@ -51,10 +48,8 @@ Iduna.EPLI.requires_reference_score(::TypedTestNormalizer) = true
         reference_score = E.RawScore(-10)).normalized_score === -150.0
     @test !E.requires_reference_score(E.no_normalization)
     @test E.requires_reference_score(E.self_reference_normalization)
-    @test E._score_result((; raw_score = 1, matched_positions = missing,
-        comparable_positions = missing)).counts === nothing
-    @test_throws ArgumentError E._score_result((; raw_score = 1,
-        matched_positions = 3, comparable_positions = 2))
+    @test E.RawScore(1) isa E.ScoreResult
+    @test E.RawScore(1).counts === nothing
     diagnostics = Dict(:value => NaN)
     raw = E.RawScore(2; diagnostics)
     diagnostics[:value] = Inf
@@ -110,8 +105,8 @@ end
     no_positions = replace(block, "A-C 2" => "--- 0", "| |" => "   ")
     @test E._identity_counts_from_codes(E._get_codes(no_positions)...) ==
           E.IdentityCounts(0, 0)
-    @test E.comparable_positions_normalization(
-        E._identity_counts_from_codes(E._get_codes(no_positions)...)).normalized_score ===
+    @test E.comparable_positions_normalization(E.IdentityScore(
+        E._identity_counts_from_codes(E._get_codes(no_positions)...))).normalized_score ===
           0.0
     for malformed in ("", "unrecognized output", "Probab=99\n",
         replace(block, "Q query" => "query"), replace(block, "T query" => "target"),
@@ -254,8 +249,7 @@ end
 @testset "Typed callbacks and zero-comparison diagnostics" begin
     E = Iduna.EPLI
     mktempdir() do tmp
-        input = joinpath(tmp, "input.fa")
-        write(input, ">ref\nACDE\n>other\nACDF\n")
+        input = write_epli_test_input(tmp)
         result = E.epli_score(input, joinpath(tmp, "typed"), copy_aligner;
             score_fn = TypedTestScore(), normalization_fn = TypedTestNormalizer(),
             sample_count = 2, progress_enabled = false)
@@ -267,7 +261,7 @@ end
         @test all(row -> ismissing(row.no_comparable_positions), result.rows)
         for normalization_fn in (E.comparable_positions_normalization,
             E.no_normalization, E.self_reference_normalization,
-            (score; kwargs...) -> (; normalized_score = 0, no_comparable_positions = false))
+            (score; kwargs...) -> E.NormalizationResult(0))
             score_fn = (args...; label, kwargs...) -> E.IdentityScore(
                 label == "reference_self" ? E.IdentityCounts(2, 2) : E.IdentityCounts(0, 0))
             result = E.epli_score(

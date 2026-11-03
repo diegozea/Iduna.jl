@@ -21,8 +21,6 @@ function _identity_count(value::Real)
     return Int(value)
 end
 
-abstract type AbstractScore end
-
 """
     IdentityScore(counts::IdentityCounts; diagnostics=(;))
 
@@ -30,7 +28,7 @@ A profile comparison measured by identity counts. `raw_score(score)` is derived
 from the matched count, so the raw score and counts cannot disagree. Optional
 tool diagnostics are retained separately and are not score invariants.
 """
-struct IdentityScore{D} <: AbstractScore
+struct IdentityScore{D}
     counts::IdentityCounts
     diagnostics::D
 end
@@ -45,7 +43,7 @@ A finite Float64 raw score, including negative profile or custom scores.
 Optional `counts` must be validated `IdentityCounts`. Diagnostics may contain
 missing or non-finite values when they are not used as the scientific score.
 """
-struct RawScore{D} <: AbstractScore
+struct RawScore{D}
     raw_score::Float64
     counts::Union{Nothing, IdentityCounts}
     diagnostics::D
@@ -56,6 +54,15 @@ struct RawScore{D} <: AbstractScore
 end
 
 """
+    ScoreResult
+
+The return type of a score callback: either `IdentityScore` or `RawScore`.
+Use `IdentityScore` for a score derived from validated identity counts, and
+`RawScore` for a finite profile or custom score. Both retain optional diagnostics.
+"""
+const ScoreResult = Union{IdentityScore, RawScore}
+
+"""
     raw_score(score)
 
 Return the finite raw value of an `IdentityScore` or `RawScore`.
@@ -63,7 +70,7 @@ Return the finite raw value of an `IdentityScore` or `RawScore`.
 raw_score(score::IdentityScore) = Float64(score.counts.matched_positions)
 raw_score(score::RawScore) = score.raw_score
 
-function _require_identity_counts(score::AbstractScore)
+function _require_identity_counts(score::ScoreResult)
     score.counts === nothing && throw(ArgumentError("This score has no identity counts."))
     return score.counts
 end
@@ -86,28 +93,4 @@ struct NormalizationResult
                 _finite_score(denominator, "Normalization score")
         return new(normalized, scale)
     end
-end
-
-function _callback_identity_counts(value::NamedTuple)
-    matched = get(value, :matched_positions, missing)
-    comparable = get(value, :comparable_positions, missing)
-    (ismissing(matched) || ismissing(comparable)) && return nothing
-    return IdentityCounts(matched, comparable)
-end
-
-_score_result(value::Union{RawScore, IdentityScore}) = value
-function _score_result(value::NamedTuple)
-    return RawScore(value.raw_score;
-        counts = _callback_identity_counts(value), diagnostics = value)
-end
-
-function _normalization_result(value)
-    value isa NormalizationResult && return value
-    value isa Real && return NormalizationResult(value)
-    value isa NamedTuple ||
-        error("Normalization function must return NormalizationResult, a real number, or a named tuple.")
-    :normalized_score in keys(value) ||
-        error("Normalization functions that return a named tuple must include `normalized_score`.")
-    return NormalizationResult(
-        value.normalized_score, get(value, :normalization_score, missing))
 end

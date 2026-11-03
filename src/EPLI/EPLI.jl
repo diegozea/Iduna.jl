@@ -22,7 +22,7 @@ using ..Utils: EPLIScore, _finite_score, _file_sha256, _sample_indices, _sample_
                _terminal_progress_enabled,
                write_fasta, write_json
 
-export IdentityCounts, IdentityScore, RawScore, NormalizationResult, raw_score,
+export IdentityCounts, IdentityScore, RawScore, ScoreResult, NormalizationResult, raw_score,
        requires_reference_score, comparable_positions_normalization,
        epli_score,
        hhsuite_identity_score,
