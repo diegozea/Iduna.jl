@@ -36,7 +36,9 @@ function _score_sample(spec,
         normalization_score = normalized.normalization_score,
         normalized_score = normalized.normalized_score,
         epli_component = normalized.normalized_score,
-        no_comparable_positions = normalized.no_comparable_positions,
+        # Unknown counts are distinct from a measured absence of comparable positions.
+        no_comparable_positions = score.counts === nothing ? missing :
+                                  iszero(score.counts.comparable_positions),
         n_sequences_reference = n_reference,
         n_sequences_sample = n_sample,
         reference_msa_fasta,
@@ -143,7 +145,9 @@ function _score_alignment_samples(reference_msa_fasta::AbstractString,
     end
     return (;
         rows = score_rows,
-        no_comparable_samples = count(row -> row.no_comparable_positions, score_rows),
+        no_comparable_samples = count(row -> row.no_comparable_positions === true, score_rows),
+        samples_without_identity_counts = count(
+            row -> ismissing(row.no_comparable_positions), score_rows),
         epli,
         reference_score,
         scores_path)
@@ -262,6 +266,7 @@ function epli_score(
         epli = scored.epli.value,
         n_samples = length(scored.rows),
         no_comparable_samples = scored.no_comparable_samples,
+        samples_without_identity_counts = scored.samples_without_identity_counts,
         sample_count = Int(sample_count),
         sample_fraction = Float64(sample_fraction),
         sample_seed = seed,

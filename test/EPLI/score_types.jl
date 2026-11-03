@@ -28,26 +28,21 @@ Iduna.EPLI.requires_reference_score(::TypedTestNormalizer) = true
     @test E._score_result(score) === score
     @test E.comparable_positions_normalization(score).normalized_score == 75
     @test E.comparable_positions_normalization(counts).normalized_score == 75
-    @test !E.comparable_positions_normalization(score).no_comparable_positions
     @test_throws ArgumentError E.comparable_positions_normalization(E.RawScore(1))
     zero = E.comparable_positions_normalization(E.IdentityCounts(0, 0))
     @test zero isa E.NormalizationResult
     @test zero.normalized_score === 0.0
-    @test zero.no_comparable_positions
-    @test !E.comparable_positions_normalization(E.IdentityCounts(0, 4)).no_comparable_positions
-    @test_throws ArgumentError E.NormalizationResult(1, 0; no_comparable_positions = true)
-    @test_throws ArgumentError E.NormalizationResult(0; no_comparable_positions = true)
-    @test_throws ArgumentError E.NormalizationResult(0, 1; no_comparable_positions = true)
+    @test zero.normalization_score === 0.0
+    @test E.comparable_positions_normalization(E.IdentityCounts(0, 4)).normalization_score ==
+          4
     for value in (0.0, -0.0), denominator in (0.0, -0.0)
 
-        result = E.NormalizationResult(value, denominator; no_comparable_positions = true)
+        result = E.NormalizationResult(value, denominator)
         @test result.normalized_score === value
         @test result.normalization_score === denominator
-        @test result.no_comparable_positions
     end
     @test E._normalization_result(zero) === zero
-    @test E._normalization_result((; normalized_score = 0, normalization_score = 0,
-        no_comparable_positions = true)).no_comparable_positions
+    @test E._normalization_result((; normalized_score = 0, normalization_score = 0)) == zero
     @test E.raw_score(E.RawScore(-2)) === -2.0
     @test E.no_normalization(E.RawScore(-2)).normalized_score === -2.0
     @test E.self_reference_normalization(E.RawScore(15);
@@ -82,11 +77,30 @@ end
     @test_throws ArgumentError E._hhsuite_residue_indices("AA", 1, 1)
     annotated = replace(block, "Q query" => "Q ss_pred   HHH\nQ query")
     @test E._get_codes(annotated) == (positions, codes)
+    # HHsuite accepts annotation names with these prefixes, including suffixes.
+    for annotation in ("ss_pred", "ss_conf", "ss_dssp", "sa_dssp", "ss_pred_extra")
+        symbols = annotation in ("ss_conf", "sa_dssp") ? "999" : "HHH"
+        annotated = replace(block, "Q query" => "Q $annotation   $symbols\nQ query",
+            "Confidence" => "T $annotation   $symbols\nConfidence")
+        @test E._get_codes(annotated) == (positions, codes)
+    end
     # Use the first displayed query sequence for position counts, as before; the
     # comparison row is after the consensus row, whose insert columns may differ.
     consensus = "Probab=99\nQ query 1 Aac 3\nQ Conse 1 A.. 1\n          |  \nT query 1 ABC 3\nConfidence\n"
     @test E._identity_counts_from_codes(E._get_codes(consensus)...) ==
           E.IdentityCounts(1, 3)
+    # Validate all displayed sequences. A truncated first row must not fall back
+    # to consensus counts; a damaged later row must not be silently ignored.
+    for malformed in (
+        replace(consensus, "Q query 1 Aac 3" => "Q query 1 Aac"),
+        replace(consensus, "Q Conse 1 A.. 1" => "Q Conse 1 A.."),
+        replace(consensus, "Q Conse 1 A.. 1" => "Q Conse 1 A. 1"),
+        replace(consensus, "T query 1 ABC 3" => "T query 1 ABC\nT Conse 1 ABC 3"),
+        replace(consensus, "T query 1 ABC 3" => "T query 1 ABC 3\nT other 1 ABC"),
+        replace(consensus, "T query 1 ABC 3" => "T query 1 ABC 3\nT other 1 AB 2"),
+        replace(consensus, "Q query 1 Aac 3" => "Q ss_pred 1 Aac"))
+        @test_throws ArgumentError E._get_codes(malformed)
+    end
     @test E._identity_counts_from_codes(E._get_codes(block * "\n" * block)...) ==
           E.IdentityCounts(2, 2)
     no_matches = replace(block, "| |" => "   ")
@@ -97,7 +111,8 @@ end
     @test E._identity_counts_from_codes(E._get_codes(no_positions)...) ==
           E.IdentityCounts(0, 0)
     @test E.comparable_positions_normalization(
-        E._identity_counts_from_codes(E._get_codes(no_positions)...)).no_comparable_positions
+        E._identity_counts_from_codes(E._get_codes(no_positions)...)).normalized_score ===
+          0.0
     for malformed in ("", "unrecognized output", "Probab=99\n",
         replace(block, "Q query" => "query"), replace(block, "T query" => "target"),
         replace(block, "          | |\n" => ""),
@@ -208,6 +223,19 @@ end
             "pid,pid_order,eligible,epli,n_sequences_msa0,stockholm_path,fasta_path\n" *
             "10,2,true,0,2,s10.sto,s10.fa\n20,1,true,0,3,s20.sto,s20.fa\n")
         @test T.select_best_seed(path).pid == 20
+        # Signed zeros are the same scientific score. Both MSA size and PID order
+        # must break their ties, while the selected seed retains its original sign.
+        for (first_score, second_score) in (("-0.0", "0.0"), ("0.0", "-0.0"))
+            for (first_size, second_size) in ((5, 2), (3, 3))
+                write(path,
+                    "pid,pid_order,eligible,epli,n_sequences_msa0,stockholm_path,fasta_path\n" *
+                    "10,1,true,$first_score,$first_size,s10.sto,s10.fa\n" *
+                    "20,2,true,$second_score,$second_size,s20.sto,s20.fa\n")
+                best = T.select_best_seed(path)
+                @test best.pid == 10
+                @test best.epli.value === parse(Float64, first_score)
+            end
+        end
         # Rank the validated Float64 values. These integer inputs become the same
         # score, so the larger MSA must win the tie.
         write(path,
@@ -235,13 +263,37 @@ end
         @test result.epli.value == -20
         @test E.raw_score(result.reference_score) == 10
         @test result.no_comparable_samples == 0
-        result = E.epli_score(input, joinpath(tmp, "zero"), copy_aligner;
-            score_fn = (args...; kwargs...) -> E.IdentityScore(E.IdentityCounts(0, 0)),
-            sample_count = 2, progress_enabled = false)
-        @test result.epli.value === 0.0
-        @test result.no_comparable_samples == 2
-        @test all(row -> row.no_comparable_positions, E.CSV.File(result.scores_path))
-        @test only(E.CSV.File(result.summary_path)).no_comparable_samples == 2
+        @test result.samples_without_identity_counts == 2
+        @test all(row -> ismissing(row.no_comparable_positions), result.rows)
+        for normalization_fn in (E.comparable_positions_normalization,
+            E.no_normalization, E.self_reference_normalization,
+            (score; kwargs...) -> (; normalized_score = 0, no_comparable_positions = false))
+            score_fn = (args...; label, kwargs...) -> E.IdentityScore(
+                label == "reference_self" ? E.IdentityCounts(2, 2) : E.IdentityCounts(0, 0))
+            result = E.epli_score(
+                input, joinpath(tmp, string(normalization_fn)), copy_aligner;
+                score_fn, normalization_fn, sample_count = 2, progress_enabled = false)
+            @test result.epli.value === 0.0
+            @test result.no_comparable_samples == 2
+            @test result.samples_without_identity_counts == 0
+            @test all(row -> row.no_comparable_positions, E.CSV.File(result.scores_path))
+            @test only(E.CSV.File(result.summary_path)).no_comparable_samples == 2
+        end
+        # The evidence follows validated counts even for negative profile scores,
+        # and unavailable counts remain distinct from observed zero matches.
+        scores = [E.RawScore(-2; counts = E.IdentityCounts(0, 0)),
+            E.IdentityScore(E.IdentityCounts(0, 4)), E.RawScore(0)]
+        score_fn = (args...; label, kwargs...) -> scores[parse(Int, last(split(label, '_')))]
+        result = E.epli_score(input, joinpath(tmp, "mixed_counts"), copy_aligner;
+            score_fn, normalization_fn = E.no_normalization,
+            sample_count = 3, progress_enabled = false)
+        @test isequal([row.no_comparable_positions for row in result.rows], [
+            true, false, missing])
+        @test result.epli.value == 0
+        @test result.rows[1].normalized_score == -2
+        @test result.no_comparable_samples == 1
+        @test result.samples_without_identity_counts == 1
+        @test only(E.CSV.File(result.summary_path)).samples_without_identity_counts == 1
         T = Iduna.ThorAxeMSA
         @test_throws ArgumentError T._candidate_summary_row(
             Iduna.ResolvedTarget(input_id = "x", input_kind = :uniprot,

@@ -69,30 +69,22 @@ function _require_identity_counts(score::AbstractScore)
 end
 
 """
-    NormalizationResult(value, normalization_score=missing;
-                        no_comparable_positions=false)
+    NormalizationResult(value, normalization_score=missing)
 
 An immutable normalized component with finite Float64 values. A missing
 `normalization_score` means no denominator was supplied, as with `no_normalization`.
-Negative values and ratios above 100 are valid. `no_comparable_positions=true`
-records the explicit zero-comparison convention and requires both values to be zero.
+Negative values and ratios above 100 are valid. Identity counts belong to the
+original score; normalization does not determine whether positions were compared.
 Invalid values raise `ArgumentError` at construction, not on field access.
 """
 struct NormalizationResult
     normalized_score::Float64
     normalization_score::Union{Missing, Float64}
-    no_comparable_positions::Bool
-    function NormalizationResult(value::Real, denominator::Union{Missing, Real} = missing;
-            no_comparable_positions::Bool = false)
+    function NormalizationResult(value::Real, denominator::Union{Missing, Real} = missing)
         normalized = _finite_score(value, "Normalized score")
         scale = ismissing(denominator) ? missing :
                 _finite_score(denominator, "Normalization score")
-        if no_comparable_positions
-            if ismissing(scale) || !iszero(scale) || !iszero(normalized)
-                throw(ArgumentError("No comparable positions requires a zero component and denominator."))
-            end
-        end
-        return new(normalized, scale, no_comparable_positions)
+        return new(normalized, scale)
     end
 end
 
@@ -117,6 +109,5 @@ function _normalization_result(value)
     :normalized_score in keys(value) ||
         error("Normalization functions that return a named tuple must include `normalized_score`.")
     return NormalizationResult(
-        value.normalized_score, get(value, :normalization_score, missing);
-        no_comparable_positions = get(value, :no_comparable_positions, false))
+        value.normalized_score, get(value, :normalization_score, missing))
 end

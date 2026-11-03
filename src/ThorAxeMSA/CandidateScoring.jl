@@ -39,7 +39,8 @@ function _candidate_summary_row(target::ResolvedTarget,
         metadata,
         epli = missing,
         n_samples::Integer = 0,
-        no_comparable_samples::Integer = 0)
+        no_comparable_samples::Integer = 0,
+        samples_without_identity_counts::Integer = 0)
     score = _optional_epli(epli)
     reason = if score === nothing
         validation.eligible && sample_count != 0 &&
@@ -60,6 +61,7 @@ function _candidate_summary_row(target::ResolvedTarget,
         epli = score === nothing ? missing : score.value,
         epli_reason = reason,
         no_comparable_samples = Int(no_comparable_samples),
+        samples_without_identity_counts = Int(samples_without_identity_counts),
         n_samples = Int(n_samples),
         n_sequences_msa0 = nsequences(candidate.msa),
         pid_sample_count = Int(sample_count),
@@ -137,6 +139,7 @@ function _score_pid_candidate(target::ResolvedTarget,
         epli = scored.epli,
         n_samples = length(scored.rows),
         no_comparable_samples = scored.no_comparable_samples,
+        samples_without_identity_counts = scored.samples_without_identity_counts,
         sample_count,
         sample_fraction,
         sample_seed,
