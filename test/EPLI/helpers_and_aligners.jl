@@ -63,22 +63,12 @@ mktempdir() do tmp
     @test Iduna.EPLI.comparable_positions_normalization(
         identity_score).normalized_score == 100.0
     @test isfile(joinpath(logs_dir, "identity_hhalign.out"))
-    @test Iduna.EPLI._hhsuite_query_indices("A-A", 1, 2) == [1, 0, 2]
+    @test Iduna.EPLI._hhsuite_residue_indices("A-A", 1, 2) == [1, 0, 2]
 
     profile_score = Iduna.EPLI.hhsuite_profile_score(reference, reference;
         label = "profile")
     @test Iduna.EPLI.self_reference_normalization(
         profile_score; reference_score = profile_score).normalized_score == 100.0
-
-    @test Iduna.ThorAxeMSA._hhsuite_query_indices("A-A", 1, 2) == [1, 0, 2]
-    parsed = Iduna.ThorAxeMSA._parse_hhsuite_query_segment("Q 1 A-A 2")
-    @test parsed.indices == [1, 0, 2]
-    positions = Int[]
-    codes = Char[]
-    Iduna.ThorAxeMSA._append_hhsuite_code_line!(positions, codes, "  ||", 3:4,
-        [1, 2])
-    @test positions == [1, 2]
-    @test codes == ['|', '|']
 end
 
 mktempdir() do tmp

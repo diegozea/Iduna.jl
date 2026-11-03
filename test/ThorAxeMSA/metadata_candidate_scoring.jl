@@ -466,12 +466,6 @@ mktempdir() do tmp
         overwrite = true,
         keep_thoraxe_dir = true)
 
-    positions,
-    codes = Iduna.ThorAxeMSA._get_codes(
-        "Probab=99\nQ query 1 A-C 2\n          | |\nT query 1 ABC 3\nConfidence\n")
-    @test positions == [1, 0, 2]
-    @test codes == ['|', ' ', '|']
-    @test Iduna.ThorAxeMSA._identity_from_codes(positions, codes) == 100.0
     @test_throws ErrorException Iduna.ThorAxeMSA._reference_index(
         msa, "MISSING_GENE", "MISSING_TRANSCRIPT")
 

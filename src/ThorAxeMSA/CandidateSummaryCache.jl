@@ -7,7 +7,6 @@ const _CANDIDATE_SUMMARY_STRING_TYPES = Dict(
     :orthology => String,
     :transcript_query_fingerprint => String,
     :selection_mode => String,
-    :epli_state => String,
     :epli_reason => String,
     :sampling_strategy => String,
     :msa0_status => String,
@@ -299,8 +298,8 @@ function _candidate_summary_matches(df::DataFrame, metadata)
     end
 end
 
-function _row_seed(row, summary_path::AbstractString; allow_uncomputed::Bool = false)
-    epli = _candidate_score(row; allow_uncomputed)
+# The CSV boundary has already parsed and validated this score.
+function _row_seed(row, summary_path::AbstractString, epli::Union{Nothing, EPLIScore})
     workdir = abspath(_candidate_summary_workdir(summary_path))
     return SeedSelection(;
         pid = Float64(row.pid),

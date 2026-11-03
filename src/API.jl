@@ -784,27 +784,14 @@ function _load_result_target(summary, workdir::AbstractString)
     end
 end
 
-function _load_epli(data)
-    value = _missing_or_float_result(get(data, "epli", nothing))
-    # Validate a legacy state marker if present; absence does not imply never computed.
-    expected = ismissing(value) ? "not_computed" : "computed"
-    get(data, "epli_state", expected) == expected ||
-        throw(ArgumentError("Result EPLI state and value disagree."))
-    return Utils._optional_epli(value)
-end
-
-function _load_epli_reason(data, score)
-    reason = get(data, "epli_reason", score === nothing ? "not_recorded" : nothing)
-    return reason === nothing ? nothing : Symbol(reason)
-end
-
 function _load_result_seed_record(data, workdir::AbstractString)
     data isa AbstractDict || error("ThorAxe seed record is not an object.")
-    score = _load_epli(data)
+    score = Utils._optional_epli(_missing_or_float_result(get(data, "epli", nothing)))
+    reason = get(data, "epli_reason", score === nothing ? "not_recorded" : nothing)
     return Utils.SeedSelection(;
         pid = Float64(data["pid"]),
         epli = score,
-        epli_reason = _load_epli_reason(data, score),
+        epli_reason = reason === nothing ? nothing : Symbol(reason),
         stockholm_path = String(data["stockholm_path"]),
         fasta_path = get(data, "fasta_path", nothing) === nothing ? nothing :
                      String(data["fasta_path"]),
