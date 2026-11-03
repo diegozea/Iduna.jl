@@ -208,6 +208,15 @@ end
             "pid,pid_order,eligible,epli,n_sequences_msa0,stockholm_path,fasta_path\n" *
             "10,2,true,0,2,s10.sto,s10.fa\n20,1,true,0,3,s20.sto,s20.fa\n")
         @test T.select_best_seed(path).pid == 20
+        # Rank the validated Float64 values. These integer inputs become the same
+        # score, so the larger MSA must win the tie.
+        write(path,
+            "pid,pid_order,eligible,epli,n_sequences_msa0,stockholm_path,fasta_path\n" *
+            "10,2,true,9007199254740992,5,s10.sto,s10.fa\n" *
+            "20,1,true,9007199254740993,2,s20.sto,s20.fa\n")
+        best = T.select_best_seed(path)
+        @test best.pid == 10
+        @test best.epli.value == 9007199254740992.0
         @test T._sampling_disabled((; pid_sample_count = 0))
         @test !T._sampling_disabled((; selection_mode = "sampled_selection"))
         @test T._sampling_disabled((; selection_mode = "all_candidates"))
