@@ -64,6 +64,18 @@
     end
 end
 
+@testset "Subnormal medians" begin
+    tiny = nextfloat(0.0)
+    @test Iduna.EPLI._score_median([tiny, tiny]) == tiny
+    @test Iduna.EPLI._score_median([tiny, 2 * tiny]) == 2 * tiny
+    @test Iduna.EPLI._score_median([-tiny, -tiny]) == -tiny
+    @test Iduna.EPLI._score_median([-tiny, tiny]) == 0.0
+    @test Iduna.EPLI._score_median([0.0, tiny]) == 0.0
+    @test Iduna.EPLI._score_median([tiny, tiny, tiny]) == tiny
+    @test Iduna.EPLI._score_median([floatmax(Float64), floatmax(Float64)]) ==
+          floatmax(Float64)
+end
+
 @testset "Extreme normalization through scoring callbacks" begin
     mktempdir() do tmp
         input = joinpath(tmp, "input.fasta")

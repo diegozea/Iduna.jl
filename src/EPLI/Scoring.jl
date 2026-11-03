@@ -104,6 +104,19 @@ end
 # Alignment Sample Summaries
 # --------------------------
 
+function _score_median(components::AbstractVector{Float64})
+    value = median(components)
+    if iseven(length(components)) && abs(value) < floatmin(Float64)
+        # The two central values may underflow when halved separately by median.
+        return setprecision(BigFloat, 256) do
+            setrounding(BigFloat, RoundNearest) do
+                Float64(median(BigFloat.(components)), RoundNearest)
+            end
+        end
+    end
+    return value
+end
+
 function _score_alignment_samples(reference_msa_fasta::AbstractString,
         sample_specs::AbstractVector;
         score_fn::Function = hhsuite_identity_score,
@@ -133,7 +146,7 @@ function _score_alignment_samples(reference_msa_fasta::AbstractString,
         progress_enabled)
     score_rows = [row for row in rows if row !== nothing]
     isempty(score_rows) && error("No sample scores were computed.")
-    epli = median([row.epli_component for row in score_rows])
+    epli = _score_median([row.epli_component for row in score_rows])
     _validate_finite_score(epli, "EPLI")
     if scores_path !== nothing
         mkpath(dirname(scores_path))

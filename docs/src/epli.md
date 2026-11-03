@@ -233,6 +233,8 @@ normalization still rejects a zero reference score.
 Built-in percentage normalization uses higher precision near the `Float64` limits
 to avoid intermediate overflow and premature underflow. Results that are too small
 to represent round to zero; results that overflow `Float64` still raise an error.
+The final median also preserves representable subnormal scores when averaging its
+two central values.
 Seed selection also rejects non-finite scores in eligible or cached selected
 candidates. When PID sampling is explicitly disabled, `missing` means that no EPLI
 score was computed; it is tolerated for retaining candidates, not used as a numeric
