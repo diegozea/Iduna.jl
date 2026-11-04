@@ -53,12 +53,13 @@ function _validated_hhsuite_sequence(lines, row_indices, label)
     return first_sequence
 end
 
-function _append_hhsuite_block!(positions, codes, lines)
+function _append_hhsuite_block!(positions, codes, lines; summary_pending = false)
     query_rows = findall(line -> startswith(line, "Q "), lines)
     target_rows = findall(line -> startswith(line, "T "), lines)
     if isempty(query_rows) && isempty(target_rows)
         return false
     end
+    summary_pending && throw(ArgumentError("HHsuite hit has no summary header."))
     query = _validated_hhsuite_sequence(lines, query_rows, "query")
     target = _validated_hhsuite_sequence(lines, target_rows, "target")
 
@@ -82,26 +83,52 @@ function _append_hhsuite_block!(positions, codes, lines)
     return true
 end
 
+function _require_hhsuite_block_separator(block)
+    any(row -> startswith(row, "Q ") || startswith(row, "T "), block) &&
+        throw(ArgumentError("HHsuite alignment blocks must be separated."))
+    return nothing
+end
+
+function _require_complete_hhsuite_hit(hit_recognized, summary_pending = false)
+    summary_pending && throw(ArgumentError("HHsuite hit has no summary header."))
+    hit_recognized || throw(ArgumentError("HHsuite hit has no complete alignment block."))
+    return nothing
+end
+
 function _get_codes(output::AbstractString)
     lines = split(output, '\n')
-    start = findfirst(line -> startswith(line, "Probab="), lines)
+    start = findfirst(line -> startswith(line, "Probab=") || occursin(r"^No \d+$", line), lines)
     start === nothing && throw(ArgumentError("HHsuite output has no recognized alignment."))
     positions = Int[]
     codes = Char[]
     block = SubString{String}[]
-    recognized = false
+    hit_recognized = false
+    # No N and its following Probab line belong to the same hit header.
+    summary_pending = startswith(lines[start], "No ")
     # HHsuite 3.3 PrintHHR separates blocks with empty lines; Confidence is optional.
     # Preserve all-space comparison rows: only truly empty lines end a block.
     for line in @view(lines[(start + 1):end])
-        if isempty(line) || startswith(line, "Confidence")
-            recognized |= _append_hhsuite_block!(positions, codes, block)
+        if occursin(r"^No \d+$", line)
+            _require_hhsuite_block_separator(block)
+            _require_complete_hhsuite_hit(hit_recognized, summary_pending)
+            hit_recognized = false
+            summary_pending = true
+            empty!(block)
+        elseif startswith(line, "Probab=")
+            _require_hhsuite_block_separator(block)
+            summary_pending || _require_complete_hhsuite_hit(hit_recognized)
+            hit_recognized = false
+            summary_pending = false
+            empty!(block)
+        elseif isempty(line) || startswith(line, "Confidence")
+            hit_recognized |= _append_hhsuite_block!(positions, codes, block; summary_pending)
             empty!(block)
         else
             push!(block, line)
         end
     end
-    recognized |= _append_hhsuite_block!(positions, codes, block)
-    recognized || throw(ArgumentError("HHsuite output has no complete alignment block."))
+    hit_recognized |= _append_hhsuite_block!(positions, codes, block; summary_pending)
+    _require_complete_hhsuite_hit(hit_recognized, summary_pending)
     return positions, codes
 end
 
@@ -120,10 +147,11 @@ function _identity_counts_from_codes(positions::Vector{Int}, codes::Vector{Char}
 end
 
 function _parse_hhalign_float(line::AbstractString, key::AbstractString)
-    pattern = Regex("$(key)=([+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?)")
+    pattern = Regex("(?:^|\\s)$(key)=(\\S+)")
     m = match(pattern, line)
     m === nothing && return missing
-    return parse(Float64, m.captures[1])
+    value = tryparse(Float64, m.captures[1])
+    return value === nothing ? missing : value
 end
 
 function _hhalign_summary(output::AbstractString)

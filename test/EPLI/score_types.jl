@@ -125,6 +125,89 @@ end
     @test_throws ArgumentError E._identity_counts_from_codes([-1], ['|'])
 end
 
+@testset "Complete HHsuite hit sections" begin
+    E = Iduna.EPLI
+    # PrintHHR uses No/name/Probab headers for each alternative hit; a hit can
+    # contain several alignment blocks. Keep the native sequence-column layout.
+    output = """
+    No 1
+    >query
+    Probab=99.00  E-value=1e-10  Score=20.00
+
+    Q query             1 AC    2 (4)
+    Q Consensus         1 ac    2 (4)
+                          |+
+    T Consensus         1 ac    2 (4)
+    T query             1 AC    2 (4)
+    Confidence            99
+
+
+    Q query             3 DE    4 (4)
+    Q Consensus         3 de    4 (4)
+                          .|
+    T Consensus         3 de    4 (4)
+    T query             3 DE    4 (4)
+    Confidence            99
+
+
+    No 2
+    >query
+    Probab=98.00  E-value=1e-9  Score=18.00
+
+    Q query             1 AC    2 (4)
+    Q Consensus         1 ac    2 (4)
+                          ||
+    T Consensus         3 ac    4 (4)
+    T query             3 AC    4 (4)
+    Confidence            99
+
+    """
+    positions, codes = E._get_codes(output)
+    @test positions == [1, 2, 3, 4, 1, 2]
+    @test E._identity_counts_from_codes(positions, codes) == E.IdentityCounts(3, 4)
+    @test E._get_codes(replace(output, "Confidence            99\n" => "")) ==
+          (positions, codes)
+    first_hit, second_hit = split(output, "No 2\n"; limit = 2)
+    second_header = first(split(second_hit, "Q query"; limit = 2))
+    for incomplete in (
+        "Probab=99\n\n" * output,
+        first_hit * "Probab=99\n\nNo 2\n" * second_hit,
+        first_hit * "No 2\n" * second_header,
+        output * "No 3\n>query\nProbab=99\n\n",
+        "No 0\n>query\n" * output,
+        first_hit * "No 0\n>query\nNo 2\n" * second_hit,
+        first_hit * "No 2\n",
+        first_hit * "No 2\n>query\n",
+        first_hit * "No 2\n>query\nProbab",
+        replace(output, "Probab=99.00  E-value=1e-10  Score=20.00\n" => ""),
+        replace(output, "Probab=98.00  E-value=1e-9  Score=18.00\n" => ""))
+        @test_throws ArgumentError E._get_codes(incomplete)
+    end
+end
+
+@testset "HHsuite numeric fields" begin
+    E = Iduna.EPLI
+    summary = E._hhalign_summary("Probab=99.00  E-value=1.2e-30  Score=-3.50")
+    @test summary == (; probability = 99.0, e_value = 1.2e-30, hhalign_score = -3.5)
+    @test E._parse_hhalign_float("OtherScore=10 Score=2", "Score") == 2.0
+    @test ismissing(E._parse_hhalign_float("OtherScore=10", "Score"))
+    for token in ("1e+", "1.2garbage", "1e999", "")
+        @test ismissing(E._parse_hhalign_float("Score=$(token)", "Score"))
+        diagnostics = E._hhalign_summary("Probab=99 E-value=$(token) Score=10")
+        @test ismissing(diagnostics.e_value)
+        @test E.raw_score(E.IdentityScore(E.IdentityCounts(1, 2); diagnostics)) == 1.0
+        @test E.raw_score(E.RawScore(diagnostics.hhalign_score; diagnostics)) == 10.0
+    end
+    for (token, value) in (("nan", NaN), ("-nan", NaN), ("inf", Inf),
+        ("+inf", Inf), ("-inf", -Inf))
+        diagnostics = E._hhalign_summary("Probab=99 E-value=$(token) Score=$(token)")
+        @test isequal(diagnostics.e_value, value)
+        @test isequal(diagnostics.hhalign_score, value)
+        @test E.raw_score(E.IdentityScore(E.IdentityCounts(1, 2); diagnostics)) == 1.0
+        @test_throws ArgumentError E.RawScore(diagnostics.hhalign_score)
+    end
+end
+
 @testset "Optional EPLI and absence metadata" begin
     score = Iduna.EPLIScore(-2)
     @test Iduna.require_epli(score) === -2.0
