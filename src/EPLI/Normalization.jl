@@ -1,3 +1,18 @@
+function _percentage_ratio(numerator::Float64, denominator::Float64)
+    scaled = 100 * numerator
+    value = scaled / denominator
+    if isfinite(scaled) && floatmin(Float64) <= abs(value) < floatmax(Float64) / 2
+        return value
+    end
+    # Avoid intermediate overflow and double rounding near the Float64 limits.
+    # Julia 1.12 scopes these settings to the current task, including parallel scoring.
+    return setprecision(BigFloat, 256) do
+        setrounding(BigFloat, RoundNearest) do
+            Float64(100 * BigFloat(numerator) / BigFloat(denominator), RoundNearest)
+        end
+    end
+end
+
 """
     comparable_positions_normalization(score; reference_score=nothing)
 
@@ -10,7 +25,9 @@ function comparable_positions_normalization(score::ScoreResult;
     counts = _require_identity_counts(score)
     comparable = counts.comparable_positions
     comparable == 0 && return NormalizationResult(0.0, 0.0)
-    return NormalizationResult(100 * Float64(counts.matched_positions) / comparable, comparable)
+    return NormalizationResult(
+        _percentage_ratio(Float64(counts.matched_positions), Float64(comparable)),
+        comparable)
 end
 
 """
@@ -27,7 +44,7 @@ function self_reference_normalization(score::ScoreResult;
     denominator = raw_score(reference_score)
     denominator == 0.0 &&
         error("Cannot use self-reference normalization when the reference self score is zero.")
-    return NormalizationResult(100 * numerator / denominator, denominator)
+    return NormalizationResult(_percentage_ratio(numerator, denominator), denominator)
 end
 
 """
