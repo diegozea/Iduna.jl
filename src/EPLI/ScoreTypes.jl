@@ -22,13 +22,25 @@ function _identity_count(value::Real)
 end
 
 """
+    ScoreResult
+
+Abstract type for results returned by a score callback. Subtypes must implement
+`raw_score`, returning a real value representable as a finite Float64. They may
+also implement `identity_counts` and `score_diagnostics`.
+
+Accessors must return consistent values during scoring and be safe for concurrent
+reads. Iduna checks raw values and counts when callbacks return, before normalization.
+"""
+abstract type ScoreResult end
+
+"""
     IdentityScore(counts::IdentityCounts; diagnostics=(;))
 
 A profile comparison measured by identity counts. `raw_score(score)` is derived
 from the matched count, so the raw score and counts cannot disagree. Optional
 tool diagnostics are retained separately and are not score invariants.
 """
-struct IdentityScore{D}
+struct IdentityScore{D} <: ScoreResult
     counts::IdentityCounts
     diagnostics::D
 end
@@ -43,7 +55,7 @@ A finite Float64 raw score, including negative profile or custom scores.
 Optional `counts` must be validated `IdentityCounts`. Diagnostics may contain
 missing or non-finite values when they are not used as the scientific score.
 """
-struct RawScore{D}
+struct RawScore{D} <: ScoreResult
     raw_score::Float64
     counts::Union{Nothing, IdentityCounts}
     diagnostics::D
@@ -54,25 +66,48 @@ struct RawScore{D}
 end
 
 """
-    ScoreResult
-
-The return type of a score callback: either `IdentityScore` or `RawScore`.
-Use `IdentityScore` for a score derived from validated identity counts, and
-`RawScore` for a finite profile or custom score. Both retain optional diagnostics.
-"""
-const ScoreResult = Union{IdentityScore, RawScore}
-
-"""
     raw_score(score)
 
-Return the finite raw value of an `IdentityScore` or `RawScore`.
+Return the raw numerical value of a score. Every `ScoreResult` subtype must
+implement this method. The value must be real and representable as a finite Float64.
+For `IdentityScore`, it is the matched count; for `RawScore`, it is the stored value.
 """
 raw_score(score::IdentityScore) = Float64(score.counts.matched_positions)
 raw_score(score::RawScore) = score.raw_score
 
+"""
+    identity_counts(score::ScoreResult)
+
+Return validated `IdentityCounts`, or `nothing` when the score has no identity
+counts. The default is `nothing`. Implement this method to support
+`comparable_positions_normalization` and identity-count columns in sample output.
+"""
+identity_counts(::ScoreResult) = nothing
+identity_counts(score::Union{IdentityScore, RawScore}) = score.counts
+
+"""
+    score_diagnostics(score::ScoreResult)
+
+Return optional information from the scoring tool. The default is an empty named
+tuple. Prefer named fields such as `(; e_value=1e-6)`; `hhalign_score`, `probability`,
+and `e_value` properties are copied to sample output. Other information remains
+available to custom normalizers. These fields do not supply identity counts or
+change the raw score, and may contain missing or non-finite values.
+"""
+score_diagnostics(::ScoreResult) = (;)
+score_diagnostics(score::Union{IdentityScore, RawScore}) = score.diagnostics
+
+# Check extension results once at the callback boundary, retaining values for output.
+function _validated_score_values(score::ScoreResult)
+    raw = _finite_score(raw_score(score)::Real, "Raw score")
+    counts = identity_counts(score)::Union{Nothing, IdentityCounts}
+    return raw, counts
+end
+
 function _require_identity_counts(score::ScoreResult)
-    score.counts === nothing && throw(ArgumentError("This score has no identity counts."))
-    return score.counts
+    counts = identity_counts(score)::Union{Nothing, IdentityCounts}
+    counts === nothing && throw(ArgumentError("This score has no identity counts."))
+    return counts
 end
 
 """

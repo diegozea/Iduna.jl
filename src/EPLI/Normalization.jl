@@ -23,8 +23,10 @@ function self_reference_normalization(score::ScoreResult;
         reference_score::Union{Nothing, ScoreResult} = nothing)
     reference_score === nothing &&
         error("self_reference_normalization requires a reference self score.")
-    numerator = raw_score(score)
-    denominator = raw_score(reference_score)
+    # Custom score types may return integers or narrower floats. Convert before
+    # arithmetic so their numeric representation does not change the result.
+    numerator = _finite_score(raw_score(score)::Real, "Raw score")
+    denominator = _finite_score(raw_score(reference_score)::Real, "Reference self score")
     denominator == 0.0 &&
         error("Cannot use self-reference normalization when the reference self score is zero.")
     return NormalizationResult(100 * numerator / denominator, denominator)

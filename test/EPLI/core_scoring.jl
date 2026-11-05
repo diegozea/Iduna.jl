@@ -31,6 +31,64 @@ using MIToS.MSA: AnnotatedSequence
     end
 end
 
+@testset "Custom score implementations" begin
+    E = Iduna.EPLI
+    @test isabstracttype(E.ScoreResult)
+    raw = CustomRawScore(Float32(-2))
+    @test E.identity_counts(raw) === nothing
+    @test E.score_diagnostics(raw) == (;)
+    @test_throws ArgumentError E.comparable_positions_normalization(raw)
+    # Custom numeric storage must not introduce integer or Float32 overflow.
+    for value in (typemax(Int), floatmax(Float32), 3 // 4)
+        normalized = E.self_reference_normalization(CustomRawScore(value);
+            reference_score = CustomRawScore(value))
+        @test normalized.normalized_score ≈ 100.0
+        @test normalized.normalization_score === Float64(value)
+    end
+    for invalid in (NaN, Inf, -Inf)
+        @test_throws ArgumentError E.self_reference_normalization(CustomRawScore(invalid);
+            reference_score = CustomRawScore(1))
+        @test_throws ArgumentError E.self_reference_normalization(CustomRawScore(1);
+            reference_score = CustomRawScore(invalid))
+    end
+    mktempdir() do tmp
+        input = write_epli_test_input(tmp)
+        score_fn = (args...; label, kwargs...) -> label == "reference_self" ?
+                                                  CustomRawScore(4) : raw
+        for (normalizer, expected) in ((E.no_normalization, -2.0),
+            (E.self_reference_normalization, -50.0))
+            result = E.epli_score(input, joinpath(tmp, string(normalizer)), copy_aligner;
+                score_fn, normalization_fn = normalizer, sample_count = 1,
+                sample_seed = 1, progress_enabled = false)
+            @test Iduna.epli_value(result) === expected
+            @test result.samples_without_identity_counts == 1
+            @test ismissing(only(result.rows).e_value)
+        end
+
+        for counts in (E.IdentityCounts(3, 4), E.IdentityCounts(0, 0))
+            score = CustomCountScore(-2.0, counts, (; e_value = Inf, note = :preserved))
+            function normalize_custom(value; reference_score)
+                @test value === score # The normalizer receives the user's own type.
+                @test E.score_diagnostics(value).note === :preserved
+                return E.comparable_positions_normalization(value)
+            end
+            result = E.epli_score(
+                input, joinpath(tmp, "counts_$(counts.comparable_positions)"),
+                copy_aligner; score_fn = (args...; kwargs...) -> score,
+                normalization_fn = normalize_custom, sample_count = 1,
+                sample_seed = 1, progress_enabled = false)
+            row = only(result.rows)
+            @test Iduna.epli_value(result) ==
+                  (counts.comparable_positions == 0 ? 0.0 : 75.0)
+            @test row.raw_score === -2.0
+            @test row.matched_positions == counts.matched_positions
+            @test row.comparable_positions == counts.comparable_positions
+            @test row.no_comparable_positions == iszero(counts.comparable_positions)
+            @test row.e_value === Inf
+        end
+    end
+end
+
 @testset "Scoring failures do not produce results" begin
     E = Iduna.EPLI
     mktempdir() do tmp
@@ -65,6 +123,35 @@ end
                 callbacks..., sample_count = 1, sample_seed = 1, progress_enabled = false)
             @test !isfile(joinpath(workdir, "scores.csv"))
             @test !isfile(joinpath(workdir, "summary.csv"))
+        end
+
+        # Subtyping alone cannot guarantee valid values. Both callback boundaries
+        # must reject bad extension data even when the normalizer would ignore it.
+        invalid_custom_scores = (
+            ("nan", CustomRawScore(NaN), ArgumentError),
+            ("inf", CustomRawScore(Inf), ArgumentError),
+            ("negative_inf", CustomRawScore(-Inf), ArgumentError),
+            ("overflow", CustomRawScore(big"1e1000"), ArgumentError),
+            ("nonnumeric", CustomRawScore("bad"), TypeError),
+            ("counts", CustomCountScore(1.0, (; matched = 3, comparable = 2), (;)),
+                TypeError),
+            ("missing_counts", CustomCountScore(1.0, missing, (;)), TypeError))
+        for (name, bad_score, error_type) in invalid_custom_scores
+            for (stage, self_score) in (("sample", false), ("reference", true))
+                score_fn = (args...; label, kwargs...) -> begin
+                    if self_score && label != "reference_self"
+                        return E.RawScore(10)
+                    end
+                    return bad_score
+                end
+                workdir = joinpath(tmp, "$(stage)_$(name)")
+                @test_throws error_type E.epli_score(input, workdir, copy_aligner;
+                    score_fn, normalization_fn = observed_normalization,
+                    compute_reference_self_score = self_score, sample_count = 1,
+                    sample_seed = 1, progress_enabled = false)
+                @test !isfile(joinpath(workdir, "scores.csv"))
+                @test !isfile(joinpath(workdir, "summary.csv"))
+            end
         end
         @test normalization_calls[] == 0
 
@@ -101,8 +188,8 @@ end
                 custom_metadata = :preserved))
         score_fn = (reference, sample; kwargs...) -> score
         normalization_fn = (value; kwargs...) -> begin
-            @test value.diagnostics.custom_metadata === :preserved
-            @test value.diagnostics.matched_positions == 12
+            @test Iduna.EPLI.score_diagnostics(value).custom_metadata === :preserved
+            @test Iduna.EPLI.score_diagnostics(value).matched_positions == 12
             return Iduna.EPLI.NormalizationResult(150)
         end
         result = Iduna.EPLI.epli_score(input, joinpath(tmp, "run"), copy_aligner;

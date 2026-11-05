@@ -8,6 +8,21 @@ end
 # Construct inside the callback so invalid values fail at the scoring boundary.
 constant_score_callback(value) = (args...; kwargs...) -> Iduna.EPLI.RawScore(value)
 
+# These test types deliberately accept unchecked data to exercise callback validation.
+struct CustomRawScore{V} <: Iduna.EPLI.ScoreResult
+    value::V
+end
+Iduna.EPLI.raw_score(score::CustomRawScore) = score.value
+
+struct CustomCountScore{C, D} <: Iduna.EPLI.ScoreResult
+    value::Float64
+    evidence::C
+    details::D
+end
+Iduna.EPLI.raw_score(score::CustomCountScore) = score.value
+Iduna.EPLI.identity_counts(score::CustomCountScore) = score.evidence
+Iduna.EPLI.score_diagnostics(score::CustomCountScore) = score.details
+
 function sample_size_score(reference_msa, sample_msa; kwargs...)
     n_sample = Iduna.EPLI.nsequences(Iduna.EPLI.read_file(sample_msa, Iduna.EPLI.FASTA))
     return Iduna.EPLI.RawScore(n_sample)

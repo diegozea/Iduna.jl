@@ -251,7 +251,8 @@ score of zero cannot be used as a divisor. Scores must be finite numbers:
 The built-in functions above handle the usual workflows. To experiment with a
 different comparison method, pass your function as `score_fn` to `epli_score`.
 It receives two aligned FASTA paths, for the full reference and the sample,
-and must accept the keywords `logs_dir` and `label`. Return one of these types:
+and must accept the keywords `logs_dir` and `label`. These built-in result types
+cover common comparison methods:
 
 | What your function calculates | What to return |
 | --- | --- |
@@ -275,17 +276,60 @@ profile_score = RawScore(-2.0);
 (3.0, -2.0)
 ```
 
-[`ScoreResult`](@ref Iduna.EPLI.ScoreResult) is the name for
-`Union{IdentityScore,RawScore}`, not an abstract supertype. Custom scoring methods
-return these same types; you implement the comparison function rather than a new
-score subtype. Pair count-based scores with `comparable_positions_normalization`,
-or use `self_reference_normalization` or `no_normalization` for other measures.
+Both types belong to the abstract supertype [`ScoreResult`](@ref Iduna.EPLI.ScoreResult).
+Pair count-based scores with `comparable_positions_normalization`, or use
+`self_reference_normalization` or `no_normalization` for other measures.
+
+### Define your own score type
+
+If your measure needs different checks or stored information, define a subtype of
+`ScoreResult`. Iduna uses these methods to read it, so your fields can have any names:
+
+| Method | What it returns | Default |
+| --- | --- | --- |
+| [`raw_score(score)`](@ref Iduna.EPLI.raw_score) | A real value representable as a finite `Float64` | You must implement it |
+| [`identity_counts(score)`](@ref Iduna.EPLI.identity_counts) | Validated `IdentityCounts`, when available | `nothing` |
+| [`score_diagnostics(score)`](@ref Iduna.EPLI.score_diagnostics) | Optional tool information, usually a named tuple | An empty named tuple |
+
+For example, a comparison method that returns a probability can enforce values
+between 0 and 1 in its own constructor:
+
+```jldoctest custom_score_type
+import Iduna.EPLI: ScoreResult, raw_score, no_normalization
+
+struct ProbabilityScore <: ScoreResult
+    value::Float64
+    function ProbabilityScore(value::Real)
+        x = Float64(value)
+        0 <= x <= 1 || throw(ArgumentError("Probability must be between 0 and 1."))
+        new(x)
+    end
+end
+
+raw_score(score::ProbabilityScore) = score.value
+
+no_normalization(ProbabilityScore(0.8)).normalized_score
+
+# output
+
+0.8
+```
+
+Your `score_fn` can then return a `ProbabilityScore`. Only `raw_score` is needed
+for this example. Implement `identity_counts` as well if your measure supplies
+counts and should work with `comparable_positions_normalization`.
+
+These methods must give consistent values without changing the score; samples
+may be processed in parallel. Iduna checks raw values and counts when a scoring
+function returns, including reference self scores, before calling the normalizer.
+The normalizer receives your original score object. Invalid results stop the run
+before score tables are written.
 
 ### Optional information from scoring tools
 
 The built-in HHsuite functions also provide the alignment probability, E-value,
-and HHalign profile score in `score.diagnostics`. These fields are copied to
-`scores.csv` to help you inspect each comparison. You do not need to fill them in
+and HHalign profile score through `score_diagnostics(score)`. These fields are
+copied to `scores.csv` to help you inspect each comparison. You do not need to fill them in
 when using the built-in functions.
 
 A custom scoring function can attach extra information for its normalizer to
@@ -293,7 +337,7 @@ read. For example:
 
 ```jldoctest score_values
 score = RawScore(-2.0; diagnostics=(; e_value=1e-6));
-score.diagnostics.e_value
+score_diagnostics(score).e_value
 
 # output
 
@@ -318,7 +362,7 @@ zero-comparison convention, then changes the units from percent to fraction:
 ```jldoctest identity_fraction
 using Iduna.EPLI
 
-function identity_fraction(score::IdentityScore; reference_score=nothing)
+function identity_fraction(score::ScoreResult; reference_score=nothing)
     percent = comparable_positions_normalization(score)
     return NormalizationResult(percent.normalized_score / 100,
         percent.normalization_score)
