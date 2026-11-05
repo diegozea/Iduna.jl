@@ -22,12 +22,16 @@ function _finite_score(value::Real, label::AbstractString)
 end
 
 """
-    require_epli(score::Union{Nothing,EPLIScore})
+    epli_value(result)
 
-Return the numeric value of an EPLI score, or throw `ArgumentError` if it is absent.
+Return the EPLI as a `Float64` from an `EPLI.epli_score` result or a `SeedSelection`.
+Raise `ArgumentError` if the score is unavailable, for example when seed sampling
+was disabled.
 """
-require_epli(score::EPLIScore) = score.value
-function require_epli(::Nothing)
+epli_value(result) = _require_epli(result.epli)
+
+_require_epli(score::EPLIScore) = score.value
+function _require_epli(::Nothing)
     throw(ArgumentError("An EPLI score is required but unavailable."))
 end
 

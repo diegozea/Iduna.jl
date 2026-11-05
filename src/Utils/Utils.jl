@@ -20,7 +20,7 @@ using MIToS.MSA: AbstractMultipleSequenceAlignment, getannotcolumn, getannotfile
 using Printf: @sprintf
 using StatsBase: sample
 
-export EPLIScore, require_epli, DEFAULT_PID_THRESHOLDS,
+export EPLIScore, epli_value, DEFAULT_PID_THRESHOLDS,
        ExpansionResult,
        IdunaResult,
        ResolvedTarget,

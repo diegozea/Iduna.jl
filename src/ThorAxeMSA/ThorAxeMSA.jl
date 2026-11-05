@@ -23,7 +23,7 @@ using Random: MersenneTwister
 using StatsBase: sample
 
 using ..EPLI
-using ..Utils: EPLIScore, require_epli, _optional_epli,
+using ..Utils: EPLIScore, _require_epli, _optional_epli,
                DEFAULT_PID_THRESHOLDS, ResolvedTarget, SeedSelection, ThorAxeMSAResult,
                _http_get_request, _http_get_with_retries, _relative_artifact_path,
                _resolve_artifact_path, _sample_indices, _sample_rng,

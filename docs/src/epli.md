@@ -8,7 +8,7 @@ is when the input sequence set is subsampled.
 This example creates four fake protein sequences with MIToS, aligns them with
 ProGraphMSA, and computes EPLI with the default sampling settings.
 
-```jldoctest epli_result; output = false
+```jldoctest; output = false
 using Iduna
 using MIToS.MSA
 
@@ -47,16 +47,11 @@ The main output files are:
 ### Read the score
 
 `result.epli` is an `EPLIScore` containing the median of the sample scores.
-Use `.value` to get its numerical value. `require_epli` provides the same value
-and raises an error if a score is unavailable.
+Use `epli_value` to get its numerical value. This function also accepts a ThorAxe
+seed and raises `ArgumentError` if its score is unavailable.
 
-```jldoctest epli_result
-value = result.epli.value;
-Iduna.require_epli(result.epli) == value
-
-# output
-
-true
+```julia
+value = epli_value(result)
 ```
 
 ## Input Types
@@ -362,7 +357,7 @@ seed = first(result.thoraxe_msa.seeds)
 if seed.epli === nothing
     println("EPLI unavailable: ", seed.epli_reason)
 else
-    println(seed.epli.value)
+    println(epli_value(seed))
 end
 ```
 

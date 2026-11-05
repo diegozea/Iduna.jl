@@ -210,14 +210,17 @@ end
 
 @testset "Optional EPLI and absence metadata" begin
     score = Iduna.EPLIScore(-2)
-    @test Iduna.require_epli(score) === -2.0
-    @test_throws ArgumentError Iduna.require_epli(nothing)
     seed_kwargs = (; pid = 10, stockholm_path = "seed.sto", summary_path = "summary.csv")
     for (epli, reason) in ((score, nothing), (nothing, nothing),
         (nothing, :sampling_disabled), (nothing, :not_recorded), (nothing, :ineligible))
         seed = Iduna.SeedSelection(; seed_kwargs..., epli, epli_reason = reason)
         @test seed.epli === epli
         @test seed.epli_reason === reason
+        if epli === nothing
+            @test_throws ArgumentError Iduna.epli_value(seed)
+        else
+            @test Iduna.epli_value(seed) === -2.0
+        end
         @test !hasproperty(seed, :score)
         relative = Iduna.Utils._relative_seed_paths(seed, pwd())
         @test relative.epli === epli
@@ -229,7 +232,7 @@ end
         @test loaded.epli_reason === reason
     end
     @test Iduna.SeedSelection(; seed_kwargs..., epli = missing).epli === nothing
-    @test Iduna.SeedSelection(; seed_kwargs..., epli = 150).epli.value === 150.0
+    @test Iduna.epli_value(Iduna.SeedSelection(; seed_kwargs..., epli = 150)) === 150.0
     @test_throws ArgumentError Iduna.SeedSelection(; seed_kwargs...,
         epli = nothing, epli_reason = :unknown)
     @test_throws ArgumentError Iduna.SeedSelection(; seed_kwargs...,

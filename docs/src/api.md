@@ -25,7 +25,7 @@ load_expanded_msa
 ResolvedTarget
 SeedSelection
 EPLIScore
-require_epli
+epli_value
 ThorAxeMSAResult
 ExpansionResult
 ValidationResult

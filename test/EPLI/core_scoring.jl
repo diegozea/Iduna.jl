@@ -152,7 +152,7 @@ mktempdir() do tmp
         aligner_args = `--example-arg`,
         progress_enabled = false)
 
-    @test result.epli.value == 31.0
+    @test Iduna.epli_value(result) === 31.0
     @test result.n_samples == 3
     @test result.sample_seed == UInt64(7)
     @test result.input_source == "fasta"
