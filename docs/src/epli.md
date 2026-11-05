@@ -8,7 +8,7 @@ is when the input sequence set is subsampled.
 This example creates four fake protein sequences with MIToS, aligns them with
 ProGraphMSA, and computes EPLI with the default sampling settings.
 
-```jldoctest; output = false
+```jldoctest epli_result; output = false
 using Iduna
 using MIToS.MSA
 
@@ -43,6 +43,21 @@ The main output files are:
 - `result.summary_path`: one-row CSV with the run settings and final EPLI.
 - `result.scores_path`: per-sample scores used to compute the median.
 - `result.reference_msa_fasta`: the full ProGraphMSA alignment.
+
+### Read the score
+
+`result.epli` is an `EPLIScore` containing the median of the sample scores.
+Use `.value` to get its numerical value. `require_epli` provides the same value
+and raises an error if a score is unavailable.
+
+```jldoctest epli_result
+value = result.epli.value;
+Iduna.require_epli(result.epli) == value
+
+# output
+
+true
+```
 
 ## Input Types
 
@@ -205,6 +220,14 @@ normalization:
 100 * matched_positions / comparable_positions
 ```
 
+By convention, a valid comparison with no comparable positions contributes zero
+to the median. In `scores.csv`, `no_comparable_positions` is `true` for this case,
+`false` when positions were compared (even if none matched), and `missing` when
+the scoring function did not supply counts. Summaries count samples with
+no comparable positions in `no_comparable_samples` and samples lacking counts
+in `samples_without_identity_counts`.
+Malformed HHsuite output raises an error instead of being treated as zero.
+
 For profile-score experiments, pass a different score and normalization function:
 
 ```julia
@@ -223,110 +246,133 @@ result = epli_score(
 This computes each sample's raw HHalign profile score and normalizes it by the
 raw score from aligning the full reference MSA against itself.
 
-### Score values and callback contracts
+Use `no_normalization` if you want the median of the raw scores in their original
+units. Negative profile scores and ratios above 100 are allowed; a reference self
+score of zero cannot be used as a divisor. Scores must be finite numbers:
+`NaN`, `Inf`, and `-Inf` raise errors.
 
-The built-in score functions return immutable domain values: `IdentityScore`
-contains `IdentityCounts`, while `RawScore` holds a finite profile or custom score.
-`IdentityCounts` requires integer counts with `0 ≤ matched ≤ comparable`. Its raw
-identity score is derived from the matched count. Use `raw_score(score)` to read
-raw values. Optional tool information lives in `score.diagnostics`; unavailable
-or non-finite diagnostics do not invalidate an unrelated scientific score.
+## Write a Custom Scoring Function
 
-All normalizers return `NormalizationResult`. Its constructor converts to Float64
-and rejects non-finite components and non-finite supplied denominators. Negative
-raw scores and normalized ratios above 100 remain valid. Self-reference normalization
-requires a nonzero reference score; no normalization uses a missing denominator.
-Normalization results contain numerical values only. Whether positions were compared
-is determined from the original score's validated identity counts.
+The built-in functions above handle the usual workflows. To experiment with a
+different comparison method, pass your function as `score_fn` to `epli_score`.
+It receives two aligned FASTA paths, for the full reference and the sample,
+and must accept the keywords `logs_dir` and `label`. Return one of these types:
 
-Callbacks follow one typed contract:
+| What your function calculates | What to return |
+| --- | --- |
+| Matched and comparable position counts | `IdentityScore(IdentityCounts(matched, comparable))` |
+| A profile score or another numerical measure | `RawScore(value)` |
 
-- A score callback returns [`ScoreResult`](@ref Iduna.EPLI.ScoreResult): either
-  `IdentityScore` or `RawScore`. This also applies to a requested reference self score.
-- A normalization callback receives that score and returns `NormalizationResult`.
-  Its `reference_score` keyword is either a `ScoreResult` or `nothing`.
+`IdentityCounts` checks that the counts are integers and satisfy
+`0 ≤ matched ≤ comparable`. The raw value of an `IdentityScore` is its matched
+count. `RawScore` stores the finite number you supply, including negative values.
+Use `raw_score` to read either kind of score:
 
-Named tuples and bare numbers are not callback results. Construct the appropriate
-type where the value is first calculated; invalid numerical values fail there.
-Returning the wrong type raises `TypeError` before the result can enter a median
-or output table. Access additional information through `score.diagnostics`.
-Scientific count columns come only from validated `IdentityCounts`, never from
-similarly named diagnostic fields.
+```jldoctest score_values
+using Iduna.EPLI
 
-For example, a custom normalizer can return a raw profile score without scaling:
+count_score = IdentityScore(IdentityCounts(3, 4));
+profile_score = RawScore(-2.0);
+(raw_score(count_score), raw_score(profile_score))
 
-```julia
-using Iduna.EPLI: ScoreResult, RawScore, NormalizationResult, raw_score
+# output
 
-function custom_normalization(score::ScoreResult; reference_score=nothing)
-    return NormalizationResult(raw_score(score))
-end
-
-score = RawScore(-2.0; diagnostics=(; probability=missing))
-component = custom_normalization(score)  # NormalizationResult(-2.0, missing)
+(3.0, -2.0)
 ```
 
-A score callback returns such a `RawScore` after calculating the profile score,
-or `IdentityScore(IdentityCounts(matched, comparable))` for count-based scoring.
-Use the built-in `no_normalization` for the behavior illustrated above. Callable
-objects are also supported. Extend `requires_reference_score` for a normalizer
-that needs a reference self score, or set `compute_reference_self_score` explicitly.
+[`ScoreResult`](@ref Iduna.EPLI.ScoreResult) is the name for
+`Union{IdentityScore,RawScore}`, not an abstract supertype. Custom scoring methods
+return these same types; you implement the comparison function rather than a new
+score subtype. Pair count-based scores with `comparable_positions_normalization`,
+or use `self_reference_normalization` or `no_normalization` for other measures.
 
-The final median is an `EPLIScore`, whose constructor requires a finite Float64
-value. Both `result.epli` and an available `seed.epli` expose that value as `.value`.
-A seed without a score has `seed.epli === nothing`. Its optional `epli_reason`
-metadata explains absence: sampling disabled, ineligible, or not recorded.
-`require_epli` returns the number and throws if the score is absent. Scoring itself
-returns a validated score or throws; an error never becomes `nothing`.
+### Optional information from scoring tools
 
-CSV stores absent scores as `missing`, and JSON uses `null`. No separate state flag
-is needed. Eligible candidates in sampled selection must have scores before ranking
-or cache reuse. Disabled sampling permits absent scores. Older JSON results with an
-unavailable score retain `:not_recorded`, which does not assert that the score was
-never computed. Absence reasons are optional; supplied reasons must agree with the
-score and sampling metadata. Absence is never converted into zero.
+The built-in HHsuite functions also provide the alignment probability, E-value,
+and HHalign profile score in `score.diagnostics`. These fields are copied to
+`scores.csv` to help you inspect each comparison. You do not need to fill them in
+when using the built-in functions.
 
-### Zero comparable positions
+A custom scoring function can attach extra information for its normalizer to
+read. For example:
 
-Comparable-position normalization uses the explicit convention
-`(matched=0, comparable=0) → 0`. This differs from comparing positions and finding
-no matches. The zero component still enters the median and normal seed ranking:
-ties use MSA size, then PID order. Positive and negative zero are tied; the selected
-seed retains its original score. Zero components are not removed from the sample set.
+```jldoctest score_values
+score = RawScore(-2.0; diagnostics=(; e_value=1e-6));
+score.diagnostics.e_value
 
-Per-sample CSVs retain the identity counts and `no_comparable_positions`. This
-diagnostic describes the evidence, independently of the normalizer or resulting score:
+# output
 
-| Identity counts | `no_comparable_positions` | Interpretation |
-| --- | --- | --- |
-| `(0, 0)` | `true` | No reference positions were compared. |
-| `(0, 4)` | `false` | Four positions were compared, with no matches. |
-| Unavailable | `missing` | The score did not supply validated identity counts. |
+1.0e-6
+```
 
-Summaries report confirmed zero-comparison samples in `no_comparable_samples`, and
-samples with unavailable counts in `samples_without_identity_counts`. These fields
-also appear in ThorAxe candidate summaries. A zero count in the former does not
-establish that every sample had comparable positions; check the latter too.
-Disabling sampling leaves the score absent and both sample counts at zero.
+Adding this information does not change the raw score. Optional diagnostic values
+may be missing or non-finite; the numerical score itself must remain finite.
 
-HHsuite output must contain complete, recognizable query/comparison/target blocks.
-Empty, unrecognized, or truncated output raises an error rather than becoming a
-zero-comparison result. Residue coordinates start at one; zero is reserved for gaps
-in the parsed position vector. A successfully parsed block without any reference positions
-can still produce valid `(0,0)` counts. All displayed sequence rows are validated;
-only recognized secondary-structure annotation rows are skipped. A malformed first
-query cannot be replaced by a consensus row. Position counts continue to use the first
-displayed query sequence. Optional HHsuite diagnostics remain separate.
+### Write a normalization function
 
-Finite constructors do not guarantee that arithmetic is numerically accurate.
-Extreme finite normalization arithmetic is covered separately by PR #64; this
-change establishes score invariants and preserves the normalization and median
-formulas. Invalid computed results raise errors rather than dropping samples.
+Pass a custom function as `normalization_fn` to change how each sample score is
+scaled. It receives the score returned by `score_fn` and the keyword
+`reference_score`, and returns `NormalizationResult(value, denominator)`.
+`value` enters the final median; the optional `denominator` is recorded in
+`scores.csv`. Both supplied numbers must be finite.
 
-Iduna uses EPLI internally to choose the best seed generated by ThorAxe. That
-adapter uses the same scoring layer, but its sampling step is different: ThorAxe
-does not normally accept arbitrary sampled sequence rows as input, so Iduna
-samples species lists instead of sequences for ThorAxe PID selection.
+For example, report identity as a fraction from 0 to 1 when comparing it with
+other measures on that scale. This reuses the built-in calculation and its
+zero-comparison convention, then changes the units from percent to fraction:
+
+```jldoctest identity_fraction
+using Iduna.EPLI
+
+function identity_fraction(score::IdentityScore; reference_score=nothing)
+    percent = comparable_positions_normalization(score)
+    return NormalizationResult(percent.normalized_score / 100,
+        percent.normalization_score)
+end
+
+score = IdentityScore(IdentityCounts(3, 4));
+identity_fraction(score).normalized_score
+
+# output
+
+0.75
+```
+
+Use this function with the default identity scorer by passing
+`normalization_fn=identity_fraction` to `epli_score`.
+
+`reference_score` is normally `nothing`. If your normalizer needs the score from
+comparing the reference MSA with itself, also pass
+`compute_reference_self_score=true`. Iduna then calls your `score_fn` with the
+reference path twice and passes that result to the normalizer. The built-in
+`self_reference_normalization` requests this automatically.
+
+## EPLI for ThorAxe Seed Selection
+
+`iduna` uses EPLI to choose among the alignments generated by ThorAxe at different
+percent identity (PID) thresholds. It samples species lists because ThorAxe does
+not normally accept arbitrary sampled sequence rows as input. Each selected
+alignment is stored as a seed in `result.thoraxe_msa.seeds`.
+
+Setting `pid_sample_count=0` keeps all eligible candidates without computing EPLI.
+Their `seed.epli` is `nothing`. When reading a seed from an `iduna` result, check
+for an unavailable score before using its value:
+
+```julia
+seed = first(result.thoraxe_msa.seeds)
+if seed.epli === nothing
+    println("EPLI unavailable: ", seed.epli_reason)
+else
+    println(seed.epli.value)
+end
+```
+
+An optional `epli_reason` explains why a score is unavailable: sampling was
+disabled, the candidate was ineligible, or no score was recorded. When analysing
+saved results, an empty EPLI cell in a CSV (read as `missing` in Julia) or `null`
+in JSON also means unavailable. Do not interpret it as zero. Scoring errors stop
+the calculation; they do not produce an unavailable score to rank or reuse.
+
+## Function Reference
 
 ```@docs
 Iduna.EPLI.epli_score
