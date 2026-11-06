@@ -52,30 +52,6 @@ function _validate_transcript_translation(target::ResolvedTarget,
     return warnings
 end
 
-function _hhsuite_query_indices(seq::AbstractString, start::Integer, stop::Integer)
-    return EPLI._hhsuite_query_indices(seq, start, stop)
-end
-
-function _parse_hhsuite_query_segment(line::AbstractString)
-    return EPLI._parse_hhsuite_query_segment(line)
-end
-
-function _append_hhsuite_code_line!(positions, codes, line::AbstractString, cols, indices)
-    return EPLI._append_hhsuite_code_line!(positions, codes, line, cols, indices)
-end
-
-function _get_codes(output::AbstractString)
-    return EPLI._get_codes(output)
-end
-
-function _identity_from_codes(positions::Vector{Int}, codes::Vector{Char})
-    counts = EPLI._identity_counts_from_codes(positions, codes)
-    score = (;
-        matched_positions = counts.matched_positions,
-        comparable_positions = counts.comparable_positions)
-    return EPLI.comparable_positions_normalization(score).normalized_score
-end
-
 """
     compute_identity_against_reference(reference_fasta, sample_fasta;
                                        logs_dir=nothing, label="seed")

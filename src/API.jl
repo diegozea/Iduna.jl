@@ -786,9 +786,12 @@ end
 
 function _load_result_seed_record(data, workdir::AbstractString)
     data isa AbstractDict || error("ThorAxe seed record is not an object.")
+    score = Utils._optional_epli(_missing_or_float_result(get(data, "epli", nothing)))
+    reason = get(data, "epli_reason", score === nothing ? "not_recorded" : nothing)
     return Utils.SeedSelection(;
         pid = Float64(data["pid"]),
-        epli = _missing_or_float_result(get(data, "epli", nothing)),
+        epli = score,
+        epli_reason = reason === nothing ? nothing : Symbol(reason),
         stockholm_path = String(data["stockholm_path"]),
         fasta_path = get(data, "fasta_path", nothing) === nothing ? nothing :
                      String(data["fasta_path"]),
@@ -914,8 +917,7 @@ function _load_result_expansions(summary, target::Utils.ResolvedTarget,
     expansions = Union{Missing, Utils.ExpansionResult}[_load_result_expansion_at_index(
                                                            expansion_data, target,
                                                            seed, workdir, index)
-                                                       for (index, seed) in
-                                                           pairs(thoraxe.seeds)]
+                                                       for (index, seed) in pairs(thoraxe.seeds)]
     _warn_extra_expansion_summaries(expansion_data, thoraxe.seeds, workdir)
     return expansions
 end

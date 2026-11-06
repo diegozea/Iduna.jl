@@ -58,8 +58,11 @@ A ThorAxe percent identity (PID) seed selected for later steps.
 # Fields
 
 - `pid::Float64`: Percent identity threshold used to build this seed.
-- `epli::Union{Missing, Float64}`: Estimated Profile-Level Identities score used
-  during seed selection. `missing` means the score was unavailable.
+- `epli::Union{Nothing,EPLIScore}`: a validated score, or `nothing` when unavailable.
+  The constructor also accepts finite real values and legacy `missing` input.
+- `epli_reason::Union{Nothing,Symbol}`: optional absence metadata, one of
+  `:sampling_disabled`, `:ineligible`, or `:not_recorded`. It must be `nothing`
+  when a score is available. An unrecorded score is not assumed to be uncomputed.
 - `stockholm_path::String`: Path to the selected seed MSA in Stockholm format.
 - `fasta_path::Union{Nothing, String} = nothing`: Path to the selected seed MSA
   in FASTA format. `nothing` means no FASTA copy is available.
@@ -71,15 +74,27 @@ A ThorAxe percent identity (PID) seed selected for later steps.
 - `workdir::Union{Nothing, String} = nothing`: Work directory used for paths
   stored in this result. `nothing` means paths are not tied to a work directory.
 """
-Base.@kwdef struct SeedSelection
+struct SeedSelection
     pid::Float64
-    epli::Union{Missing, Float64}
+    epli::Union{Nothing, EPLIScore}
+    epli_reason::Union{Nothing, Symbol}
     stockholm_path::String
-    fasta_path::Union{Nothing, String} = nothing
-    s_exon_blocks_tsv::Union{Nothing, String} = nothing
+    fasta_path::Union{Nothing, String}
+    s_exon_blocks_tsv::Union{Nothing, String}
     summary_path::String
-    used_fallback_dir::Bool = false
-    workdir::Union{Nothing, String} = nothing
+    used_fallback_dir::Bool
+    workdir::Union{Nothing, String}
+    function SeedSelection(; pid::Real, epli, stockholm_path::AbstractString,
+            epli_reason::Union{Nothing, Symbol} = nothing,
+            fasta_path::Union{Nothing, AbstractString} = nothing,
+            s_exon_blocks_tsv::Union{Nothing, AbstractString} = nothing,
+            summary_path::AbstractString, used_fallback_dir::Bool = false,
+            workdir::Union{Nothing, AbstractString} = nothing)
+        score = _optional_epli(epli)
+        reason = _validate_epli_reason(score, epli_reason)
+        return new(_finite_score(pid, "PID"), score, reason, stockholm_path,
+            fasta_path, s_exon_blocks_tsv, summary_path, used_fallback_dir, workdir)
+    end
 end
 
 """

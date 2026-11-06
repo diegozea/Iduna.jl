@@ -3,16 +3,16 @@ _function_label(fn) = string(fn)
 # Sample Scoring
 # --------------
 
-function _score_field(score, name::Symbol)
-    name in keys(score) || return missing
-    return getfield(score, name)
+function _optional_score_field(diagnostics, name::Symbol)
+    hasproperty(diagnostics, name) || return missing
+    return getproperty(diagnostics, name)
 end
 
 function _score_sample(spec,
         reference_msa_fasta::AbstractString,
         reference_score;
-        score_fn::Function,
-        normalization_fn::Function,
+        score_fn,
+        normalization_fn,
         logs_dir::Union{Nothing, AbstractString},
         overwrite::Bool)
     build_sample_msa = spec.build_sample_msa
@@ -21,8 +21,10 @@ function _score_sample(spec,
         error("Sample MSA FASTA is missing: $(sample_msa_fasta).")
     score = score_fn(reference_msa_fasta, sample_msa_fasta;
         logs_dir = logs_dir === nothing ? nothing : joinpath(logs_dir, "hhalign"),
-        label = spec.sample_label)
-    normalized = _normalization_result(normalization_fn(score; reference_score))
+        label = spec.sample_label)::ScoreResult
+    raw, counts = _validated_score_values(score)
+    normalized = normalization_fn(score; reference_score)::NormalizationResult
+    diagnostics = score_diagnostics(score)
     n_reference = spec.n_sequences_reference
     n_sample = spec.n_sequences_sample === nothing ?
                nsequences(read_file(sample_msa_fasta, FASTA)) :
@@ -30,37 +32,42 @@ function _score_sample(spec,
     return (;
         sample = spec.sample,
         sample_label = spec.sample_label,
-        raw_score = Float64(score.raw_score),
+        raw_score = raw,
         normalization_score = normalized.normalization_score,
         normalized_score = normalized.normalized_score,
         epli_component = normalized.normalized_score,
+        # Unknown counts are distinct from a measured absence of comparable positions.
+        no_comparable_positions = counts === nothing ? missing :
+                                  iszero(counts.comparable_positions),
         n_sequences_reference = n_reference,
         n_sequences_sample = n_sample,
         reference_msa_fasta,
         sample_msa_fasta,
-        matched_positions = _score_field(score, :matched_positions),
-        comparable_positions = _score_field(score, :comparable_positions),
-        hhalign_score = _score_field(score, :hhalign_score),
-        probability = _score_field(score, :probability),
-        e_value = _score_field(score, :e_value))
+        matched_positions = counts === nothing ? missing : counts.matched_positions,
+        comparable_positions = counts === nothing ? missing : counts.comparable_positions,
+        hhalign_score = _optional_score_field(diagnostics, :hhalign_score),
+        probability = _optional_score_field(diagnostics, :probability),
+        e_value = _optional_score_field(diagnostics, :e_value))
 end
 
 function _reference_self_score(reference_msa_fasta::AbstractString,
         compute_reference_self_score::Bool;
-        score_fn::Function,
+        score_fn,
         logs_dir::Union{Nothing, AbstractString})
     compute_reference_self_score || return nothing
-    return score_fn(reference_msa_fasta, reference_msa_fasta;
+    score = score_fn(reference_msa_fasta, reference_msa_fasta;
         logs_dir = logs_dir === nothing ? nothing : joinpath(logs_dir, "hhalign"),
-        label = "reference_self")
+        label = "reference_self")::ScoreResult
+    _validated_score_values(score)
+    return score
 end
 
 function _score_sample_specs!(rows::AbstractVector,
         sample_specs::AbstractVector,
         reference_msa_fasta::AbstractString,
         reference_score;
-        score_fn::Function,
-        normalization_fn::Function,
+        score_fn,
+        normalization_fn,
         logs_dir::Union{Nothing, AbstractString},
         overwrite::Bool,
         parallel::Bool,
@@ -102,13 +109,12 @@ end
 
 function _score_alignment_samples(reference_msa_fasta::AbstractString,
         sample_specs::AbstractVector;
-        score_fn::Function = hhsuite_identity_score,
-        normalization_fn::Function = comparable_positions_normalization,
+        score_fn = hhsuite_identity_score,
+        normalization_fn = comparable_positions_normalization,
         scores_path::Union{Nothing, AbstractString} = nothing,
         logs_dir::Union{Nothing, AbstractString} = nothing,
         overwrite::Bool = false,
-        compute_reference_self_score::Bool = normalization_fn ===
-                                             self_reference_normalization,
+        compute_reference_self_score::Bool = requires_reference_score(normalization_fn),
         progress_desc::AbstractString = "Scoring EPLI samples: ",
         progress_output::IO = stderr,
         progress_enabled::Bool = _terminal_progress_enabled(progress_output),
@@ -129,13 +135,17 @@ function _score_alignment_samples(reference_msa_fasta::AbstractString,
         progress_enabled)
     score_rows = [row for row in rows if row !== nothing]
     isempty(score_rows) && error("No sample scores were computed.")
+    epli = EPLIScore(median([row.epli_component for row in score_rows]))
     if scores_path !== nothing
         mkpath(dirname(scores_path))
         CSV.write(scores_path, DataFrame(score_rows))
     end
     return (;
         rows = score_rows,
-        epli = median([row.epli_component for row in score_rows]),
+        no_comparable_samples = count(row -> row.no_comparable_positions === true, score_rows),
+        samples_without_identity_counts = count(
+            row -> ismissing(row.no_comparable_positions), score_rows),
+        epli,
         reference_score,
         scores_path)
 end
@@ -167,22 +177,35 @@ Compute EPLI for an aligner over sequence-row subsamples.
 - `sample_seed = nothing`: random seed; `nothing` records a generated seed.
 - `reference_sequence = nothing`: reference sequence name, or first row when `nothing`.
 - `overwrite::Bool = false`: rebuild existing output files.
+
+# Score Contract
+
+Score callbacks return a subtype of `ScoreResult`, such as `RawScore` or
+`IdentityScore`. Custom types implement `raw_score` and may implement
+`identity_counts` and `score_diagnostics`. Raw values and counts are checked
+before normalization. Normalizers receive the original score object and return
+`NormalizationResult`. A reference self score,
+when requested, follows the same score contract. Other return types raise `TypeError`.
+Raw scores, normalized scores and the final EPLI must be finite Float64 values.
+An optional `normalization_score` must be finite or `missing`. Invalid scores
+raise `ArgumentError` at construction or at the callback boundary. Parallel scoring
+reports callback failures as task failures. Samples are never silently discarded.
+Finite negative scores and normalization ratios above 100 remain valid.
 """
 function epli_score(
         input::Union{AbstractString, AbstractMultipleSequenceAlignment,
             AbstractSequence, AbstractVector{<:AbstractSequence}},
         workdir::AbstractString,
         aligner_fn::Function;
-        score_fn::Function = hhsuite_identity_score,
-        normalization_fn::Function = comparable_positions_normalization,
+        score_fn = hhsuite_identity_score,
+        normalization_fn = comparable_positions_normalization,
         aligner_args::Cmd = Cmd(String[]),
         sample_count::Integer = 45,
         sample_fraction::Real = 0.8,
         sample_seed::Union{Nothing, Integer} = nothing,
         reference_sequence = nothing,
         overwrite::Bool = false,
-        compute_reference_self_score::Bool = normalization_fn ===
-                                             self_reference_normalization,
+        compute_reference_self_score::Bool = requires_reference_score(normalization_fn),
         progress_output::IO = stderr,
         progress_enabled::Bool = _terminal_progress_enabled(progress_output))
     input_source = input isa AbstractString ? "fasta" :
@@ -240,8 +263,10 @@ function epli_score(
         progress_output,
         progress_enabled)
     summary = (;
-        epli = scored.epli,
+        epli = scored.epli.value,
         n_samples = length(scored.rows),
+        no_comparable_samples = scored.no_comparable_samples,
+        samples_without_identity_counts = scored.samples_without_identity_counts,
         sample_count = Int(sample_count),
         sample_fraction = Float64(sample_fraction),
         sample_seed = seed,
@@ -258,5 +283,6 @@ function epli_score(
             workdir = String(workdir),
             summary_path,
             rows = scored.rows,
+            epli = scored.epli,
             reference_score = scored.reference_score))
 end

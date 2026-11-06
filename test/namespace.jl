@@ -3,6 +3,11 @@
     @test isdefined(Iduna, :load_result)
     @test isdefined(Iduna, :load_seed_msa)
     @test isdefined(Iduna, :load_expanded_msa)
+    for namespace in (Iduna, Iduna.Utils)
+        @test :epli_value in names(namespace)
+        @test !isdefined(namespace, :require_epli)
+        @test !(:_require_epli in names(namespace))
+    end
     @test isdefined(Iduna, :_pipeline_status)
     @test !isdefined(Iduna, :pipeline_status)
     @test !isdefined(Iduna, :normalize_primary_input)

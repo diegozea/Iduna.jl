@@ -18,16 +18,20 @@ using MIToS.MSA: AbstractMultipleSequenceAlignment, AbstractSequence,
                  read_file, sequence_id, sequencenames, stringsequence, write_file
 using Statistics: median
 
-using ..Utils: _file_sha256, _sample_indices, _sample_rng, _terminal_progress_enabled,
+using ..Utils: EPLIScore, _finite_score, _file_sha256, _sample_indices, _sample_rng,
+               _terminal_progress_enabled,
                write_fasta, write_json
 
-export comparable_positions_normalization,
+export IdentityCounts, IdentityScore, RawScore, ScoreResult, NormalizationResult, raw_score,
+       identity_counts, score_diagnostics,
+       requires_reference_score, comparable_positions_normalization,
        epli_score,
        hhsuite_identity_score,
        hhsuite_profile_score,
        no_normalization,
        self_reference_normalization
 
+include("ScoreTypes.jl")
 include("HHsuite.jl")
 include("Normalization.jl")
 include("AlignmentCache.jl")

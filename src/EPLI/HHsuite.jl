@@ -1,74 +1,144 @@
 # HHsuite Alignment Parsing
 # -------------------------
 
-function _hhsuite_query_indices(seq::AbstractString, start::Integer, stop::Integer)
+function _hhsuite_residue_indices(seq::AbstractString, start::Integer, stop::Integer)
+    start >= 1 ||
+        throw(ArgumentError("HHsuite residue positions must start at 1 or later."))
     indices = Int[]
     current = Int(start)
     for residue in seq
-        if residue == '-'
+        if residue in ('-', '.')
             push!(indices, 0)
         else
             push!(indices, current)
             current += 1
         end
     end
-    current - 1 == stop || error("Could not parse HHsuite alignment positions.")
+    current - 1 == stop ||
+        throw(ArgumentError("HHsuite residue positions disagree with the aligned sequence."))
     return indices
 end
 
-function _parse_hhsuite_query_segment(line::AbstractString)
-    m = match(r"\S+\s+(\d+)\s+(\S+)\s+(\d+)", line)
+function _parse_hhsuite_sequence_row(line::AbstractString)
+    m = match(r"^[QT]\s+\S+\s+(-?\d+)\s+(\S+)\s+(-?\d+)(?:\s|$)", line)
     m === nothing && return nothing
 
     start = parse(Int, m.captures[1])
     seq = m.captures[2]
     stop = parse(Int, m.captures[3])
+    # PrintHHR uses %4i for coordinates, but keeps the comparison row fixed when
+    # a coordinate needs more digits. Its symbols still begin at the original column.
+    comparison_start = m.offsets[2] - max(0, ndigits(start) - 4)
     return (;
-        cols = findfirst(seq, line),
-        indices = _hhsuite_query_indices(seq, start, stop))
+        cols = comparison_start:(comparison_start + ncodeunits(seq) - 1),
+        indices = _hhsuite_residue_indices(seq, start, stop))
 end
 
-function _append_hhsuite_code_line!(positions, codes, line::AbstractString, cols, indices)
-    occursin(r"^\s", line) || return nothing
-    isempty(indices) && return nothing
-    (cols === nothing || isempty(cols)) && return nothing
-    append!(positions, indices)
-    append!(codes, collect(line[cols]))
+function _validated_hhsuite_sequence(lines, row_indices, label)
+    first_sequence = nothing
+    for index in row_indices
+        line = lines[index]
+        # Secondary-structure annotations have no residue coordinates. A malformed
+        # sequence row must not be skipped in favour of another sequence or consensus.
+        occursin(r"^[QT]\s+(?:ss_pred|ss_conf|ss_dssp|sa_dssp)\S*\s+\S+\s*$", line) &&
+            continue
+        parsed = _parse_hhsuite_sequence_row(line)
+        parsed === nothing &&
+            throw(ArgumentError("Malformed HHsuite $(label) sequence row: $(line)"))
+        if first_sequence === nothing
+            first_sequence = parsed
+        elseif length(parsed.indices) != length(first_sequence.indices)
+            throw(ArgumentError("HHsuite $(label) sequence rows have different alignment widths."))
+        end
+    end
+    first_sequence === nothing &&
+        throw(ArgumentError("HHsuite alignment has no recognized $(label) sequence row."))
+    return first_sequence
+end
+
+function _append_hhsuite_block!(positions, codes, lines; summary_pending = false)
+    query_rows = findall(line -> startswith(line, "Q "), lines)
+    target_rows = findall(line -> startswith(line, "T "), lines)
+    if isempty(query_rows) && isempty(target_rows)
+        return false
+    end
+    summary_pending && throw(ArgumentError("HHsuite hit has no summary header."))
+    query = _validated_hhsuite_sequence(lines, query_rows, "query")
+    target = _validated_hhsuite_sequence(lines, target_rows, "target")
+
+    # Count positions from the first displayed query sequence, but read comparison
+    # symbols after the last query row (which can be the consensus).
+    comparison_index = last(query_rows) + 1
+    comparison_index < first(target_rows) ||
+        throw(ArgumentError("HHsuite alignment has no comparison row."))
+    length(query.indices) == length(target.indices) ||
+        throw(ArgumentError("HHsuite query and target alignment widths differ."))
+    comparison_line = lines[comparison_index]
+    if !startswith(comparison_line, " ") || lastindex(comparison_line) < last(query.cols)
+        throw(ArgumentError("HHsuite comparison row is malformed or truncated."))
+    end
+    symbols = comparison_line[query.cols]
+    all(c -> c in " |+.-=", symbols) ||
+        throw(ArgumentError("HHsuite comparison row contains unrecognized symbols."))
+
+    append!(positions, query.indices)
+    append!(codes, symbols)
+    return true
+end
+
+function _require_hhsuite_block_separator(block)
+    any(row -> startswith(row, "Q ") || startswith(row, "T "), block) &&
+        throw(ArgumentError("HHsuite alignment blocks must be separated."))
+    return nothing
+end
+
+function _require_complete_hhsuite_hit(hit_recognized, summary_pending = false)
+    summary_pending && throw(ArgumentError("HHsuite hit has no summary header."))
+    hit_recognized || throw(ArgumentError("HHsuite hit has no complete alignment block."))
     return nothing
 end
 
 function _get_codes(output::AbstractString)
-    in_alignment = false
-    query_line = true
-    cols = 1:0
-    indices = Int[]
+    lines = split(output, '\n')
+    start = findfirst(line -> startswith(line, "Probab=") || occursin(r"^No \d+$", line), lines)
+    start === nothing && throw(ArgumentError("HHsuite output has no recognized alignment."))
     positions = Int[]
     codes = Char[]
-    for line in split(output, '\n')
-        if startswith(line, "Probab=")
-            in_alignment = true
-            continue
-        end
-        in_alignment || continue
-        isempty(line) && continue
-        # HHalign prints one query row followed by rows of symbols for each block.
-        if query_line
-            parsed = _parse_hhsuite_query_segment(line)
-            if parsed !== nothing
-                cols = parsed.cols
-                indices = parsed.indices
-            end
-            query_line = false
-        elseif startswith(line, "Confidence")
-            query_line = true
+    block = SubString{String}[]
+    hit_recognized = false
+    # No N and its following Probab line belong to the same hit header.
+    summary_pending = startswith(lines[start], "No ")
+    # HHsuite 3.3 PrintHHR separates blocks with empty lines; Confidence is optional.
+    # Preserve all-space comparison rows: only truly empty lines end a block.
+    for line in @view(lines[(start + 1):end])
+        if occursin(r"^No \d+$", line)
+            _require_hhsuite_block_separator(block)
+            _require_complete_hhsuite_hit(hit_recognized, summary_pending)
+            hit_recognized = false
+            summary_pending = true
+            empty!(block)
+        elseif startswith(line, "Probab=")
+            _require_hhsuite_block_separator(block)
+            summary_pending || _require_complete_hhsuite_hit(hit_recognized)
+            hit_recognized = false
+            summary_pending = false
+            empty!(block)
+        elseif isempty(line) || startswith(line, "Confidence")
+            hit_recognized |= _append_hhsuite_block!(positions, codes, block; summary_pending)
+            empty!(block)
         else
-            _append_hhsuite_code_line!(positions, codes, line, cols, indices)
+            push!(block, line)
         end
     end
+    hit_recognized |= _append_hhsuite_block!(positions, codes, block; summary_pending)
+    _require_complete_hhsuite_hit(hit_recognized, summary_pending)
     return positions, codes
 end
 
 function _identity_counts_from_codes(positions::Vector{Int}, codes::Vector{Char})
+    length(positions) == length(codes) ||
+        throw(ArgumentError("HHsuite positions and comparison symbols have different lengths."))
+    all(>=(0), positions) || throw(ArgumentError("HHsuite positions cannot be negative."))
     seen = Dict{Int, Bool}()
     for (pos, code) in zip(positions, codes)
         pos == 0 && continue
@@ -76,16 +146,15 @@ function _identity_counts_from_codes(positions::Vector{Int}, codes::Vector{Char}
         seen[pos] = get(seen, pos, false) || code == '|'
     end
     matched = count(identity, values(seen))
-    return (;
-        matched_positions = matched,
-        comparable_positions = length(seen))
+    return IdentityCounts(matched, length(seen))
 end
 
 function _parse_hhalign_float(line::AbstractString, key::AbstractString)
-    pattern = Regex("$(key)=([+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?)")
+    pattern = Regex("(?:^|\\s)$(key)=(\\S+)")
     m = match(pattern, line)
     m === nothing && return missing
-    return parse(Float64, m.captures[1])
+    value = tryparse(Float64, m.captures[1])
+    return value === nothing ? missing : value
 end
 
 function _hhalign_summary(output::AbstractString)
@@ -150,7 +219,7 @@ Compare two MSA FASTA files with HHsuite and return identity-count fields for EP
 
 # Returns
 
-A named tuple with `raw_score`, `matched_positions`, and `comparable_positions`.
+An `IdentityScore` with validated counts and separate tool diagnostics.
 """
 function hhsuite_identity_score(reference_msa_fasta::AbstractString,
         sample_msa_fasta::AbstractString;
@@ -161,12 +230,8 @@ function hhsuite_identity_score(reference_msa_fasta::AbstractString,
     positions, codes = _get_codes(output)
     counts = _identity_counts_from_codes(positions, codes)
     summary = _hhalign_summary(output)
-    return merge(summary,
-        (;
-            score_name = "hhsuite_identity_score",
-            raw_score = Float64(counts.matched_positions),
-            matched_positions = counts.matched_positions,
-            comparable_positions = counts.comparable_positions))
+    return IdentityScore(counts; diagnostics = merge(summary, (;
+        score_name = "hhsuite_identity_score")))
 end
 
 """
@@ -184,7 +249,7 @@ function hhsuite_profile_score(reference_msa_fasta::AbstractString,
     summary = _hhalign_summary(output)
     ismissing(summary.hhalign_score) &&
         error("Could not parse HHalign profile score.")
-    return merge(summary, (;
-        score_name = "hhsuite_profile_score",
-        raw_score = Float64(summary.hhalign_score)))
+    return RawScore(summary.hhalign_score;
+        diagnostics = merge(summary, (;
+            score_name = "hhsuite_profile_score")))
 end

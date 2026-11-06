@@ -1,6 +1,54 @@
 # Seed Selection
 # --------------
 
+function _validate_candidate_sample_count(count)
+    count isa Real && isfinite(count) && isinteger(count) && count >= 0 ||
+        throw(ArgumentError("Candidate sample count must be a nonnegative integer."))
+    return nothing
+end
+
+function _sampling_disabled(row; default::Bool = false)
+    mode = get(row, :selection_mode, missing)
+    count = get(row, :pid_sample_count, missing)
+    if !ismissing(mode) && !(mode in ("all_candidates", "sampled_selection"))
+        throw(ArgumentError("Unknown candidate selection mode: $(mode)."))
+    end
+    if ismissing(count)
+        return ismissing(mode) ? default : mode == "all_candidates"
+    end
+
+    _validate_candidate_sample_count(count)
+    disabled = iszero(count)
+    if !ismissing(mode)
+        mode_disables_sampling = mode == "all_candidates"
+        if mode_disables_sampling != disabled
+            throw(ArgumentError("Candidate sampling mode and sample count disagree."))
+        end
+    end
+    return disabled
+end
+
+function _candidate_score(row; allow_absent::Bool = false)
+    disabled = _sampling_disabled(row; default = allow_absent)
+    value = get(row, :epli, missing)
+    reason = get(row, :epli_reason, missing)
+    if ismissing(value)
+        disabled || throw(ArgumentError("PID $(row.pid) requires an EPLI score."))
+        if !ismissing(reason) && reason != "sampling_disabled"
+            throw(ArgumentError("Eligible unscored candidates require sampling_disabled."))
+        end
+        return nothing
+    end
+    value isa Real || throw(ArgumentError("PID $(row.pid) has an invalid EPLI value."))
+    ismissing(reason) ||
+        throw(ArgumentError("An available EPLI cannot have an absence reason."))
+    return EPLIScore(value)
+end
+
+function _parse_candidate_scores(df::DataFrame; allow_absent::Bool = false)
+    return [_candidate_score(row; allow_absent) for row in eachrow(df)]
+end
+
 """
     select_best_seed(summary_path) -> SeedSelection
 
@@ -8,7 +56,7 @@ Choose the best eligible percent identity (PID) candidate from a ThorAxe
 candidate summary table.
 
 Candidates are ranked by EPLI, candidate MSA size, and then the original PID
-order.
+order. Non-finite scores in eligible candidates raise `ArgumentError`.
 
 # Arguments
 
@@ -21,7 +69,9 @@ function select_best_seed(summary_path::AbstractString)
         df = df[[!ismissing(value) && _truthy(value) for value in df.eligible], :]
     end
     :epli in propertynames(df) || error("Candidate summary has no epli column.")
-    df = df[[!ismissing(value) for value in df.epli], :]
+    scores = _parse_candidate_scores(df)
+    # Both signs of zero are equal for ranking. Preserve the original score in the seed.
+    df.epli = [iszero(value) ? 0.0 : value for value in _require_epli.(scores)]
     isempty(df) && error("No eligible PID candidates are available for seed selection.")
     df.__row_order = 1:nrow(df)
     order_col = :pid_order in propertynames(df) ? :pid_order : :__row_order
@@ -31,9 +81,9 @@ function select_best_seed(summary_path::AbstractString)
         df.__n_sequences_msa0 = zeros(Int, nrow(df))
         :__n_sequences_msa0
     end
-    sort!(df, [:epli, nseq_col, order_col]; rev = [true, true, false])
-    row = first(eachrow(df))
-    return _row_seed(row, summary_path)
+    order = sortperm(df, [:epli, nseq_col, order_col]; rev = [true, true, false])
+    best = first(order)
+    return _row_seed(df[best, :], summary_path, scores[best])
 end
 
 function _candidate_summary_workdir(summary_path::AbstractString)
@@ -74,9 +124,22 @@ end
 function _selected_candidate_seeds(summary_path::AbstractString)
     df = _candidate_summary_dataframe(summary_path)
     :selected in propertynames(df) || return [select_best_seed(summary_path)]
-    selected = df[[!ismissing(value) && _truthy(value) for value in df.selected], :]
-    isempty(selected) && return SeedSelection[]
-    return [_row_seed(row, summary_path) for row in eachrow(selected)]
+    eligible = if :eligible in propertynames(df)
+        [!ismissing(value) && _truthy(value) for value in df.eligible]
+    else
+        trues(nrow(df))
+    end
+    selected = [!ismissing(value) && _truthy(value) for value in df.selected]
+    if any(selected .& .!eligible)
+        throw(ArgumentError("Selected candidates must be eligible."))
+    end
+
+    # Validate every eligible row before reusing any cached selection.
+    candidates = df[eligible, :]
+    scores = _parse_candidate_scores(candidates)
+    selected_indices = findall(selected[eligible])
+    return [_row_seed(candidates[index, :], summary_path, scores[index])
+            for index in selected_indices]
 end
 
 function _eligible_candidate_seeds(summary_path::AbstractString)
@@ -84,8 +147,10 @@ function _eligible_candidate_seeds(summary_path::AbstractString)
     :eligible in propertynames(df) || error("Candidate summary has no eligible column.")
     eligible = df[[!ismissing(value) && _truthy(value) for value in df.eligible], :]
     isempty(eligible) && error("No eligible PID candidates are available.")
-    sort!(eligible, [:pid_order])
-    return [_row_seed(row, summary_path) for row in eachrow(eligible)]
+    # This path selects all eligible candidates when sampling is disabled.
+    scores = _parse_candidate_scores(eligible; allow_absent = true)
+    order = sortperm(eligible, :pid_order)
+    return [_row_seed(eligible[index, :], summary_path, scores[index]) for index in order]
 end
 
 function _normalize_pid_sample_seed(seed::Integer)::UInt64

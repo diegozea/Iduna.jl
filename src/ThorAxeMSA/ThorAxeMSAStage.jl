@@ -211,8 +211,8 @@ function _score_pid_samples(target::ResolvedTarget,
         sample_count::Integer,
         overwrite::Bool = false,
         thoraxe_fn::Function = ThorAxe.thoraxe,
-        score_fn::Function = EPLI.hhsuite_identity_score,
-        normalization_fn::Function = EPLI.comparable_positions_normalization,
+        score_fn = EPLI.hhsuite_identity_score,
+        normalization_fn = EPLI.comparable_positions_normalization,
         progress_output::IO = stderr,
         progress_enabled::Bool = _terminal_progress_enabled(progress_output))
     sample_total = Int(sample_count)
@@ -246,8 +246,8 @@ function _score_validated_pid_candidate(target::ResolvedTarget,
         metadata,
         overwrite::Bool = false,
         thoraxe_fn::Function = ThorAxe.thoraxe,
-        score_fn::Function = EPLI.hhsuite_identity_score,
-        normalization_fn::Function = EPLI.comparable_positions_normalization)
+        score_fn = EPLI.hhsuite_identity_score,
+        normalization_fn = EPLI.comparable_positions_normalization)
     candidate = record.candidate
     validation = record.validation
     pid = record.pid
@@ -276,6 +276,8 @@ function _score_validated_pid_candidate(target::ResolvedTarget,
         target, candidate, pid, pid_order, validation;
         epli = scored.epli,
         n_samples = length(scored.rows),
+        no_comparable_samples = scored.no_comparable_samples,
+        samples_without_identity_counts = scored.samples_without_identity_counts,
         sample_count,
         sample_fraction,
         sample_seed,
@@ -293,8 +295,8 @@ function _score_pid_candidates(target::ResolvedTarget,
         sample_seed::UInt64,
         overwrite::Bool,
         thoraxe_fn::Function = ThorAxe.thoraxe,
-        score_fn::Function = EPLI.hhsuite_identity_score,
-        normalization_fn::Function = EPLI.comparable_positions_normalization)
+        score_fn = EPLI.hhsuite_identity_score,
+        normalization_fn = EPLI.comparable_positions_normalization)
     sampling_strategy = metadata.sampling_strategy
     candidate_records = NamedTuple[]
     for (pid_order, pid) in enumerate(Float64.(pid_thresholds))

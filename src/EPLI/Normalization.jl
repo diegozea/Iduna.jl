@@ -1,54 +1,53 @@
 """
     comparable_positions_normalization(score; reference_score=nothing)
 
-Normalize an HHsuite identity score as `100 * matched_positions / comparable_positions`.
+Normalize validated identity counts as `100 * matched_positions / comparable_positions`.
+The explicit `(0, 0)` convention returns zero. Per-sample records retain the counts
+and whether any positions were compared, independently of the chosen normalizer.
 """
-function comparable_positions_normalization(score; reference_score = nothing)
-    comparable = Int(score.comparable_positions)
-    comparable == 0 && return (; normalized_score = 0.0, normalization_score = 0.0)
-    return (;
-        normalized_score = 100 * Float64(score.matched_positions) / comparable,
-        normalization_score = Float64(comparable))
+function comparable_positions_normalization(score::ScoreResult;
+        reference_score::Union{Nothing, ScoreResult} = nothing)
+    counts = _require_identity_counts(score)
+    comparable = counts.comparable_positions
+    comparable == 0 && return NormalizationResult(0.0, 0.0)
+    return NormalizationResult(100 * Float64(counts.matched_positions) / comparable, comparable)
 end
 
 """
     self_reference_normalization(score; reference_score)
 
-Normalize a score by the raw score obtained from aligning the reference MSA to itself.
+Normalize a raw score by the score from aligning the reference MSA to itself.
+Both raw values must be finite; the reference score must also be nonzero.
 """
-function self_reference_normalization(score; reference_score = nothing)
+function self_reference_normalization(score::ScoreResult;
+        reference_score::Union{Nothing, ScoreResult} = nothing)
     reference_score === nothing &&
         error("self_reference_normalization requires a reference self score.")
-    denominator = Float64(reference_score.raw_score)
+    # Custom score types may return integers or narrower floats. Convert before
+    # arithmetic so their numeric representation does not change the result.
+    numerator = _finite_score(raw_score(score)::Real, "Raw score")
+    denominator = _finite_score(raw_score(reference_score)::Real, "Reference self score")
     denominator == 0.0 &&
         error("Cannot use self-reference normalization when the reference self score is zero.")
-    return (;
-        normalized_score = 100 * Float64(score.raw_score) / denominator,
-        normalization_score = denominator)
+    return NormalizationResult(100 * numerator / denominator, denominator)
 end
 
 """
     no_normalization(score; reference_score=nothing)
 
-Use `score.raw_score` directly as the EPLI component.
+Use the finite raw score directly as the EPLI component, without a denominator.
 """
-function no_normalization(score; reference_score = nothing)
-    return (;
-        normalized_score = Float64(score.raw_score),
-        normalization_score = missing)
+function no_normalization(score::ScoreResult;
+        reference_score::Union{Nothing, ScoreResult} = nothing)
+    return NormalizationResult(raw_score(score))
 end
 
-function _normalization_result(value)
-    if value isa Real
-        return (; normalized_score = Float64(value), normalization_score = missing)
-    elseif value isa NamedTuple
-        :normalized_score in keys(value) ||
-            error("Normalization functions that return a named tuple must include `normalized_score`.")
-        normalization_score = :normalization_score in keys(value) ?
-                              value.normalization_score : missing
-        return (;
-            normalized_score = Float64(value.normalized_score),
-            normalization_score)
-    end
-    error("Normalization function must return a real number or a named tuple.")
+"""
+    requires_reference_score(normalization_fn)
+
+Whether a normalizer needs a reference self score. Custom callable normalizers
+can extend this method; callers may also set `compute_reference_self_score` explicitly.
+"""
+function requires_reference_score(normalization_fn)
+    normalization_fn === self_reference_normalization
 end
