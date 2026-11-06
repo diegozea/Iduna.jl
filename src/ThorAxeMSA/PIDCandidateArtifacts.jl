@@ -284,9 +284,11 @@ function _run_kept_thoraxe_pid_msa!(target::ResolvedTarget,
         run_root = _pid_sample_run_root(workdir, pid, sample_idx)
         isdir(run_root) && safe_rm(run_root, workdir)
         mkpath(dirname(run_root))
-        thoraxe_fn(
-            input_dir, run_root; identity = Float64(pid), specieslist = specieslist,
-            phylosofs = true, runner = runner)
+        _with_thoraxe_lock() do
+            thoraxe_fn(
+                input_dir, run_root; identity = Float64(pid), specieslist = specieslist,
+                phylosofs = true, runner = runner)
+        end
     end
     pid_msa,
     _ = assemble_transcript_msa(thoraxe_dir,
@@ -356,9 +358,11 @@ function _run_thoraxe_pid_msa(target::ResolvedTarget,
     tmp_root = joinpath(_thoraxe_msa_dir(workdir), "tmp")
     mkpath(tmp_root)
     mktempdir(tmp_root; prefix = "$(sample_label)_") do tmp
-        thoraxe_fn(
-            input_dir, tmp; identity = Float64(pid), specieslist = specieslist,
-            phylosofs = true, runner = runner)
+        _with_thoraxe_lock() do
+            thoraxe_fn(
+                input_dir, tmp; identity = Float64(pid), specieslist = specieslist,
+                phylosofs = true, runner = runner)
+        end
         pid_msa,
         _ = assemble_transcript_msa(joinpath(tmp, "thoraxe"),
             target.ensembl_gene_id, target.transcript_id)

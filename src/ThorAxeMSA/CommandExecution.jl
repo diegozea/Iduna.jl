@@ -1,6 +1,14 @@
 # Command Execution
 # -----------------
 
+const _THORAXE_LOCK = ReentrantLock()
+
+function _with_thoraxe_lock(f::Function)
+    # Conda activation changes global ENV. Hold the lock until the runner and
+    # ThorAxe's environment cleanup both finish, including on failure.
+    return lock(f, _THORAXE_LOCK)
+end
+
 function _open_logs(f::Function, stdout_path::AbstractString, stderr_path::AbstractString)
     mkpath(dirname(stdout_path))
     mkpath(dirname(stderr_path))
