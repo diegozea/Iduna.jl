@@ -26,8 +26,11 @@ function _parse_hhsuite_sequence_row(line::AbstractString)
     start = parse(Int, m.captures[1])
     seq = m.captures[2]
     stop = parse(Int, m.captures[3])
+    # PrintHHR uses %4i for coordinates, but keeps the comparison row fixed when
+    # a coordinate needs more digits. Its symbols still begin at the original column.
+    comparison_start = m.offsets[2] - max(0, ndigits(start) - 4)
     return (;
-        cols = m.offsets[2]:(m.offsets[2] + ncodeunits(seq) - 1),
+        cols = comparison_start:(comparison_start + ncodeunits(seq) - 1),
         indices = _hhsuite_residue_indices(seq, start, stop))
 end
 

@@ -125,6 +125,27 @@ end
     @test_throws ArgumentError E._identity_counts_from_codes([-1], ['|'])
 end
 
+@testset "HHsuite long residue coordinates" begin
+    E = Iduna.EPLI
+    # Match HHsuite 3.3 FullAlignment::PrintHHR: names occupy 14 columns,
+    # coordinates at least four, and comparison symbols have a fixed 22-space prefix.
+    sequence_row(side, start) = "$(side) $(rpad("query", 14)) $(lpad(start, 4)) AC $(start + 1) (10001)\n"
+    for (query_start, target_start) in ((9999, 1), (10000, 1), (1, 10000), (10000, 10000))
+        for symbols in ("|+", "  ")
+            output = "Probab=99\n" * sequence_row("Q", query_start) *
+                     "                      $(symbols)\n" * sequence_row("T", target_start)
+            positions, codes = E._get_codes(output)
+            @test positions == [query_start, query_start + 1]
+            @test codes == collect(symbols)
+            @test E._identity_counts_from_codes(positions, codes) ==
+                  E.IdentityCounts(symbols == "|+" ? 1 : 0, 2)
+            truncated = replace(output,
+                "                      $(symbols)\n" => "                      $(first(symbols))\n")
+            @test_throws ArgumentError E._get_codes(truncated)
+        end
+    end
+end
+
 @testset "Complete HHsuite hit sections" begin
     E = Iduna.EPLI
     # PrintHHR uses No/name/Probab headers for each alternative hit; a hit can
